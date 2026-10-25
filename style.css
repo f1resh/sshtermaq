@@ -247,6 +247,23 @@ h1, h2, h3 { line-height: 1.15; margin: 0 0 0.5em; letter-spacing: -0.015em; }
 }
 .copy:hover { border-color: var(--accent); }
 .copy.is-done { border-color: #3fb950; color: #3fb950; }
+.store-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.92rem;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.store-link:hover { border-color: var(--accent); text-decoration: none; transform: translateY(-1px); }
+.store-link svg { color: var(--accent); flex: none; }
 .package.is-soon .command { opacity: 0.45; }
 .package.is-soon h4 { color: var(--text-dim); }
 

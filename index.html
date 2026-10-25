@@ -187,6 +187,7 @@
             <p class="platform__req">Windows 10 or 11, 64-bit</p>
             <a class="button button--primary" data-asset="win-setup" href="https://github.com/f1resh/sshtermaq/releases/latest">Installer <small>.exe</small></a>
             <a class="button button--ghost" data-asset="win-zip" href="https://github.com/f1resh/sshtermaq/releases/latest">Portable <small>.zip</small></a>
+            <a class="button button--ghost" href="https://apps.microsoft.com/detail/9ppk5dxcrqrc">Microsoft Store <small>automatic updates</small></a>
             <p class="platform__note">Needs the Microsoft Edge WebView2 Runtime, which Windows 11 and up-to-date Windows 10 already have.</p>
           </article>
           <article class="platform" id="platform-mac">
@@ -222,16 +223,16 @@
             </div>
             <p class="package__note">Windows Package Manager. Until it's listed, use the installer above.</p>
           </article>
-          <article class="package is-soon">
+          <article class="package">
             <div class="package__head">
               <h4>Microsoft Store</h4>
               <span class="package__os">Windows</span>
-              <span class="badge">In progress</span>
             </div>
-            <div class="command" aria-disabled="true">
-              <span class="command__text">Get it from Microsoft Store</span>
-            </div>
-            <p class="package__note">Installs and updates through the Store app. Until it's listed, use the installer above.</p>
+            <a class="store-link" href="https://apps.microsoft.com/detail/9ppk5dxcrqrc">
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 6V5a4 4 0 0 1 8 0v1h4a1 1 0 0 1 1 1v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a1 1 0 0 1 1-1h4Zm2 0h4V5a2 2 0 0 0-4 0v1Zm-1 5v3h3v-3H9Zm4 0v3h3v-3h-3Zm-4 4v3h3v-3H9Zm4 0v3h3v-3h-3Z"/></svg>
+              Get it from Microsoft Store
+            </a>
+            <p class="package__note">Installs and updates through the Store app, without the SmartScreen warning.</p>
           </article>
         </div>
 
@@ -260,7 +261,7 @@
         </details>
         <details>
           <summary>Windows says "Windows protected your PC". Is that normal?</summary>
-          <p>SmartScreen warns about programs it hasn't seen often yet. Choose <em>More info › Run anyway</em>. You can check the download against the release on GitHub, and the source code is public.</p>
+          <p>SmartScreen warns about programs it hasn't seen often yet. Choose <em>More info › Run anyway</em>. You can check the download against the release on GitHub, and the source code is public. Or install SSHTermaq from the <a href="https://apps.microsoft.com/detail/9ppk5dxcrqrc">Microsoft Store</a>, which doesn't show the warning and keeps the app up to date.</p>
         </details>
         <details>
           <summary>Which Mac download do I need?</summary>
