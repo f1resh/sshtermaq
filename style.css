@@ -108,6 +108,7 @@ h1, h2, h3 { line-height: 1.15; margin: 0 0 0.5em; letter-spacing: -0.015em; }
 .eyebrow { color: var(--accent); font-weight: 600; font-size: 0.9rem; letter-spacing: 0.02em; margin: 0 0 14px; }
 .hero h1 { font-size: clamp(2.3rem, 4.6vw, 3.5rem); }
 .hero__actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 28px 0 14px; }
+.hero__alt { color: var(--text-dim); font-size: 0.9rem; margin: -4px 0 10px; }
 .hero__version { color: var(--text-dim); font-size: 0.9rem; margin: 0; }
 .hero__shot img { width: 100%; filter: drop-shadow(0 30px 60px rgba(0, 0, 0, 0.5)); }
 
@@ -180,7 +181,7 @@ h1, h2, h3 { line-height: 1.15; margin: 0 0 0.5em; letter-spacing: -0.015em; }
 
 /* ---- download --------------------------------------------------------------------------------------------------- */
 .download { padding: 72px 0; }
-.platforms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; max-width: 900px; margin: 32px auto 24px; }
+.platforms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; max-width: 1040px; margin: 32px auto 24px; align-items: start; }
 .platform {
   display: flex;
   flex-direction: column;
@@ -192,26 +193,46 @@ h1, h2, h3 { line-height: 1.15; margin: 0 0 0.5em; letter-spacing: -0.015em; }
 }
 .platform.is-yours { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 12px 40px rgba(225, 90, 245, 0.15); }
 .platform h3 { font-size: 1.5rem; margin: 0; }
-.platform__req { color: var(--text-dim); margin: 0 0 6px; }
+.platform__top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.platform__req { color: var(--text-dim); margin: 0; font-size: 0.92rem; }
 .platform__note { color: var(--text-dim); font-size: 0.88rem; margin: 6px 0 0; }
 .platform .button { flex-direction: row; gap: 8px; }
 
-/* ---- package managers ------------------------------------------------------------------------------------------- */
-.packages__title { text-align: center; font-size: 1.25rem; margin: 48px 0 20px; }
-.packages { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; max-width: 1100px; margin: 0 auto 28px; }
-.package {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 22px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+/* Two columns: the cards line up row by row (Store with disk image, direct download with Homebrew, note with note)
+   and end at the same height. Each card is four rows of the shared grid: with winget back on the Windows side, make it
+   five and give the Mac card a fifth row as well. */
+@media (min-width: 981px) {
+  @supports (grid-template-rows: subgrid) {
+    .platforms { align-items: stretch; row-gap: 0; }
+    .platform { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: 14px; }
+  }
 }
-.package__head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.package__head h4 { margin: 0; font-size: 1.1rem; }
-.package__os { color: var(--text-dim); font-size: 0.85rem; }
-.package__note { color: var(--text-dim); font-size: 0.88rem; margin: 0; }
+
+/* ---- install options inside a platform card --------------------------------------------------------------------- */
+.option { display: flex; flex-direction: column; gap: 10px; padding-top: 18px; border-top: 1px solid var(--border); }
+.option--recommended { border-top: 0; padding-top: 4px; }
+.option__head { display: flex; align-items: center; gap: 10px; }
+.option h4 { margin: 0; font-size: 1.05rem; }
+.option--direct h4 { font-size: 0.95rem; color: var(--text-dim); }
+.option__links { display: flex; gap: 10px; flex-wrap: wrap; }
+.option__links .button { flex: 1 1 140px; }
+.option--direct .button { min-height: 40px; padding: 6px 14px; font-size: 0.92rem; }
+.option__note { color: var(--text-dim); font-size: 0.88rem; margin: 0; }
+.tag {
+  margin-left: auto;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid rgba(225, 90, 245, 0.4);
+}
+.button--row { flex-direction: row; gap: 10px; }
+.button--row svg { flex: none; }
+.option:has(.command[aria-disabled]) .command { opacity: 0.45; }
+.option:has(.command[aria-disabled]) h4 { color: var(--text-dim); }
+
 .badge {
   margin-left: auto;
   padding: 2px 10px;
@@ -233,7 +254,6 @@ h1, h2, h3 { line-height: 1.15; margin: 0 0 0.5em; letter-spacing: -0.015em; }
   border-radius: 10px;
 }
 .command code { background: none; border: 0; padding: 0; font-size: 0.85rem; flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
-.command__text { color: var(--text-dim); font-size: 0.9rem; }
 .copy {
   flex: none;
   padding: 6px 12px;
@@ -247,25 +267,6 @@ h1, h2, h3 { line-height: 1.15; margin: 0 0 0.5em; letter-spacing: -0.015em; }
 }
 .copy:hover { border-color: var(--accent); }
 .copy.is-done { border-color: #3fb950; color: #3fb950; }
-.store-link {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  min-height: 44px;
-  padding: 8px 14px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-raised);
-  color: var(--text);
-  font-weight: 600;
-  font-size: 0.92rem;
-  transition: border-color 0.15s, transform 0.15s;
-}
-.store-link:hover { border-color: var(--accent); text-decoration: none; transform: translateY(-1px); }
-.store-link svg { color: var(--accent); flex: none; }
-.package.is-soon .command { opacity: 0.45; }
-.package.is-soon h4 { color: var(--text-dim); }
 
 /* ---- FAQ -------------------------------------------------------------------------------------------------------- */
 .faq { padding: 48px 0 80px; }
@@ -309,7 +310,7 @@ h1, h2, h3 { line-height: 1.15; margin: 0 0 0.5em; letter-spacing: -0.015em; }
   .hero__inner, .feature, .putty__inner { grid-template-columns: minmax(0, 1fr); gap: 32px; }
   .feature--flip .feature__text { order: 0; }
   .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .packages { grid-template-columns: minmax(0, 1fr); max-width: 560px; }
+  .platforms { grid-template-columns: minmax(0, 1fr); max-width: 560px; }
   .putty .section-title { text-align: center; }
 }
 
@@ -325,7 +326,7 @@ h1, h2, h3 { line-height: 1.15; margin: 0 0 0.5em; letter-spacing: -0.015em; }
   .cards { grid-template-columns: minmax(0, 1fr); margin-top: 48px; }
   .more { padding: 22px 20px; }
   .more ul { columns: 1; }
-  .platforms, .packages { grid-template-columns: minmax(0, 1fr); }
+  .platforms { grid-template-columns: minmax(0, 1fr); }
   .putty, .download { padding: 48px 0; }
 }
 

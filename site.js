@@ -2,6 +2,7 @@
 // only while visible. Everything works without it: the buttons then lead to the Releases page.
 (() => {
   const RELEASES = 'https://github.com/f1resh/sshtermaq/releases/latest';
+  const STORE = 'https://apps.microsoft.com/detail/9ppk5dxcrqrc';  // signed by Microsoft: no SmartScreen warning
   const API = 'https://api.github.com/repos/f1resh/sshtermaq/releases/latest';
 
   // Release files, by the end of their name (the name carries the version: SSHTermaq-1.0.0-setup.exe).
@@ -14,7 +15,7 @@
     'mac-x64-zip': /-mac-x64\.zip$/,
   };
   const LABELS = {
-    'win-setup': ['Download for Windows', 'Installer · Windows 10 and 11'],
+    'win-store': ['Get it from Microsoft Store', 'Windows 10 and 11 · updates itself'],
     'mac-arm64-dmg': ['Download for Mac', 'Apple silicon · macOS 12+'],
     'mac-x64-dmg': ['Download for Mac', 'Intel · macOS 12+'],
   };
@@ -26,7 +27,7 @@
     const uaData = navigator.userAgentData;
     const platform = (uaData && uaData.platform) || navigator.platform || '';
     const ua = navigator.userAgent;
-    if (/win/i.test(platform) || /Windows/.test(ua)) return 'win-setup';
+    if (/win/i.test(platform) || /Windows/.test(ua)) return 'win-store';
     if (!/mac/i.test(platform) && !/Mac OS X/.test(ua)) return null;
     if (/iPhone|iPad/.test(ua) || navigator.maxTouchPoints > 1) return null;  // iPadOS reports itself as a Mac
     // Chromium browsers say which processor; Safari and Firefox don't, so ask the graphics driver.
@@ -82,11 +83,18 @@
       const primary = document.getElementById('primary-download');
       document.getElementById('primary-label').textContent = LABELS[mine][0];
       document.getElementById('primary-detail').textContent = LABELS[mine][1];
-      if (urls[mine]) primary.href = urls[mine].href;
+      if (mine === 'win-store') {  // the Store first; the unsigned installer one click away
+        primary.href = STORE;
+        if (urls['win-setup']) document.getElementById('primary-alt-link').href = urls['win-setup'].href;
+        document.getElementById('primary-alt').hidden = false;
+      } else if (urls[mine]) {
+        primary.href = urls[mine].href;
+      }
       const card = document.getElementById(mine.startsWith('win') ? 'platform-windows' : 'platform-mac');
       card.classList.add('is-yours');
       if (mine === 'mac-x64-dmg') {  // the Intel download becomes the main button on an Intel Mac
-        const [arm, intel] = card.querySelectorAll('.button');
+        const arm = card.querySelector('[data-asset="mac-arm64-dmg"]');
+        const intel = card.querySelector('[data-asset="mac-x64-dmg"]');
         arm.classList.replace('button--primary', 'button--ghost');
         intel.classList.replace('button--ghost', 'button--primary');
         intel.after(arm);

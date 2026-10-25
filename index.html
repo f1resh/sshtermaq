@@ -56,6 +56,7 @@
             </a>
             <a class="button button--ghost" href="#download">All downloads</a>
           </div>
+          <p class="hero__alt" id="primary-alt" hidden>or <a id="primary-alt-link" href="https://github.com/f1resh/sshtermaq/releases/latest">download the installer</a> from GitHub</p>
           <p class="hero__version"><span id="version">Latest release</span> · <a href="https://github.com/f1resh/sshtermaq/releases/latest">Release notes</a></p>
         </div>
         <picture class="hero__shot">
@@ -183,56 +184,77 @@
         <p class="lead center">Free, no account, no ads. <span id="version-line"></span></p>
         <div class="platforms">
           <article class="platform" id="platform-windows">
-            <h3>Windows</h3>
-            <p class="platform__req">Windows 10 or 11, 64-bit</p>
-            <a class="button button--primary" data-asset="win-setup" href="https://github.com/f1resh/sshtermaq/releases/latest">Installer <small>.exe</small></a>
-            <a class="button button--ghost" data-asset="win-zip" href="https://github.com/f1resh/sshtermaq/releases/latest">Portable <small>.zip</small></a>
-            <a class="button button--ghost" href="https://apps.microsoft.com/detail/9ppk5dxcrqrc">Microsoft Store <small>automatic updates</small></a>
+            <div class="platform__top">
+              <h3>Windows</h3>
+              <p class="platform__req">Windows 10 or 11, 64-bit</p>
+            </div>
+
+            <div class="option option--recommended">
+              <div class="option__head">
+                <h4>Microsoft Store</h4>
+                <span class="tag">Recommended</span>
+              </div>
+              <a class="button button--primary button--row" href="https://apps.microsoft.com/detail/9ppk5dxcrqrc">
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 6V5a4 4 0 0 1 8 0v1h4a1 1 0 0 1 1 1v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a1 1 0 0 1 1-1h4Zm2 0h4V5a2 2 0 0 0-4 0v1Zm-1 5v3h3v-3H9Zm4 0v3h3v-3h-3Zm-4 4v3h3v-3H9Zm4 0v3h3v-3h-3Z"/></svg>
+                Get it from Microsoft Store
+              </a>
+              <p class="option__note">Signed by Microsoft, so Windows installs it without warnings, and it updates itself.</p>
+            </div>
+
+            <!-- winget: hidden until the package is listed; restore by removing this comment wrapper
+            <div class="option">
+              <div class="option__head">
+                <h4>winget</h4>
+                <span class="badge">In progress</span>
+              </div>
+              <div class="command" aria-disabled="true">
+                <code>winget install f1resh.SSHTermaq</code>
+              </div>
+            </div>
+            -->
+
+            <div class="option option--direct">
+              <h4>Direct download</h4>
+              <div class="option__links">
+                <a class="button button--ghost" data-asset="win-setup" href="https://github.com/f1resh/sshtermaq/releases/latest">Installer <small>.exe</small></a>
+                <a class="button button--ghost" data-asset="win-zip" href="https://github.com/f1resh/sshtermaq/releases/latest">Portable <small>.zip</small></a>
+              </div>
+              <p class="option__note">Not code-signed yet: SmartScreen warns once (<em>More info › Run anyway</em>). The zip needs no install or admin rights.</p>
+            </div>
+
             <p class="platform__note">Needs the Microsoft Edge WebView2 Runtime, which Windows 11 and up-to-date Windows 10 already have.</p>
           </article>
-          <article class="platform" id="platform-mac">
-            <h3>macOS</h3>
-            <p class="platform__req">macOS 12 Monterey or later</p>
-            <a class="button button--primary" data-asset="mac-arm64-dmg" href="https://github.com/f1resh/sshtermaq/releases/latest">Apple silicon <small>.dmg</small></a>
-            <a class="button button--ghost" data-asset="mac-x64-dmg" href="https://github.com/f1resh/sshtermaq/releases/latest">Intel <small>.dmg</small></a>
-            <p class="platform__note">Signed and notarized by Apple. Also as .zip: <a data-asset="mac-arm64-zip" href="https://github.com/f1resh/sshtermaq/releases/latest">Apple silicon</a>, <a data-asset="mac-x64-zip" href="https://github.com/f1resh/sshtermaq/releases/latest">Intel</a>.</p>
-          </article>
-        </div>
 
-        <h3 class="packages__title" id="packages">Or use a package manager</h3>
-        <div class="packages">
-          <article class="package">
-            <div class="package__head">
-              <h4>Homebrew</h4>
-              <span class="package__os">macOS</span>
+          <article class="platform" id="platform-mac">
+            <div class="platform__top">
+              <h3>macOS</h3>
+              <p class="platform__req">macOS 12 Monterey or later</p>
             </div>
-            <div class="command">
-              <code>brew install --cask f1resh/tap/sshtermaq</code>
-              <button class="copy" type="button" data-copy="brew install --cask f1resh/tap/sshtermaq" aria-label="Copy the Homebrew command">Copy</button>
+
+            <div class="option option--recommended">
+              <div class="option__head">
+                <h4>Disk image</h4>
+                <span class="tag">Recommended</span>
+              </div>
+              <div class="option__links">
+                <a class="button button--primary" data-asset="mac-arm64-dmg" href="https://github.com/f1resh/sshtermaq/releases/latest">Apple silicon <small>.dmg</small></a>
+                <a class="button button--ghost" data-asset="mac-x64-dmg" href="https://github.com/f1resh/sshtermaq/releases/latest">Intel <small>.dmg</small></a>
+              </div>
+              <p class="option__note">Signed and notarized by Apple: it opens without warnings. Also as .zip: <a data-asset="mac-arm64-zip" href="https://github.com/f1resh/sshtermaq/releases/latest">Apple silicon</a>, <a data-asset="mac-x64-zip" href="https://github.com/f1resh/sshtermaq/releases/latest">Intel</a>.</p>
             </div>
-            <p class="package__note">Later versions arrive with <code>brew upgrade</code>.</p>
-          </article>
-          <article class="package is-soon">
-            <div class="package__head">
-              <h4>winget</h4>
-              <span class="package__os">Windows</span>
-              <span class="badge">In progress</span>
+
+            <div class="option">
+              <div class="option__head">
+                <h4>Homebrew</h4>
+              </div>
+              <div class="command">
+                <code>brew install --cask f1resh/tap/sshtermaq</code>
+                <button class="copy" type="button" data-copy="brew install --cask f1resh/tap/sshtermaq" aria-label="Copy the Homebrew command">Copy</button>
+              </div>
+              <p class="option__note">Later versions arrive with <code>brew upgrade</code>.</p>
             </div>
-            <div class="command" aria-disabled="true">
-              <code>winget install f1resh.SSHTermaq</code>
-            </div>
-            <p class="package__note">Windows Package Manager. Until it's listed, use the installer above.</p>
-          </article>
-          <article class="package">
-            <div class="package__head">
-              <h4>Microsoft Store</h4>
-              <span class="package__os">Windows</span>
-            </div>
-            <a class="store-link" href="https://apps.microsoft.com/detail/9ppk5dxcrqrc">
-              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 6V5a4 4 0 0 1 8 0v1h4a1 1 0 0 1 1 1v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a1 1 0 0 1 1-1h4Zm2 0h4V5a2 2 0 0 0-4 0v1Zm-1 5v3h3v-3H9Zm4 0v3h3v-3h-3Zm-4 4v3h3v-3H9Zm4 0v3h3v-3h-3Z"/></svg>
-              Get it from Microsoft Store
-            </a>
-            <p class="package__note">Installs and updates through the Store app, without the SmartScreen warning.</p>
+
+            <p class="platform__note">Which one? Apple menu › About This Mac: a chip called "Apple M…" means Apple silicon, an Intel processor means Intel.</p>
           </article>
         </div>
 
@@ -245,7 +267,7 @@
         <h2 class="section-title">Questions</h2>
         <details>
           <summary>Is it really free?</summary>
-          <p>Yes. SSHTermaq is open source under the MIT license: no price, no subscription, no account and no ads.</p>
+          <p>Yes. SSHTermaq is open source under the MIT license: no price, no subscription, no account and no ads. The Microsoft Store and Homebrew versions are the same app, free as well.</p>
         </details>
         <details>
           <summary>Where are my sessions stored?</summary>
@@ -261,7 +283,7 @@
         </details>
         <details>
           <summary>Windows says "Windows protected your PC". Is that normal?</summary>
-          <p>SmartScreen warns about programs it hasn't seen often yet. Choose <em>More info › Run anyway</em>. You can check the download against the release on GitHub, and the source code is public. Or install SSHTermaq from the <a href="https://apps.microsoft.com/detail/9ppk5dxcrqrc">Microsoft Store</a>, which doesn't show the warning and keeps the app up to date.</p>
+          <p>Yes, for the installer and zip from GitHub: they aren't code-signed yet, and SmartScreen warns about programs it doesn't know. The <a href="https://apps.microsoft.com/detail/9ppk5dxcrqrc">Microsoft Store</a> version is signed by Microsoft and installs without the warning, so we recommend it. If you use the download, choose <em>More info › Run anyway</em>; the source code and every release are public on GitHub.</p>
         </details>
         <details>
           <summary>Which Mac download do I need?</summary>
