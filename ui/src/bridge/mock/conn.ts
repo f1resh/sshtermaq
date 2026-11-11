@@ -4,12 +4,15 @@
 import type { ConnOpenRequest, EventLogEntry, SpecialCommandDef } from '@shared/types';
 import { sessionLabel } from '@shared/defaults';
 import type { MockContext } from './index';
+import { DEMO_COMMANDS, demoBanner, demoCommand, isFullScreen } from './demoShell';
 
 interface MockConn {
   req: ConnOpenRequest;
   line: string;
   log: EventLogEntry[];
   closed: boolean;
+  cols: number;
+  rows: number;
 }
 
 const conns = new Map<string, MockConn>();
@@ -21,10 +24,14 @@ export function registerConnMocks(ctx: MockContext): void {
     ctx.emit('conn:onEventLog', c.req.connId, e);
   };
   const out = (c: MockConn, s: string) => ctx.emit('conn:onData', c.req.connId, s);
-  const prompt = () => '\x1b[1;32mmock\x1b[0m@\x1b[1;34m' + 'demo' + '\x1b[0m:~$ ';
+  const promptOf = (c: MockConn) => {
+    const s = c.req.session;
+    const host = (s.name || s.host || 'demo').replace(/\s+/g, '-').toLowerCase();
+    return `\x1b[1;32m${s.username || 'demo'}@${host}\x1b[0m:\x1b[1;34m~\x1b[0m$ `;
+  };
 
   ctx.handle('conn:open', (req: ConnOpenRequest) => {
-    const c: MockConn = { req, line: '', log: [], closed: false };
+    const c: MockConn = { req, line: '', log: [], closed: false, cols: req.cols || 80, rows: req.rows || 24 };
     conns.set(req.connId, c);
     const s = req.session;
     ctx.emit('conn:onStatus', { connId: req.connId, status: 'connecting', message: `Connecting to ${sessionLabel(s)}` });
@@ -42,12 +49,7 @@ export function registerConnMocks(ctx: MockContext): void {
         serverInfo: 'SSH-2.0-MockSSH_1.0, chacha20-poly1305@openssh.com'
       });
       log(c, 'Connected (mock)');
-      out(
-        c,
-        `Welcome to the \x1b[1mSSHTermaq\x1b[0m mock shell (${s.protocol} ${sessionLabel(s)}).\r\n` +
-          `Type \x1b[33mhelp\x1b[0m, \x1b[33mcolors\x1b[0m, \x1b[33mexit\x1b[0m.\r\n\r\n` +
-          prompt()
-      );
+      out(c, demoBanner() + '\r\n' + promptOf(c));
     }, 400);
   });
 
@@ -65,7 +67,9 @@ export function registerConnMocks(ctx: MockContext): void {
           ctx.emit('conn:onStatus', { connId, status: 'disconnected', clean: true, exitCode: 0, message: 'Session ended' });
           return;
         }
-        if (cmd === 'help') out(c, 'Commands: help, colors, ls, date, exit\r\n');
+        const demo = demoCommand(cmd, c.cols, c.rows);
+        if (demo !== undefined) out(c, demo);
+        else if (cmd === 'help') out(c, `Commands: help, colors, ls, date, exit, ${DEMO_COMMANDS.join(', ')}\r\n`);
         else if (cmd === 'colors') {
           let s = '';
           for (let i = 0; i < 16; i++) s += `\x1b[48;5;${i}m  ${String(i).padStart(2)}  \x1b[0m` + (i === 7 ? '\r\n' : '');
@@ -73,7 +77,7 @@ export function registerConnMocks(ctx: MockContext): void {
         } else if (cmd === 'ls') out(c, '\x1b[1;34mdocuments\x1b[0m  \x1b[1;34mprojects\x1b[0m  notes.txt  \x1b[1;32mrun.sh\x1b[0m\r\n');
         else if (cmd === 'date') out(c, new Date().toString() + '\r\n');
         else if (cmd) out(c, `${cmd}: command not found\r\n`);
-        out(c, prompt());
+        if (!isFullScreen(cmd)) out(c, promptOf(c));
       } else if (ch === '\x7f' || ch === '\b') {
         if (c.line.length) {
           c.line = c.line.slice(0, -1);
@@ -81,7 +85,7 @@ export function registerConnMocks(ctx: MockContext): void {
         }
       } else if (ch === '\x03') {
         c.line = '';
-        out(c, '^C\r\n' + prompt());
+        out(c, '^C\r\n' + promptOf(c));
       } else if (ch >= ' ') {
         c.line += ch;
         out(c, ch);
@@ -89,7 +93,13 @@ export function registerConnMocks(ctx: MockContext): void {
     }
   });
 
-  ctx.on('conn:resize', () => undefined);
+  ctx.on('conn:resize', (connId: string, cols: number, rows: number) => {
+    const c = conns.get(connId);
+    if (c && cols > 0 && rows > 0) {
+      c.cols = cols;
+      c.rows = rows;
+    }
+  });
   ctx.on('conn:close', (connId: string) => {
     const c = conns.get(connId);
     if (!c || c.closed) return;

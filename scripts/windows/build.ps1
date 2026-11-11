@@ -12,6 +12,7 @@
   ./scripts/windows/build.ps1 -Portable  # also drop portable.flag so the app keeps its data next to the exe
   ./scripts/windows/build.ps1 -Tests     # run the native and UI test suites first
   ./scripts/windows/build.ps1 -Installer # also build dist/SSHTermaq-<ver>-setup.exe (Inno Setup 6)
+  ./scripts/windows/build.ps1 -Msix      # also build dist/SSHTermaq-<ver>-win-x64.msix for the Microsoft Store (msix.ps1)
   ./scripts/windows/build.ps1 -Sign      # sign SSHTermaq.exe, ssh.dll and the installer (scripts/windows/sign.ps1)
   ./scripts/windows/build.ps1 -NoPrompt  # do not wait for Enter at the version check
 #>
@@ -22,6 +23,7 @@ param(
     [switch]$NoZip,
     [switch]$Installer,
     [switch]$Sign,
+    [switch]$Msix,
     [switch]$NoPrompt
 )
 
@@ -153,4 +155,10 @@ if ($Installer) {
     & $iscc @isccArgs (Join-Path $PSScriptRoot 'installer.iss') | Out-Host
     if ($LASTEXITCODE) { throw 'Installer build failed' }
     Write-Host "Created $(Join-Path $root "dist/SSHTermaq-$version-setup.exe")" -ForegroundColor Green
+}
+
+# ---- Microsoft Store package -------------------------------------------------------------------------
+if ($Msix) {
+    if ($Portable) { throw '-Msix and -Portable do not go together (the package keeps its data in the user profile)' }
+    & (Join-Path $PSScriptRoot 'msix.ps1') -Source $dist
 }

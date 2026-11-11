@@ -1,5 +1,6 @@
 """Renders the SSHTermaq application icon (stdlib only) into native/res/windows/app.ico and native/res/icon-256.png;
 with --mac into native/res/macos/app.icns instead (needs macOS's iconutil).
+With --msix: the square app icons of the MSIX package, in native/res/windows/msix.
 
 Design (same drawing as ui/src/components/welcome/Logo.tsx, in its 120x120 units): a near-black rounded square with
 a neon tube — a magenta terminal-window outline whose corner grows the tail of a "Q" — and a pink ">_" prompt inside.
@@ -157,9 +158,29 @@ def main_mac():
     print("wrote app.icns")
 
 
+def main_msix():
+    """The MSIX package's square app icons (taskbar, Start, Explorer, Store). The tiles with a margin around the logo
+    (Square150x150Logo, Wide310x150Logo) come from ui/scripts/store-art.mjs."""
+    out_dir = os.path.join(OUT_DIR, "windows", "msix")
+    os.makedirs(out_dir, exist_ok=True)
+    names = [(44, "Square44x44Logo.scale-100"), (88, "Square44x44Logo.scale-200"),
+             (50, "StoreLogo.scale-100"), (100, "StoreLogo.scale-200")]
+    for n in (16, 24, 32, 48, 256):
+        names += [(n, "Square44x44Logo.targetsize-%d" % n), (n, "Square44x44Logo.targetsize-%d_altform-unplated" % n)]
+    rendered = {}
+    for n, name in names:
+        if n not in rendered:
+            rendered[n] = png_bytes(n, render(n))
+        with open(os.path.join(out_dir, name + ".png"), "wb") as f:
+            f.write(rendered[n])
+    print("wrote %d images to %s" % (len(names), out_dir))
+
+
 def main():
     if "--mac" in sys.argv[1:]:
         return main_mac()
+    if "--msix" in sys.argv[1:]:
+        return main_msix()
     sizes = [16, 20, 24, 32, 40, 48, 64, 128, 256]
     images = []
     for n in sizes:

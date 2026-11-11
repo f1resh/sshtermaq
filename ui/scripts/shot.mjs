@@ -4,7 +4,7 @@
  * screenshot. Lets several people/agents preview concurrently without clobbering each other.
  *
  *   node scripts/shot.mjs --name shell --out ../artifacts/shell.png [--steps steps.mjs] [--width 1400 --height 900]
- *                         [--no-build] [--theme dark|light] [--keep-storage]
+ *                         [--no-build] [--theme dark|light] [--keep-storage] [--scale 2]
  *
  * --steps: an ES module whose default export is `async (page) => { ... }` run before the screenshot
  *          (click, type, page.evaluate(...) etc.). Further screenshots can be taken inside it.
@@ -33,6 +33,7 @@ const width = Number(opt('width', 1400));
 const height = Number(opt('height', 900));
 const steps = opt('steps');
 const theme = opt('theme');
+const scale = Number(opt('scale', 1));
 const outDir = join(uiRoot, '.preview', name);
 
 if (!flag('no-build')) {
@@ -69,7 +70,7 @@ try {
   const context = await browser.newContext({
     viewport: { width, height },
     colorScheme: theme === 'light' ? 'light' : 'dark',
-    deviceScaleFactor: 1
+    deviceScaleFactor: scale
   });
   const page = await context.newPage();
   const logs = [];
@@ -90,7 +91,12 @@ try {
   console.log(`screenshot: ${out}`);
   const errors = logs.filter((l) => l.startsWith('[error]') || l.startsWith('[pageerror]'));
   if (errors.length) console.log('console errors:\n' + errors.join('\n'));
+} catch (e) {
+  console.error(e);
+  process.exitCode = 1;
 } finally {
-  await browser.close();
+  // browser.close() can hang with Edge; don't let it keep the script alive.
+  await Promise.race([browser.close(), new Promise((r) => setTimeout(r, 5000))]);
   server.close();
+  process.exit(process.exitCode ?? 0);
 }
