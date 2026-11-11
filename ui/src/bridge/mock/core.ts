@@ -178,7 +178,10 @@ export function registerCoreMocks(ctx: MockContext): void {
   ctx.handle('app:logDirectory', () => 'C:\\Users\\mock\\AppData\\Roaming\\SSHTermaq\\logs');
   ctx.handle('app:readFileDataUrl', () => null);
   ctx.handle('app:openExternal', (url: string) => void globalThis.open?.(url, '_blank'));
+  ctx.handle('app:openPath', (path: string) => void console.info('[mock] open', path));
+  ctx.on('app:showItemInFolder', (path: string) => console.info('[mock] show in folder', path));
   ctx.on('app:confirmClose', () => undefined);
+  ctx.on('app:quit', () => console.info('[mock] quit'));
   ctx.on('app:setThemeSource', () => undefined);
   ctx.on('app:setBackgroundMaterial', () => undefined);
   ctx.on('app:setUiScale', () => undefined);
@@ -197,7 +200,8 @@ export function registerCoreMocks(ctx: MockContext): void {
   ctx.on('window:setTitle', (t: string) => (document.title = t));
   ctx.on('window:flash', () => undefined);
   ctx.on('window:setTitleBarLayout', () => undefined);
-  ctx.on('window:setMenuBar', () => undefined);
+  // The macOS menu bar the UI asked for, for the Playwright tests (ui/e2e).
+  ctx.on('window:setMenuBar', (menus: unknown) => void ((globalThis as { __mockMenuBar?: unknown }).__mockMenuBar = menus));
 
   /* dialogs */
   ctx.handle('dialog:openFile', () => null);

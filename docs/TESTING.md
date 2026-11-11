@@ -11,11 +11,14 @@ them depends on another.
 | Part | What it tests | Framework | Where | Automated | Size | Run time |
 |---|---|---|---|---|---|---|
 | **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 217 test cases | about 1 minute |
-| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 10 files, 110 tests | under 1 second |
+| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar; the bridge contract between the UI, the native host and the mock backend | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 11 files, 117 tests | under 2 seconds |
+| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes | Playwright Test | `ui/e2e/*.spec.ts` | yes | 4 files, 19 tests, each run twice (38) | about 1–1.5 minutes |
 | **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs` | no, run by hand | no saved scenarios | seconds |
 
-There are no automated tests of UI behaviour (clicking through screens, rendering, dialogs), and there is no CI:
-tests run when a developer runs them, or through `scripts\windows\build.ps1 -Tests`. See [section 8](#8-what-is-not-covered).
+The browser tests cover the main screens, not every dialog: settings, import, the key generator and the file manager
+have no browser tests yet. There is no CI: tests run when a developer runs them, or through
+`scripts\windows\build.ps1 -Tests` (native and UI unit tests; not the browser tests). See
+[section 8](#8-what-is-not-covered).
 
 ## 2. Tools and libraries
 
@@ -25,6 +28,7 @@ tests run when a developer runs them, or through `scripts\windows\build.ps1 -Tes
 | CTest | ships with CMake | runs all native suites in one command |
 | libssh server API | 0.12 (vcpkg) | the in-process SSH test server (`native/tests/support`) |
 | [Vitest](https://vitest.dev/) | 4.1 | UI unit tests, run in Node (no browser, no DOM) |
+| [Playwright Test](https://playwright.dev/docs/intro) (`@playwright/test`) | 1.62 | UI browser tests: the test runner, assertions, traces of failing tests; uses the installed Edge (Windows) or Chrome |
 | TypeScript compiler | 5.9 | `npm run typecheck`: static check of the whole UI |
 | [Playwright](https://playwright.dev/) (`playwright-core`) | 1.62 | end-to-end and screenshot scripts; drives Microsoft Edge or the app's WebView2 over the DevTools protocol |
 
@@ -83,6 +87,32 @@ by `cmake/EmbedUi.cmake`), so loading the embedded UI is tested against the real
 - **Only pure logic is tested**, because there is no DOM: functions that turn input into output without React or the
   native host.
 
+### UI browser tests
+
+- **Folder:** [ui/e2e](../ui/e2e), files named `<area>.spec.ts`; configuration in
+  [ui/playwright.config.ts](../ui/playwright.config.ts).
+- **What runs:** Playwright starts Vite on port 5174 (not 5173, so a running `npm run dev` is not in the way) and
+  opens the UI in the installed Edge on Windows, Chrome elsewhere (`PW_CHANNEL` overrides it). The UI runs against the
+  mock backend, as in `npm run dev`.
+- **Two layouts:** every test runs in the projects `windows` and `macos`. [e2e/fixtures.ts](../ui/e2e/fixtures.ts)
+  makes the page report that system to `src/shared/platform.ts`, so the macOS layout (no caption buttons, native menu
+  bar, ⌘ shortcuts, Finder / Keychain words) is tested on a Windows PC as well.
+- **Fresh state:** each test starts from the mock's seed data: the fixture clears the site's stored data, where the
+  mock keeps its state.
+- **Browser profiles:** each test worker reuses one profile folder in the system temp folder
+  (`sshtermaq-e2e-profile-<n>`). Playwright's own temporary profiles can't be used on Windows: Edge and Chrome give some
+  of their folders permissions that only the browser's sandbox can use, and Playwright then hangs for minutes trying to
+  delete them.
+- **Finding elements:** by role and accessible name, as a user sees them (`getByRole('dialog', { name: … })`), not by
+  CSS classes. Shared actions are in [e2e/helpers.ts](../ui/e2e/helpers.ts).
+- **Playing the host:** for what only the native host does, the mock offers two hooks: `__mockEmit(channel, ...args)`
+  sends an event as the host would (the macOS menu bar's `window:onMenuCommand`), and `__mockMenuBar` holds the menu
+  bar the UI last sent.
+- **Terminal text:** xterm.js draws on a canvas by default; tests that read the terminal switch to its DOM renderer
+  first (`useDomRenderer`), whose rows are plain text.
+- **Failures:** the list in the console, an HTML report in `ui/playwright-report`, and a trace of each failing test in
+  `ui/test-results/<test>/trace.zip` (`npx playwright show-trace <file>`: every step with a snapshot of the page).
+
 ### End-to-end and visual scripts
 
 Two Node scripts in [ui/scripts](../ui/scripts), described in [section 7](#7-end-to-end-and-visual-checks). They
@@ -94,7 +124,11 @@ The two halves talk over the JSON bridge (`ui/src/shared/ipc.ts`). Each side tes
 
 - **Native side:** `TestBridge` sends the same JSON requests the UI sends and checks the responses and events
   (`session manager: bridge handlers`, `localfs: bridge handlers`, the file manager tests).
-- **UI side:** in a normal browser the UI talks to a mock backend (`ui/src/bridge/mock`) instead of the host.
+- **UI side:** in a normal browser the UI talks to a mock backend (`ui/src/bridge/mock`) instead of the host; the
+  browser tests run against it.
+- **The contract between them:** [ui/src/bridge/contract.test.ts](../ui/src/bridge/contract.test.ts) checks that the
+  native host (its handler registrations and `emit` calls, read from `native/src`) and the mock backend both answer
+  exactly the channels of `API_SCHEMA`, with the right kind. A channel added on one side only fails this test.
 
 Only the end-to-end script `app.mjs` exercises both halves together.
 
@@ -490,7 +524,7 @@ Self-tests of the fake servers, validated with independent clients (`plink`, `ps
 | TestSshServer serves SFTP to psftp | `[support][plink]` | PuTTY `psftp` | `support_tests.cpp` |
 | TestSshServer honours local forwarding from plink | `[support][plink]` | PuTTY `plink` | `support_tests.cpp` |
 
-### UI unit tests (110 tests)
+### UI unit tests (117 tests)
 
 #### `actions.test.ts` (7)
 
@@ -673,6 +707,46 @@ About: the build number with the commit (marking uncommitted changes) and the bu
 | About: version and build id | shows nothing when the host sent no build id |
 | About: version and build id | shows the build time in local time, and nothing for a missing or invalid time |
 
+#### `contract.test.ts` (7)
+
+The bridge contract: `API_SCHEMA` against the native host's sources and the mock backend. Source: [ui/src/bridge/contract.test.ts](../ui/src/bridge/contract.test.ts).
+
+| Group | Test |
+|---|---|
+| native host | handles every invoke and send channel, and nothing else |
+| native host | registers each channel with its kind (on() for send, handle*() for invoke) |
+| native host | emits only events of the schema, and every one of them |
+| mock backend | answers every invoke channel |
+| mock backend | answers every send channel |
+| mock backend | registers only channels of the schema, with their kind |
+| mock backend | emits only events of the schema |
+
+### UI browser tests (19 tests, each run as `windows` and `macos`)
+
+Source: [ui/e2e](../ui/e2e).
+
+| File | Test |
+|---|---|
+| `welcome.spec.ts` | lists the recent sessions and quick connect |
+| `welcome.spec.ts` | quick connect shows the serial example of the system (`COM3` / `/dev/cu.*`) |
+| `welcome.spec.ts` | title bar: caption buttons and app menu on Windows, none on macOS |
+| `welcome.spec.ts` | the sidebar can be hidden and shown again |
+| `session-editor.spec.ts` | shows the session and its categories |
+| `session-editor.spec.ts` | saved password: says what encrypts it on this system (Windows DPAPI / login Keychain) |
+| `session-editor.spec.ts` | proxy password: says what encrypts it on this system |
+| `session-editor.spec.ts` | renaming and saving updates the sidebar |
+| `session-editor.spec.ts` | cancel asks before discarding changes, then keeps the session as it was |
+| `sidebar-palette.spec.ts` | search filters the saved sessions |
+| `sidebar-palette.spec.ts` | the context menu offers the session actions |
+| `sidebar-palette.spec.ts` | duplicate adds a copy of the session |
+| `sidebar-palette.spec.ts` | the command palette opens (shortcut, or the macOS menu bar) and closes with Escape |
+| `sidebar-palette.spec.ts` | the welcome screen shows the system's shortcuts |
+| `terminal.spec.ts` | double-clicking a session opens a tab with the shell |
+| `terminal.spec.ts` | typed commands reach the shell and its output is shown |
+| `terminal.spec.ts` | closing the tab returns to the welcome screen (after "Close tab?") |
+| `terminal.spec.ts` | quick connect opens a session from user@host |
+| `terminal.spec.ts` | split right from the command palette makes two panes |
+
 ## 6. How to run the tests
 
 ### Native tests
@@ -714,8 +788,26 @@ npm test                          # all tests, once (vitest run)
 npx vitest                        # watch mode: reruns affected tests on every save
 npx vitest run keymap             # only files whose path contains "keymap"
 npx vitest run -t "Backspace"     # only tests whose name contains "Backspace"
-npm run typecheck                 # TypeScript check of the whole UI (no tests, catches type errors)
+npm run typecheck                 # TypeScript check of the whole UI and of e2e/ (no tests, catches type errors)
 ```
+
+### UI browser tests
+
+```powershell
+cd ui
+npm run test:e2e                              # all browser tests, both layouts (playwright test)
+npx playwright test --project=macos           # one layout
+npx playwright test session-editor            # files whose name contains "session-editor"
+npx playwright test -g "saved password"       # tests whose title contains "saved password"
+npx playwright test --headed                  # with the browser window visible
+npx playwright test --ui                      # Playwright's interactive runner: step through, see the page
+npx playwright show-report                    # the HTML report of the last run
+```
+
+They need the installed Microsoft Edge (Windows) or Google Chrome; nothing is downloaded. Node and npm: see
+[BUILDING.md](BUILDING.md); `scripts\windows\build.ps1` finds the Node.js that comes with Visual Studio when `npm` is
+not on `PATH`, and a terminal can do the same by putting
+`C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VisualStudio\NodeJs` first on `PATH`.
 
 ### Test SSH server for manual testing
 
@@ -823,8 +915,10 @@ complete at that point. A Node `DEP0190` deprecation warning at the start is har
 
 ## 8. What is not covered
 
-- **UI behaviour:** React components, dialogs, the terminal view and the bridge client have no automated tests; of the stores
-  and actions, only the logic listed in section 5 is covered. They are checked by hand with the scripts in section 7.
+- **UI behaviour:** the browser tests (section 5) cover the welcome screen, the session editor, the sidebar, the
+  command palette, terminals and split panes, against the mock backend. Not covered yet: the settings, import and key
+  generator dialogs, the file manager and SFTP panel, themes, drag and drop, and the host-specific code (the real
+  WebView2 / WKWebView bridge client). They are checked by hand with the scripts in section 7.
 - **Native parts without tests:** the main window and WebView2 host (`platform/win/ui/HostWindowWin`; its policy, `app/HostController`, is tested), the core bridge handlers
   (`app/CoreHandlers`: sessions, settings, known hosts, window, ...), native file dialogs (`platform/ui/Dialogs`), the import
   bridge handlers (`importers/ImportHandlers`) and the serial port transport (needs hardware). The logic underneath

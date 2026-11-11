@@ -21,8 +21,9 @@ export const hostPlatform: HostPlatform = detectPlatform();
 export const isMac = hostPlatform === 'darwin';
 
 /**
- * The OS's own words in labels: the local side, its file browser, where local deletes go, and a serial line as
- * examples name it (alone, and as quick-connect input with a baud rate).
+ * The OS's own words in labels: the local side, its file browser, where local deletes go, a serial line as
+ * examples name it (alone, and as quick-connect input with a baud rate), and what encrypts saved passwords (short, and
+ * as the end of "Encrypted with ..."; platform/sys/Secret.h).
  */
 export const osTerms = isMac
   ? {
@@ -32,7 +33,9 @@ export const osTerms = isMac
       fileBrowser: 'Finder',
       trash: 'Trash',
       serialLine: '/dev/cu.usbserial-1410',
-      serialExample: '/dev/cu.usbserial-1410?baud=115200'
+      serialExample: '/dev/cu.usbserial-1410?baud=115200',
+      secretStore: 'key in your login Keychain',
+      encryptedWith: 'a key kept in your login Keychain'
     }
   : {
       computer: 'This PC',
@@ -41,5 +44,7 @@ export const osTerms = isMac
       fileBrowser: 'Explorer',
       trash: 'Recycle Bin',
       serialLine: 'COM3',
-      serialExample: 'serial://COM3?baud=115200'
+      serialExample: 'serial://COM3?baud=115200',
+      secretStore: 'Windows DPAPI',
+      encryptedWith: 'Windows DPAPI for your user account'
     };

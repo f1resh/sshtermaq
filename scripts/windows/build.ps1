@@ -34,6 +34,13 @@ Set-Location $root
 $cmake = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
 if (-not (Test-Path $cmake)) { $cmake = (Get-Command cmake -ErrorAction Stop).Source }
 
+# npm: from PATH, else the Node.js that Visual Studio ships (it is not on PATH, not even in the developer shell).
+$vsNode = 'C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VisualStudio\NodeJs'
+if (-not $SkipUi -and -not (Get-Command npm -ErrorAction SilentlyContinue)) {
+    if (-not (Test-Path (Join-Path $vsNode 'npm.cmd'))) { throw 'npm not found: install Node.js 22 LTS (winget install OpenJS.NodeJS.LTS)' }
+    $env:Path = "$vsNode;$env:Path"
+}
+
 # ---- version --------------------------------------------------------------------------------------
 # The version is set only in CMakeLists.txt; the build number (commit count) and the commit come from git, as in
 # cmake/BuildInfo.cmake, which stamps them into the executable.

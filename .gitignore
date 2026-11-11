@@ -24,3 +24,7 @@ notes.md
 .DS_Store
 
 Dist_old/
+
+# Playwright (ui/e2e)
+/ui/test-results/
+/ui/playwright-report/

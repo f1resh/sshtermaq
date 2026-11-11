@@ -261,7 +261,10 @@ How everything is tested, the full list of tests and how to run each part: [docs
     With `--sftp off --exec-shell git` it is an SCP-only server using Git for Windows' shell, GNU tools and OpenSSH
     `scp`.
   - File manager tests cover transfers, conflicts, resume, move, find, synchronize, edit and SCP.
-- **UI (Vitest):** `cd ui; npm test`.
+- **UI (Vitest):** `cd ui; npm test`. Includes the bridge contract test: the native host and the mock backend answer
+  the same channels.
+- **UI in a browser (Playwright):** `cd ui; npm run test:e2e` runs the UI against the mock backend in Edge, in both
+  the Windows and the macOS layout.
 - **End-to-end:** `node ui/scripts/app.mjs --steps <file>` drives the real app over the WebView2 DevTools protocol.
 
 ## Architecture

@@ -5,6 +5,7 @@ import { useMemo } from 'react';
 import { Cable, Lock, LogIn, Network, Plus, Trash2, Usb } from 'lucide-react';
 import { Button, IconButton, NumberInput, Select, TextArea, TextInput } from '@/components/ui';
 import { DEFAULT_PORTS, normalizeFolder, sessionLabel } from '@shared/defaults';
+import { osTerms } from '@shared/platform';
 import type { AddressFamily, Protocol, ProxyType, SessionView, TriState } from '@shared/types';
 import {
   Callout,
@@ -436,7 +437,7 @@ export function ProxySection() {
                 <FormField label="Username" span={2}>
                   <TextInput value={p.username} onChange={(v) => update((d) => void (d.proxy.username = v))} placeholder="(none)" />
                 </FormField>
-                <FormField label="Password" span={2} hint="Stored encrypted (Windows DPAPI)">
+                <FormField label="Password" span={2} hint={`Stored encrypted (${osTerms.secretStore})`}>
                   <TextInput type="password" value={p.password} onChange={(v) => update((d) => void (d.proxy.password = v))} placeholder="(none)" autoComplete="new-password" />
                 </FormField>
               </>
