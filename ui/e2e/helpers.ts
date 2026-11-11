@@ -61,3 +61,17 @@ export async function openPalette(page: Page, os: 'win32' | 'darwin'): Promise<L
 
 /** The text of the first terminal on the page (needs useDomRenderer). */
 export const terminalText = (page: Page): Locator => page.locator('.xterm-rows').first();
+
+/**
+ * Plays a connection lost by the network: the host reports the connections of all connected panes as dropped (not a
+ * clean end), so they show the "Connection failed" banner with Restart.
+ */
+export async function dropConnections(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const module = '/src/store/workspace.ts';
+    const { useWorkspace } = (await import(module)) as typeof import('../src/store/workspace');
+    const emit = (globalThis as unknown as { __mockEmit(ch: string, ...a: unknown[]): void }).__mockEmit;
+    for (const p of Object.values(useWorkspace.getState().panes))
+      if (p.status === 'connected') emit('conn:onStatus', { connId: p.connId, status: 'error', message: 'Connection reset by peer' });
+  });
+}

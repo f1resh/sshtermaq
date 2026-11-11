@@ -182,6 +182,7 @@ export function registerCoreMocks(ctx: MockContext): void {
   ctx.on('app:showItemInFolder', (path: string) => console.info('[mock] show in folder', path));
   ctx.on('app:confirmClose', () => undefined);
   ctx.on('app:quit', () => console.info('[mock] quit'));
+  ctx.on('app:log', (level: string, message: string) => console.warn(`[mock] app log (${level})`, message));
   ctx.on('app:setThemeSource', () => undefined);
   ctx.on('app:setBackgroundMaterial', () => undefined);
   ctx.on('app:setUiScale', () => undefined);

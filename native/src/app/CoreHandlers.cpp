@@ -313,6 +313,23 @@ void registerCoreHandlers(const CoreHandlerContext& c) {
         return "data:" + mimeForPath(p) + ";base64," + crypto::base64Encode(data);
     });
     b.handleSync("app:logDirectory", [&store](const Json&) { return Json(sys::fromPath(store.logDirectory())); });
+    // The UI's own errors (ui/src/bridge/reportError.ts). The UI already drops repeats; this caps a page gone wrong.
+    b.on("app:log", [count = 0](const Json& a) mutable {
+        constexpr int kMaxLines = 200;
+        constexpr size_t kMaxLength = 4000;
+        if (count >= kMaxLines) return;
+        std::string message = argStr(a, 1);
+        if (message.size() > kMaxLength) {
+            size_t cut = kMaxLength;
+            while (cut > 0 && (static_cast<unsigned char>(message[cut]) & 0xC0) == 0x80) --cut;  // not inside a UTF-8 character
+            message = message.substr(0, cut) + " …";
+        }
+        const std::string line = "UI: " + message + (++count == kMaxLines ? " (further UI messages are left out)" : "");
+        if (argStr(a, 0) == "warn")
+            applog::warn(line);
+        else
+            applog::error(line);
+    });
     b.on("app:confirmClose", [&host](const Json& a) { host.confirmClose(argBool(a, 0)); });
     b.on("app:quit", [&host](const Json&) { host.quit(); });
 

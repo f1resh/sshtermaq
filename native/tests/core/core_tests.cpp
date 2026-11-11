@@ -1,10 +1,15 @@
 #include "bridge/Bridge.h"
 #include "core/Crypto.h"
+#include "core/Log.h"
 #include "core/Strings.h"
 #include "core/Types.h"
 #include "platform/sys/Fs.h"
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <fstream>
+#include <iterator>
+#include <random>
 
 using namespace st;
 
@@ -97,4 +102,40 @@ TEST_CASE("bridge: invoke, send and events") {
     REQUIRE(e["t"] == "evt");
     REQUIRE(e["ch"] == "t:evt");
     REQUIRE(e["args"][1] == 1);
+}
+
+TEST_CASE("log: a full log is kept as <name>.1.log and a new one starts") {
+    namespace fs = std::filesystem;
+    REQUIRE(applog::previousLogFile(fs::path("logs") / "sshtermaq.log") == fs::path("logs") / "sshtermaq.1.log");
+
+    const fs::path dir = fs::temp_directory_path() / ("st-log-test-" + std::to_string(std::random_device{}()));
+    fs::create_directories(dir);
+    const fs::path file = dir / "app.log";
+    {
+        std::ofstream(dir / "app.1.log") << "oldest";
+        std::ofstream big(file, std::ios::binary);
+        big << std::string(static_cast<size_t>(applog::kRotateBytes) + 1, 'x');
+    }
+    applog::init(file);
+    applog::info("after rotation");
+    applog::close();
+    CHECK(fs::file_size(dir / "app.1.log") == applog::kRotateBytes + 1);
+    std::ifstream in(file);
+    std::string line;
+    std::getline(in, line);
+    CHECK(line.find("[INFO] after rotation") != std::string::npos);
+
+    // Under the limit: appended to, not rotated.
+    applog::init(file);
+    applog::info("second start");
+    applog::close();
+    CHECK(fs::file_size(dir / "app.1.log") == applog::kRotateBytes + 1);
+    std::ifstream again(file);
+    std::string all((std::istreambuf_iterator<char>(again)), std::istreambuf_iterator<char>());
+    CHECK(all.find("after rotation") != std::string::npos);
+    CHECK(all.find("second start") != std::string::npos);
+    again.close();
+    in.close();
+    std::error_code ec;
+    fs::remove_all(dir, ec);
 }

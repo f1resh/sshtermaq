@@ -96,6 +96,7 @@ Rules:
     `platform/ui` (tier 1) may also use `core/Types.h`, `core/Strings.h`, `core/Threading.h` and `core/Log.h`.
     Platform code never includes module headers (bridge, store, ssh, ...): modules call the platform, and the
     platform reports back through callbacks (e.g. `ui::HostWindow`'s hooks, connected by `app/HostController`).
+11. **Never change a stable identifier** (below) to tidy up or refactor: existing installs depend on it.
 
 ### Bridge
 Channel = `namespace:method` from `API_SCHEMA`. Invoke args are positional JSON arrays (optional trailing args
@@ -140,6 +141,34 @@ UI keystroke ─conn:write─▶ SessionManager ─▶ LineDiscipline (echo/edit
 Transport::onData(bytes) ─▶ SessionLog ─▶ Decoder(charset) ─▶ batch ─conn:onData─▶ xterm.write(string)
 ```
 connId = `<paneId>#<generation>` (the UI restarts a pane by bumping the generation).
+
+### Logs
+| Log | Where | What goes in |
+|---|---|---|
+| App log | `<data>/logs/sshtermaq.log` (`core/Log.h`); past 2 MB, the next start keeps it as `sshtermaq.1.log` | start (version, OS, web view), storage problems, crashes and failed jobs; each connection's start, warnings, errors and end (how long, why), named by connId, protocol and `host:port`, never the user name; failed bridge calls (channel and message, once a minute per kind); the UI's own errors (`app:log`, `ui/src/bridge/reportError.ts`, the error boundary) |
+| Event log | per connection, in memory (2,000 entries), Event log window | everything a connection reports (`Transport` `onLog`); gone when the connection is closed |
+| Session log | the file the session's Logging settings name | what the session's logging mode records (printable output, all data, or SSH debug messages) |
+
+Never secrets in any of them (rule 6).
+
+### Stable identifiers
+Names and values that users' installs and data already depend on. They look like strings to tidy up; changing one
+breaks existing installs. Change one only with a migration that reads the old value.
+
+| Identifier | Where | What breaks if it changes |
+|---|---|---|
+| DPAPI entropy `SSHTermaq/credentials/v1:6f1d…` (Windows) | `native/src/platform/win/sys/SecretWin.cpp` | every saved password and encrypted proxy password becomes unreadable |
+| Keychain item: service `SSHTermaq`, account `credentials-key` (macOS) | `native/src/platform/mac/sys/SecretMac.cpp` | the same: the key is not found, saved passwords are lost |
+| `enc:` prefix of encrypted proxy passwords | `native/src/store/Store.cpp` | stored proxy passwords are read as plain text |
+| Data folder `SSHTermaq` (`%APPDATA%\SSHTermaq`, `~/Library/Application Support/SSHTermaq`), portable `portable.flag` / `data` next to the exe, `SSHTERMAQ_DATA_DIR` | `native/src/app/Paths.cpp` | sessions, settings and known hosts are not found; portable copies and scripts stop working |
+| Data file names `sessions.json`, `settings.json`, `state.json`, `known_hosts.json`, `credentials.json` and their `version` fields | `native/src/store/Store.cpp` | the same; a format change needs a version bump and a reader for the old version |
+| JSON field names and enum values of `SessionConfig` / `AppSettings` | `ui/src/shared/types.ts`, `native/src/core/Types.h` | saved sessions and settings lose those values (they are stored as these names) |
+| Backup format tag `sshtermaq-sessions` | `native/src/importers/Importers.cpp` | exported backups no longer import |
+| Partial download suffix `.st-partial` | `native/src/sftp/TransferEngine.cpp` | interrupted downloads no longer resume |
+| Microsoft Store identity `PavelAKulov.SSHTermaq` and publisher | `scripts/windows/AppxManifest.xml.in` (set by Partner Center) | the Store no longer accepts the package as an update |
+| Installer `AppId` `{6C8B2E0B-…}` | `scripts/windows/installer.iss` | an upgrade installs a second copy instead of replacing the first |
+| macOS bundle identifier `io.github.f1resh.sshtermaq` | `native/res/macos/Info.plist.in` | macOS treats it as another app: the local network permission is asked again, macOS's own files for the app (caches, saved window state) start over, and the Homebrew cask's `zap` paths no longer match |
+| Package names: Store / winget ID `9PPK5DXCRQRC`, Homebrew `f1resh/tap/sshtermaq` | the Store listing, the `f1resh/homebrew-tap` repository | install commands in the README, on the website and in lists stop working |
 
 ## Module ownership
 

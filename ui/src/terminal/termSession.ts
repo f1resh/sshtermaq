@@ -495,8 +495,18 @@ export class TermSession {
       if (openedConns.has(old) && !isEnded(lastStatusOf(old)?.status)) api.conn.close(old);
       openedConns.delete(old);
       forgetConn(old);
-      // Restarting in place: leave the old screen contents, reset modes the previous session may have set.
-      if (this.opened) this.term.write('\x1b[0m\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?7h\r\n');
+      // Restarting in place: keep the old output, reset the modes the previous session may have set, and start the
+      // new session below the old output, after an empty line.
+      if (this.opened) {
+        // Leave the alternate screen (vim, htop…) only when it is on: in the normal screen, xterm.js would still
+        // restore the saved cursor (top left if none was saved) and the new session would overwrite the old output.
+        const altScreen = this.term.buffer.active.type === 'alternate' ? '\x1b[?1049l' : '';
+        // Scroll region and origin mode (apt's progress bar, for one) reset inside save / restore cursor: both move
+        // the cursor home.
+        const scrollRegion = '\x1b7\x1b[?6l\x1b[r\x1b8';
+        const modes = '\x1b[0m\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?7h';
+        this.term.write(`${altScreen}${scrollRegion}${modes}\r\n\r\n`);
+      }
     }
     this.connId = pane.connId;
     this.lastSentSize = '';

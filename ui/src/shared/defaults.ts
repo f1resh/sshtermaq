@@ -303,7 +303,8 @@ export function createDefaultSettings(): AppSettings {
       confirmDelete: true,
       deleteToRecycleBin: true,
       preserveTimestamps: true,
-      skipMacFiles: true,
+      // Finder's .DS_Store / ._ files exist only on macOS; elsewhere a ._ file is a real file.
+      skipMacFiles: isMac,
       parallelTransfers: 2
     }
   };

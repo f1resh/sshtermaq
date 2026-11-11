@@ -96,7 +96,8 @@ export function SftpPanel({ paneId, visible, onClose }: SftpPanelProps) {
         setSftpId(r.sftpId);
         setProtocol(r.protocol);
         setHome(r.home);
-        setPath(pane.session.ssh.sftpStartPath || r.home);
+        // After a reconnect, stay in the folder that was open.
+        setPath((cur) => cur || pane.session.ssh.sftpStartPath || r.home);
       })
       .catch((e) => {
         setError(errorText(e));
@@ -109,9 +110,10 @@ export function SftpPanel({ paneId, visible, onClose }: SftpPanelProps) {
     };
   }, [connected, pane?.connId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** Lists `dir` and shows it; false when listing failed (the error is shown instead). */
   const load = useCallback(
-    async (dir: string) => {
-      if (!sftpId) return;
+    async (dir: string): Promise<boolean> => {
+      if (!sftpId) return false;
       setLoading(true);
       setError('');
       try {
@@ -120,9 +122,11 @@ export function SftpPanel({ paneId, visible, onClose }: SftpPanelProps) {
         setPath(dir);
         setPathText(dir);
         setSelected(new Set());
+        return true;
       } catch (e) {
         setError(errorText(e));
         setPathText(path);
+        return false;
       } finally {
         setLoading(false);
       }
@@ -131,8 +135,13 @@ export function SftpPanel({ paneId, visible, onClose }: SftpPanelProps) {
   );
   const refresh = () => load(path);
 
+  // A new file session (first open, or after a reconnect): list the folder; if it is gone, the start folder.
   useEffect(() => {
-    if (sftpId && path) void load(path);
+    if (!sftpId || !path || !pane) return;
+    const start = pane.session.ssh.sftpStartPath || home;
+    void load(path).then((ok) => {
+      if (!ok && path !== start) void load(start);
+    });
   }, [sftpId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Uploads land in the folder on screen most of the time: show them.

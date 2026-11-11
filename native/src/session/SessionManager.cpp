@@ -41,6 +41,7 @@
 #include <condition_variable>
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <thread>
 #include <unordered_map>
@@ -270,16 +271,25 @@ public:
 
     void onStatus(ConnStatus status, const std::string& message) override {
         if (detached_) return;
+        bool firstConnect = false;
         {
             std::lock_guard lock(stateMutex_);
             if (closed_) return;
             status_ = status;
+            if (status == ConnStatus::Connected && !connectedAt_) {
+                connectedAt_ = Clock::now();
+                firstConnect = true;
+            }
         }
+        if (firstConnect) applog::info(logPrefix() + "connected");
         emitStatus(status, message, nullptr);
     }
 
     void onLog(LogLevel level, const std::string& message) override {
         if (detached_) return;
+        // Problems also go to the app log: the event log lives only as long as the connection.
+        if (level == LogLevel::Warn) applog::warn(logPrefix() + message);
+        if (level == LogLevel::Error) applog::error(logPrefix() + message);
         if (level == LogLevel::Debug && session_.logging.mode != LogMode::SshDebug) return;
         EventLogEntry e{nowMs(), level, message};
         {
@@ -299,6 +309,7 @@ public:
             closed_ = true;
             status_ = info.error ? ConnStatus::Error : ConnStatus::Disconnected;
         }
+        logEnd(info);
         closing_ = true;
         mgr_.cancelPrompts(connId_);
         appendTail(decoder_.flush());
@@ -486,6 +497,44 @@ private:
         lastFlush_ = Clock::now();
     }
 
+    /** "Connection <connId> (ssh 192.0.2.1:22): " — what the app log names a connection by (no user names). */
+    std::string logPrefix() const {
+        std::string target = Json(session_.protocol).get<std::string>() + " ";
+        if (session_.protocol == Protocol::Serial) {
+            target += session_.serial.line;
+        } else {
+            const bool ipv6 = session_.host.find(':') != std::string::npos;
+            target += (ipv6 ? "[" + session_.host + "]" : session_.host) + ":" + std::to_string(session_.port);
+        }
+        if (session_.ssh.noShell) target += ", files";
+        return "Connection " + connId_ + " (" + target + "): ";
+    }
+
+    /** One app log line per connection end: how long it was up and why it ended. */
+    void logEnd(const CloseInfo& info) {
+        std::optional<Clock::time_point> since;
+        {
+            std::lock_guard lock(stateMutex_);
+            since = connectedAt_;
+        }
+        std::string line = logPrefix();
+        if (since) {
+            const auto s = std::chrono::duration_cast<std::chrono::seconds>(Clock::now() - *since).count();
+            line += "ended after " + (s >= 3600 ? std::to_string(s / 3600) + " h " + std::to_string(s % 3600 / 60) + " min"
+                                      : s >= 60  ? std::to_string(s / 60) + " min " + std::to_string(s % 60) + " s"
+                                                 : std::to_string(s) + " s");
+        } else {
+            line += "failed before connecting";
+        }
+        if (!info.reason.empty()) line += ": " + info.reason;
+        if (info.hasExitCode) line += " (exit code " + std::to_string(info.exitCode) + ")";
+        if (!info.exitSignal.empty()) line += " (signal " + info.exitSignal + ")";
+        if (info.clean && !info.error)
+            applog::info(line);
+        else
+            applog::warn(line);
+    }
+
     void emitStatus(ConnStatus status, const std::string& message, const CloseInfo* close) {
         Json ev = {{"connId", connId_}, {"status", status}};
         if (!message.empty()) ev["message"] = message;
@@ -523,6 +572,7 @@ private:
     std::string preStart_;
     int cols_, rows_, widthPx_, heightPx_;
     ConnStatus status_ = ConnStatus::Connecting;
+    std::optional<Clock::time_point> connectedAt_;  // first time connected (app log)
     std::string serverInfo_;
     std::deque<EventLogEntry> events_;
 

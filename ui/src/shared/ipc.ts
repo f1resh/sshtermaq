@@ -240,6 +240,8 @@ export interface Api {
     /** data: URL of a local (audio) file, null if unreadable. */
     readFileDataUrl(path: string): Promise<string | null>;
     logDirectory(): Promise<string>;
+    /** Writes one of the UI's own errors or warnings into the app log (logs/sshtermaq.log). */
+    log(level: 'warn' | 'error', message: string): void;
     /** Main asks the renderer whether it may close (connected sessions). Renderer answers via confirmClose. */
     onCloseRequested(cb: () => void): Unsubscribe;
     confirmClose(allow: boolean): void;
@@ -436,6 +438,7 @@ export const API_SCHEMA = {
     listFonts: 'invoke',
     readFileDataUrl: 'invoke',
     logDirectory: 'invoke',
+    log: 'send',
     onCloseRequested: 'event',
     confirmClose: 'send',
     quit: 'send'

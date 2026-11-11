@@ -10,9 +10,9 @@ them depends on another.
 
 | Part | What it tests | Framework | Where | Automated | Size | Run time |
 |---|---|---|---|---|---|---|
-| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 217 test cases | about 1 minute |
-| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar; the bridge contract between the UI, the native host and the mock backend | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 11 files, 117 tests | under 2 seconds |
-| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes | Playwright Test | `ui/e2e/*.spec.ts` | yes | 4 files, 19 tests, each run twice (38) | about 1–1.5 minutes |
+| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 218 test cases | about 1 minute |
+| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 12 files, 123 tests | under 2 seconds |
+| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection | Playwright Test | `ui/e2e/*.spec.ts` | yes | 5 files, 21 tests, each run twice (42) | about 1–1.5 minutes |
 | **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs` | no, run by hand | no saved scenarios | seconds |
 
 The browser tests cover the main screens, not every dialog: settings, import, the key generator and the file manager
@@ -196,7 +196,7 @@ TEST_CASE("ssh: password authentication, shell echo and exit code", "[ssh]") {
 
 ## 5. What is tested
 
-### Native tests (217 test cases)
+### Native tests (218 test cases)
 
 215 run by default; `putty: real registry smoke test` and `codepage (Windows): regenerate the tables` are hidden. The **Needs** column shows the tool without which a
 test case is skipped. On macOS every suite runs; its `platform_ui` has the macOS local files tests (listed after
@@ -237,9 +237,9 @@ Command line (PuTTY-compatible options, `ssh://` / `sftp://` URLs, `-load`, `--v
 | ui: content types by extension | `[app][ui]` |  | `ui_tests.cpp` |
 | ui: files embedded as resources are found by path | `[app][ui]` |  | `ui_tests.cpp` |
 
-#### core — `st_test_core.exe` (5)
+#### core — `st_test_core.exe` (6)
 
-Strings (UTF-8 paths, UTF-8 validation, UTF-16LE), crypto helpers, session defaults and lenient JSON parsing, bridge message routing. *Kind: unit.* Source: [native/tests/core](../native/tests/core).
+Strings (UTF-8 paths, UTF-8 validation, UTF-16LE), crypto helpers, session defaults and lenient JSON parsing, bridge message routing, app log rotation. *Kind: unit.* Source: [native/tests/core](../native/tests/core).
 
 | Test case | Tags | Needs (skipped without) | File |
 |---|---|---|---|
@@ -248,6 +248,7 @@ Strings (UTF-8 paths, UTF-8 validation, UTF-16LE), crypto helpers, session defau
 | crypto: base64 + fingerprint | — |  | `core_tests.cpp` |
 | types: session defaults and lenient parsing | — |  | `core_tests.cpp` |
 | bridge: invoke, send and events | — |  | `core_tests.cpp` |
+| log: a full log is kept as `<name>.1.log` and a new one starts | — |  | `core_tests.cpp` |
 
 #### keys — `st_test_keys.exe` (7)
 
@@ -524,7 +525,7 @@ Self-tests of the fake servers, validated with independent clients (`plink`, `ps
 | TestSshServer serves SFTP to psftp | `[support][plink]` | PuTTY `psftp` | `support_tests.cpp` |
 | TestSshServer honours local forwarding from plink | `[support][plink]` | PuTTY `plink` | `support_tests.cpp` |
 
-### UI unit tests (117 tests)
+### UI unit tests (123 tests)
 
 #### `actions.test.ts` (7)
 
@@ -721,7 +722,20 @@ The bridge contract: `API_SCHEMA` against the native host's sources and the mock
 | mock backend | registers only channels of the schema, with their kind |
 | mock backend | emits only events of the schema |
 
-### UI browser tests (19 tests, each run as `windows` and `macos`)
+#### `reportError.test.ts` (6)
+
+The UI's own errors in the app log (`app:log`): how errors are described, repeats dropped, the cap, the window's error events. Source: [ui/src/bridge/reportError.test.ts](../ui/src/bridge/reportError.test.ts).
+
+| Group | Test |
+|---|---|
+| describeError | keeps a stack that already starts with the message (Chromium) |
+| describeError | puts the message in front of a stack without it (WebKit) |
+| describeError | describes things that are not errors |
+| reportError | writes to the app log once per distinct error |
+| reportError | stops after 50 reports |
+| reportError | reports uncaught errors and unhandled rejections from the window |
+
+### UI browser tests (21 tests, each run as `windows` and `macos`)
 
 Source: [ui/e2e](../ui/e2e).
 
@@ -746,6 +760,8 @@ Source: [ui/e2e](../ui/e2e).
 | `terminal.spec.ts` | closing the tab returns to the welcome screen (after "Close tab?") |
 | `terminal.spec.ts` | quick connect opens a session from user@host |
 | `terminal.spec.ts` | split right from the command palette makes two panes |
+| `reconnect.spec.ts` | after a lost connection and Restart, the new session starts below the old output (which stays whole), after an empty line |
+| `reconnect.spec.ts` | after a lost connection and Restart, the SFTP panel stays in the folder it showed |
 
 ## 6. How to run the tests
 
