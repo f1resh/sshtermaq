@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 # The version of SSHTermaq (x.y.z): the only place to change it. The 4th part of the file version, the build number,
 # and the commit come from git on every build (cmake/BuildInfo.cmake). See docs/BUILDING.md, "Versions".
-project(SSHTermaq VERSION 1.0.0 LANGUAGES C CXX)
+project(SSHTermaq VERSION 1.1.0 LANGUAGES C CXX)
 if(NOT PROJECT_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
   message(FATAL_ERROR "Give the version as x.y.z in project(SSHTermaq VERSION ...), not '${PROJECT_VERSION}'")
 endif()
