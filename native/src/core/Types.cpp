@@ -38,11 +38,30 @@ SessionConfig sessionFromJson(const Json& j) {
 std::string sessionLabel(const SessionConfig& s) {
     if (!s.name.empty()) return s.name;
     if (s.protocol == Protocol::Serial) return s.serial.line;
+    if (s.protocol == Protocol::Local) return localProgramName(s.local.command);
     std::string out;
     if (!s.username.empty()) out += s.username + "@";
     out += s.host;
     if (s.port && s.port != defaultPort(s.protocol)) out += ":" + std::to_string(s.port);
     return out;
+}
+
+std::string localProgramName(const std::string& command) {
+    std::string c = trim(command);
+    if (c.empty()) return "Local terminal";
+    // The program: the first word, or the quoted first part ("C:\Program Files\...\pwsh.exe" -NoLogo).
+    std::string program;
+    if (c[0] == '"' || c[0] == '\'') {
+        const size_t end = c.find(c[0], 1);
+        program = c.substr(1, end == std::string::npos ? std::string::npos : end - 1);
+    } else {
+        program = c.substr(0, c.find_first_of(" \t"));
+    }
+    const size_t slash = program.find_last_of("/\\");
+    if (slash != std::string::npos) program = program.substr(slash + 1);
+    const std::string lower = toLower(program);
+    if (lower.size() > 4 && lower.compare(lower.size() - 4, 4, ".exe") == 0) program.resize(program.size() - 4);
+    return program.empty() ? "Local terminal" : program;
 }
 
 std::string normalizeFolder(const std::string& folder) {

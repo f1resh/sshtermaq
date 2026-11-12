@@ -14,6 +14,7 @@
 #include "platform/ui/HostWindow.h"
 #include "platform/ui/Shell.h"
 #include "store/Store.h"
+#include "transport/LocalTransport.h"
 #include "transport/SerialTransport.h"
 
 #include <filesystem>
@@ -216,6 +217,9 @@ void registerCoreHandlers(const CoreHandlerContext& c) {
 
     /* ---- serial ---- */
     b.handleAsync("serial:listPorts", [](const Json&) { return Json(listSerialPorts()); });
+
+    /* ---- local terminals ---- */
+    b.handleAsync("shells:list", [](const Json&) { return Json(listLocalShells()); });
 
     /* ---- dialogs (run on the pool; the dialog itself is marshalled to the UI thread) ---- */
     b.handleAsync("dialog:openFile", [](const Json& a) {

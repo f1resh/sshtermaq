@@ -2,7 +2,7 @@
  * Shown when no tab is open: quick connect, recent sessions, PuTTY import call-to-action, shortcuts.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Download, Plus, Server, Settings } from 'lucide-react';
+import { ArrowRight, Download, Plus, Server, Settings, SquareTerminal } from 'lucide-react';
 import { api } from '@/bridge/api';
 import { runCommand } from '@/commands/commands';
 import { shortcutLabel } from '@/commands/keybindings';
@@ -10,6 +10,7 @@ import { applyQuickConnect, parseQuickConnect } from '@/components/quickconnect/
 import { connectSavedSession, connectSession, createAdHocSession, newSessionDraft, reportError } from '@/commands/actions';
 import { Button, Kbd } from '@/components/ui';
 import { useSessions } from '@/store/data';
+import { useShells } from '@/store/shells';
 import { useUi } from '@/store/ui';
 import { sessionLabel } from '@shared/defaults';
 import { isMac, osTerms } from '@shared/platform';
@@ -43,6 +44,7 @@ export function Welcome() {
     };
   }, []);
 
+  const hasShells = useShells((st) => (st.shells?.length ?? 0) > 0);
   const recent = useMemo(
     () =>
       [...sessions]
@@ -107,6 +109,11 @@ export function Welcome() {
           <Button icon={<Plus size={15} />} onClick={() => newSessionDraft()}>
             New session
           </Button>
+          {hasShells && (
+            <Button icon={<SquareTerminal size={15} />} onClick={() => runCommand('tab.newLocal')} title={`New local terminal (${shortcutLabel('tab.newLocal')})`}>
+              Local terminal
+            </Button>
+          )}
           {puttyCount > 0 && (
             <Button icon={<Download size={15} />} onClick={() => useUi.getState().openDialog({ type: 'import', source: 'putty-registry' })}>
               Import {puttyCount} PuTTY session{puttyCount === 1 ? '' : 's'}

@@ -5,11 +5,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Server, TerminalSquare } from 'lucide-react';
-import { connectSavedSession } from '@/commands/actions';
+import { connectSavedSession, openLocalTerminal } from '@/commands/actions';
 import { COMMANDS, recentCommands, runCommand } from '@/commands/commands';
 import { shortcutLabel } from '@/commands/keybindings';
 import { cx, Kbd } from '@/components/ui';
 import { useSessions } from '@/store/data';
+import { useShells } from '@/store/shells';
 import { useUi } from '@/store/ui';
 import { sessionLabel } from '@shared/defaults';
 import type { CommandId } from '@shared/types';
@@ -77,6 +78,7 @@ export function CommandPalette() {
 
 function PaletteInner({ initialMode }: { initialMode: 'all' | 'sessions' | 'commands' }) {
   const sessions = useSessions((s) => s.sessions);
+  const shells = useShells((s) => s.shells);
   const [query, setQuery] = useState(initialMode === 'commands' ? '>' : initialMode === 'sessions' ? '@' : '');
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -100,7 +102,10 @@ function PaletteInner({ initialMode }: { initialMode: 'all' | 'sessions' | 'comm
     if (showSessions) {
       for (const s of sessions) {
         const label = s.name || sessionLabel(s);
-        const detail = [s.folder, s.protocol === 'serial' ? s.serial.line : `${s.username ? s.username + '@' : ''}${s.host}`]
+        const detail = [
+          s.folder,
+          s.protocol === 'serial' ? s.serial.line : s.protocol === 'local' ? s.local.command : `${s.username ? s.username + '@' : ''}${s.host}`
+        ]
           .filter(Boolean)
           .join(' · ');
         const m = fuzzy(q, label) ?? (q ? fuzzy(q, `${label} ${detail}`) : null);
@@ -136,9 +141,26 @@ function PaletteInner({ initialMode }: { initialMode: 'all' | 'sessions' | 'comm
         });
       }
     }
+    if (showCommands) {
+      // One entry per installed shell: "Tab: New local terminal: Git Bash".
+      for (const sh of shells ?? []) {
+        const label = `Tab: New local terminal: ${sh.name}`;
+        const m = fuzzy(q, label);
+        if (!m) continue;
+        out.push({
+          key: 'l:' + sh.id,
+          kind: 'command',
+          label,
+          detail: '',
+          run: () => void openLocalTerminal(sh),
+          score: m.score,
+          match: m.match
+        });
+      }
+    }
     out.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
     return out.slice(0, 200);
-  }, [query, sessions]);
+  }, [query, sessions, shells]);
 
   useEffect(() => setIndex(0), [query]);
   useEffect(() => {

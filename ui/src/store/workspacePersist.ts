@@ -132,7 +132,9 @@ export function deserializeWorkspace(
           connId: connIdOf(id, 1),
           status: 'idle',
           hasActivity: false,
-          bell: false
+          bell: false,
+          // A local shell is started on purpose, not just because the tab came back.
+          deferStart: session.protocol === 'local' && !files ? true : undefined
         };
         return { type: 'pane', paneId: id };
       }

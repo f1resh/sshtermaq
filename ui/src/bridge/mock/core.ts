@@ -1,4 +1,5 @@
 import { createDefaultSession, createDefaultSettings, deepMerge, normalizeFolder, normalizeSession } from '@shared/defaults';
+import { isMac } from '@shared/platform';
 import type { AppSettings, KnownHost, SessionConfig } from '@shared/types';
 import type { MockContext } from './index';
 
@@ -210,6 +211,22 @@ export function registerCoreMocks(ctx: MockContext): void {
   ctx.handle('dialog:openDirectory', () => null);
   ctx.handle('dialog:saveFile', () => null);
   ctx.handle('dialog:saveTextFile', () => null);
+
+  /* local shells */
+  ctx.handle('shells:list', () =>
+    isMac
+      ? [
+          { id: '/bin/zsh', name: 'zsh', command: '/bin/zsh -l', environment: [], isDefault: true },
+          { id: '/bin/bash', name: 'bash', command: '/bin/bash -l', environment: [], isDefault: false }
+        ]
+      : [
+          { id: 'cmd', name: 'Command Prompt', command: String.raw`"C:\Windows\System32\cmd.exe"`, environment: [], isDefault: false },
+          { id: 'powershell', name: 'Windows PowerShell', command: String.raw`"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo`, environment: [], isDefault: false },
+          { id: 'pwsh', name: 'PowerShell 7', command: String.raw`"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo`, environment: [], isDefault: true },
+          { id: 'git-bash', name: 'Git Bash', command: String.raw`"C:\Program Files\Git\bin\bash.exe" --login -i`, environment: [], isDefault: false },
+          { id: 'wsl:Ubuntu', name: 'Ubuntu (WSL)', command: String.raw`"C:\Windows\System32\wsl.exe" -d "Ubuntu" --cd ~`, environment: [], isDefault: false }
+        ]
+  );
 
   /* serial */
   ctx.handle('serial:listPorts', () => [

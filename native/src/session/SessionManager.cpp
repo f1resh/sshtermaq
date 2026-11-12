@@ -502,6 +502,8 @@ private:
         std::string target = Json(session_.protocol).get<std::string>() + " ";
         if (session_.protocol == Protocol::Serial) {
             target += session_.serial.line;
+        } else if (session_.protocol == Protocol::Local) {
+            target += localProgramName(session_.local.command);
         } else {
             const bool ipv6 = session_.host.find(':') != std::string::npos;
             target += (ipv6 ? "[" + session_.host + "]" : session_.host) + ":" + std::to_string(session_.port);
@@ -766,6 +768,8 @@ void SessionManager::open(const ConnOpenRequest& reqIn) {
     if (trim(req.connId).empty()) throw std::invalid_argument("Connection id is required");
     if (s.protocol == Protocol::Serial) {
         if (trim(s.serial.line).empty()) throw std::invalid_argument("Serial line is required");
+    } else if (s.protocol == Protocol::Local) {
+        s.translation.charset = "UTF-8";  // a pseudo-terminal speaks UTF-8 (ConPTY always; macOS with LANG set)
     } else {
         s.host = trim(s.host);
         if (s.host.empty()) throw std::invalid_argument("Host name is required");

@@ -16,12 +16,13 @@ namespace st {
 /* Enums                                                                     */
 /* ------------------------------------------------------------------------ */
 
-enum class Protocol { Ssh, Telnet, Rlogin, Raw, Serial };
+enum class Protocol { Ssh, Telnet, Rlogin, Raw, Serial, Local };
 NLOHMANN_JSON_SERIALIZE_ENUM(Protocol, {{Protocol::Ssh, "ssh"},
                                         {Protocol::Telnet, "telnet"},
                                         {Protocol::Rlogin, "rlogin"},
                                         {Protocol::Raw, "raw"},
-                                        {Protocol::Serial, "serial"}})
+                                        {Protocol::Serial, "serial"},
+                                        {Protocol::Local, "local"}})
 
 enum class TriState { Auto, On, Off };
 NLOHMANN_JSON_SERIALIZE_ENUM(TriState, {{TriState::Auto, "auto"}, {TriState::On, "on"}, {TriState::Off, "off"}})
@@ -211,6 +212,16 @@ struct SerialOptions {
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(SerialOptions, line, baudRate, dataBits, stopBits, parity, flowControl)
 
+/** A local terminal: a shell (or any program) on this computer, in a pseudo-terminal. Its environment variables are
+ *  ConnectionOptions::environment, its TERM is ConnectionOptions::terminalType. */
+struct LocalOptions {
+    /** The command line (platform/sys/Pty.h, Options::command); "" = the default shell. */
+    std::string command;
+    /** The folder it starts in; "" = the home folder. A leading "~" is the home folder too. */
+    std::string startDir;
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(LocalOptions, command, startDir)
+
 struct TerminalOptions {
     bool autoWrap = true;
     TriState localEcho = TriState::Auto;
@@ -304,6 +315,7 @@ struct SessionConfig {
     TelnetOptions telnet;
     RloginOptions rlogin;
     SerialOptions serial;
+    LocalOptions local;
     TerminalOptions terminal;
     KeyboardOptions keyboard;
     /** AppearanceOverrides — UI-owned, passed through untouched (may contain customScheme, fontFamily, ...). */
@@ -313,7 +325,7 @@ struct SessionConfig {
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(SessionConfig, id, name, folder, color, notes, protocol, host, port, username,
                                                 openAs, createdAt, updatedAt, lastUsedAt, connection, proxy, ssh, telnet, rlogin, serial,
-                                                terminal, keyboard, appearance, translation, logging)
+                                                local, terminal, keyboard, appearance, translation, logging)
 
 /** Default port for a protocol (ssh 22, telnet 23, rlogin 513, raw/serial 0). */
 int defaultPort(Protocol p);
@@ -321,8 +333,10 @@ int defaultPort(Protocol p);
 SessionConfig makeDefaultSession();
 /** Parse leniently: unknown/missing fields -> defaults. Throws only on wrong JSON types. */
 SessionConfig sessionFromJson(const Json& j);
-/** "name", else "user@host:port". */
+/** "name", else "user@host:port" (serial: the line; local: the program's name). */
 std::string sessionLabel(const SessionConfig& s);
+/** A local terminal's program name for labels: `"C:\...\pwsh.exe" -NoLogo` → "pwsh", "/bin/zsh -l" → "zsh". */
+std::string localProgramName(const std::string& command);
 /** Normalize a folder path ("/a//b/" -> "a/b"). */
 std::string normalizeFolder(const std::string& folder);
 /** Milliseconds since Unix epoch. */
@@ -693,6 +707,16 @@ struct SerialPortInfo {
     std::string manufacturer;
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(SerialPortInfo, path, friendlyName, manufacturer)
+
+/** A shell installed on this computer, for "New local terminal" (platform/sys/Pty.h, listShells). */
+struct LocalShellInfo {
+    std::string id;
+    std::string name;
+    std::string command;
+    std::vector<EnvVar> environment;
+    bool isDefault = false;
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(LocalShellInfo, id, name, command, environment, isDefault)
 
 struct FileDialogFilter {
     std::string name;

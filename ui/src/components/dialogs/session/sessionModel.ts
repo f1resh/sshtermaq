@@ -3,7 +3,7 @@
  * host-string parsing and the settings patch used when saving "Default Settings".
  * No React / bridge imports so it can be unit tested in node.
  */
-import { DEFAULT_PORTS, newId, normalizeFolder } from '@shared/defaults';
+import { DEFAULT_PORTS, localProgramName, newId, normalizeFolder } from '@shared/defaults';
 import { osTerms } from '@shared/platform';
 import type { AppearanceOverrides, PortForward, Protocol, SessionConfig } from '@shared/types';
 
@@ -42,7 +42,7 @@ const NETWORK: readonly Protocol[] = ['ssh', 'telnet', 'rlogin', 'raw'];
 
 export const SESSION_SECTIONS: readonly SectionDef[] = [
   { id: 'session', label: 'Session', group: 'General', depth: 0 },
-  { id: 'connection', label: 'Connection', group: 'General', depth: 0, protocols: NETWORK },
+  { id: 'connection', label: 'Connection', group: 'General', depth: 0, protocols: [...NETWORK, 'local'] },
   { id: 'proxy', label: 'Proxy', group: 'General', depth: 0, protocols: NETWORK },
   { id: 'ssh', label: 'SSH', group: 'Protocol', depth: 0, protocols: ['ssh'] },
   { id: 'ssh.auth', label: 'Authentication', group: 'Protocol', depth: 1, protocols: ['ssh'] },
@@ -222,7 +222,9 @@ export function validateSession(s: SessionConfig, ctx: ValidationContext): Valid
   const warnings: Record<string, string> = {};
   const isDefault = !!ctx.isDefault;
 
-  if (s.protocol === 'serial') {
+  if (s.protocol === 'local') {
+    // Nothing required: an empty command line is the default shell, an empty folder the home folder.
+  } else if (s.protocol === 'serial') {
     if (!s.serial.line.trim()) errors['serial.line'] = `Serial line is required (e.g. ${osTerms.serialLine})`;
     if (!Number.isInteger(s.serial.baudRate) || s.serial.baudRate <= 0) errors['serial.baudRate'] = 'Speed must be a positive number';
   } else {
@@ -248,7 +250,9 @@ export function validateSession(s: SessionConfig, ctx: ValidationContext): Valid
     });
 
     const p = s.proxy;
-    if (PROXY_NEEDS_ENDPOINT.has(p.type)) {
+    if (s.protocol === 'local') {
+      // No network, no proxy.
+    } else if (PROXY_NEEDS_ENDPOINT.has(p.type)) {
       if (!p.host.trim()) errors['proxy.host'] = 'Proxy host is required';
       else if (!isValidHost(p.host)) errors['proxy.host'] = 'Not a valid host name or IP address';
       if (!isValidPort(p.port)) errors['proxy.port'] = 'Port must be 1–65535';
@@ -317,7 +321,13 @@ export function switchProtocol(s: SessionConfig, protocol: Protocol): SessionCon
   if (s.protocol === protocol) return s;
   const oldDefault = DEFAULT_PORTS[s.protocol];
   const keepPort = s.port && s.port !== oldDefault;
-  return { ...s, protocol, port: keepPort ? s.port : DEFAULT_PORTS[protocol] };
+  const next = { ...s, protocol, port: keepPort ? s.port : DEFAULT_PORTS[protocol] };
+  if (protocol === 'local') {
+    // A pseudo-terminal speaks UTF-8, and a shell's tab closes when it exits cleanly, as in terminal apps.
+    next.translation = { ...s.translation, charset: 'UTF-8' };
+    if (s.terminal.closeOnExit === 'never') next.terminal = { ...s.terminal, closeOnExit: 'clean' };
+  }
+  return next;
 }
 
 /** New session from a template (e.g. settings.defaultSession): fresh id, timestamps, empty name. */
@@ -337,6 +347,7 @@ export function sessionFromTemplate(template: SessionConfig, overrides: Partial<
 /** Name used when the user leaves it empty. */
 export function fallbackSessionName(s: SessionConfig): string {
   if (s.protocol === 'serial') return s.serial.line || 'Serial';
+  if (s.protocol === 'local') return localProgramName(s.local.command);
   const user = s.username ? `${s.username}@` : '';
   const port = s.port && s.port !== DEFAULT_PORTS[s.protocol] ? `:${s.port}` : '';
   return `${user}${s.host}${port}` || 'New session';

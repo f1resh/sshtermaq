@@ -50,6 +50,7 @@ import type {
   PromptRequest,
   PromptResponse,
   SerialPortInfo,
+  LocalShellInfo,
   SessionConfig,
   SftpEntry,
   SftpOpenOptions,
@@ -203,6 +204,10 @@ export interface Api {
   };
   serial: {
     listPorts(): Promise<SerialPortInfo[]>;
+  };
+  shells: {
+    /** The shells installed here, for local terminals; empty where the OS cannot host them. */
+    list(): Promise<LocalShellInfo[]>;
   };
   dialog: {
     openFile(opts?: FileDialogOptions): Promise<string | null>;
@@ -408,6 +413,9 @@ export const API_SCHEMA = {
   },
   serial: {
     listPorts: 'invoke'
+  },
+  shells: {
+    list: 'invoke'
   },
   dialog: {
     openFile: 'invoke',

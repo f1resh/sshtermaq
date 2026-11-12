@@ -10,9 +10,9 @@ them depends on another.
 
 | Part | What it tests | Framework | Where | Automated | Size | Run time |
 |---|---|---|---|---|---|---|
-| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 218 test cases | about 1 minute |
-| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 12 files, 123 tests | under 2 seconds |
-| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection | Playwright Test | `ui/e2e/*.spec.ts` | yes | 5 files, 21 tests, each run twice (42) | about 1–1.5 minutes |
+| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 229 test cases | about 1 minute |
+| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions and restore | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 13 files, 126 tests | under 2 seconds |
+| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals | Playwright Test | `ui/e2e/*.spec.ts` | yes | 6 files, 24 tests, each run twice (48) | about 1–1.5 minutes |
 | **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs` | no, run by hand | no saved scenarios | seconds |
 
 The browser tests cover the main screens, not every dialog: settings, import, the key generator and the file manager
@@ -196,7 +196,7 @@ TEST_CASE("ssh: password authentication, shell echo and exit code", "[ssh]") {
 
 ## 5. What is tested
 
-### Native tests (218 test cases)
+### Native tests (229 test cases)
 
 215 run by default; `putty: real registry smoke test` and `codepage (Windows): regenerate the tables` are hidden. The **Needs** column shows the tool without which a
 test case is skipped. On macOS every suite runs; its `platform_ui` has the macOS local files tests (listed after
@@ -264,9 +264,9 @@ Key generation, PuTTY PPK v2/v3 read/write and encryption, OpenSSH <-> PPK conve
 | plink authenticates with PPK files written by us | `[keys][plink]` | PuTTY `plink` | `keys_tests.cpp` |
 | detectKeyFormat | `[keys]` |  | `keys_tests.cpp` |
 
-#### net — `st_test_net.exe` (27)
+#### net — `st_test_net.exe` (32)
 
-Local echo / line editing, proxy rules, sockets, SOCKS5 handshake, Raw / Telnet / Rlogin against scripted servers, and the socket semantics every OS must reproduce (`[edge]`: partial writes, idle CPU, FIN and RST, urgent data, many sockets, proxy commands). *Kind: unit + integration.* Source: [native/tests/net](../native/tests/net).
+Local echo / line editing, proxy rules, sockets, SOCKS5 handshake, Raw / Telnet / Rlogin against scripted servers, the local terminal transport with this computer's default shell (Windows: PowerShell; macOS: the login shell), and the socket semantics every OS must reproduce (`[edge]`: partial writes, idle CPU, FIN and RST, urgent data, many sockets, proxy commands). *Kind: unit + integration.* Source: [native/tests/net](../native/tests/net).
 
 | Test case | Tags | Needs (skipped without) | File |
 |---|---|---|---|
@@ -297,10 +297,15 @@ Local echo / line editing, proxy rules, sockets, SOCKS5 handshake, Raw / Telnet 
 | edge: connections work while many other sockets are open | `[net][edge]` |  | `semantics_tests.cpp` |
 | edge: a proxy command's output reaches the session, its errors the event log | `[net][edge][proxy]` |  | `semantics_tests.cpp` |
 | edge: closing the session ends a running proxy command promptly | `[net][edge][proxy]` |  | `semantics_tests.cpp` |
+| local: program names for labels | `[local]` |  | `local_transport_tests.cpp` |
+| local: there is a default shell | `[local]` |  | `local_transport_tests.cpp` |
+| local: the default shell runs, takes input and reports its exit code | `[local]` |  | `local_transport_tests.cpp` |
+| local: closing ends the shell, cleanly and once | `[local]` |  | `local_transport_tests.cpp` |
+| local: a missing start folder fails with a readable reason | `[local]` |  | `local_transport_tests.cpp` |
 
-#### platform — `st_test_platform.exe` (20)
+#### platform — `st_test_platform.exe` (26)
 
-The platform layer's tier 0 (`native/src/platform/sys`): what every OS's implementation must do the same way (files and atomic writes, UTF-8 paths, file names, whether letter case counts in a folder, environment, time, secrets, code pages, registry), plus each OS's own rules: on Windows NTFS names, the Mark-of-the-Web and the check that the code page tables other OSes use are Windows' own (`[.generate]` rewrites them from Windows); on macOS (26 cases there) APFS names, the Local Network hint of failed connects, private atomic writes, executable types and the quarantine attribute (`[.keychain]` tries the real Keychain), the serial port listing, serial ports driven through a pseudo-terminal (data both ways, exclusive use, a vanished device, settings macOS lacks) and the `SSH_AUTH_SOCK` agent client against OpenSSH's `ssh-agent` (skipped without it). Uses no test servers, so it builds on every OS first. *Kind: unit (file system, pseudo-terminals, ssh-agent).* Source: [native/tests/platform](../native/tests/platform) (`common/` plus the OS's folder).
+The platform layer's tier 0 (`native/src/platform/sys`): what every OS's implementation must do the same way (files and atomic writes, UTF-8 paths, file names, whether letter case counts in a folder, environment, time, secrets, code pages, registry), the pseudo-terminals of local terminals (`[pty]`: output and exit code, input, resize, environment, a non-ASCII start folder, ending the program with what it started, errors, the shell list; Windows: ConPTY with `cmd.exe`; POSIX: `/bin/sh`, also that the program gets default signal handling), plus each OS's own rules: on Windows NTFS names, the Mark-of-the-Web and the check that the code page tables other OSes use are Windows' own (`[.generate]` rewrites them from Windows); on macOS (33 cases there) APFS names, the Local Network hint of failed connects, private atomic writes, executable types and the quarantine attribute (`[.keychain]` tries the real Keychain), the serial port listing, serial ports driven through a pseudo-terminal (data both ways, exclusive use, a vanished device, settings macOS lacks) and the `SSH_AUTH_SOCK` agent client against OpenSSH's `ssh-agent` (skipped without it). Uses no test servers, so it builds on every OS first. *Kind: unit (file system, pseudo-terminals, ssh-agent).* Source: [native/tests/platform](../native/tests/platform) (`common/` plus the OS's folder).
 
 | Test case | Tags | Needs (skipped without) | File |
 |---|---|---|---|
@@ -324,6 +329,14 @@ The platform layer's tier 0 (`native/src/platform/sys`): what every OS's impleme
 | codepage (Windows): the single-byte tables are Windows' own | `[platform][codepage]` |  | `codepage_win_tests.cpp` |
 | codepage (Windows): the lead bytes are Windows' own | `[platform][codepage]` |  | `codepage_win_tests.cpp` |
 | codepage (Windows): regenerate the tables | `[.generate]` | hidden: runs only when its tag is given (rewrites the tables) | `codepage_win_tests.cpp` |
+| pty (Windows): ConPTY is there on the Windows versions we build for | `[platform][pty]` |  | `pty_win_tests.cpp` |
+| pty (Windows): runs a program, passes its output and exit code | `[platform][pty]` |  | `pty_win_tests.cpp` |
+| pty (Windows): input, resize, environment and a non-ASCII start folder | `[platform][pty]` |  | `pty_win_tests.cpp` |
+| pty (Windows): kill ends the program and what it started | `[platform][pty]` |  | `pty_win_tests.cpp` |
+| pty (Windows): a missing program or start folder is a readable error | `[platform][pty]` |  | `pty_win_tests.cpp` |
+| pty (Windows): the shell list has Command Prompt and one default | `[platform][pty]` |  | `pty_win_tests.cpp` |
+
+On macOS, `pty_posix_tests.cpp` has the POSIX counterparts (7): output and exit code, command-line splitting, input / resize / environment / a non-ASCII folder, default signal handling for the program, kill hangs it up, readable errors, and the shell list starting with the login shell.
 
 #### platform_ui — `st_test_platform_ui.exe` (8)
 
@@ -633,7 +646,7 @@ Workspace store: automatic tab titles for each Tab titles setting (terminal titl
 | closing panes of a split tab | keeps the active pane when another one closes |
 | closing panes of a split tab | closes the tab with its last pane |
 
-#### `workspacePersist.test.ts` (2)
+#### `workspacePersist.test.ts` (3)
 
 Saving and restoring open tabs, including file manager tabs and snapshots from older versions. Source: [ui/src/store/workspacePersist.test.ts](../ui/src/store/workspacePersist.test.ts).
 
@@ -641,6 +654,16 @@ Saving and restoring open tabs, including file manager tabs and snapshots from o
 |---|---|
 | workspace persistence with file manager tabs | keeps the kind and folders, drops the terminal link |
 | workspace persistence with file manager tabs | treats old snapshots as terminals |
+| workspace persistence with local terminals | brings local terminals back waiting to be started, other sessions as before |
+
+#### `local.test.ts` (2)
+
+Local terminal helpers: program names for labels and new local sessions from a shell. Source: [ui/src/shared/local.test.ts](../ui/src/shared/local.test.ts).
+
+| Group | Test |
+|---|---|
+| local terminals | names the program for labels |
+| local terminals | builds an unsaved session from a shell, keeping the template |
 
 #### `keymap.test.ts` (37)
 
@@ -735,7 +758,7 @@ The UI's own errors in the app log (`app:log`): how errors are described, repeat
 | reportError | stops after 50 reports |
 | reportError | reports uncaught errors and unhandled rejections from the window |
 
-### UI browser tests (21 tests, each run as `windows` and `macos`)
+### UI browser tests (24 tests, each run as `windows` and `macos`)
 
 Source: [ui/e2e](../ui/e2e).
 
@@ -762,6 +785,9 @@ Source: [ui/e2e](../ui/e2e).
 | `terminal.spec.ts` | split right from the command palette makes two panes |
 | `reconnect.spec.ts` | after a lost connection and Restart, the new session starts below the old output (which stays whole), after an empty line |
 | `reconnect.spec.ts` | after a lost connection and Restart, the SFTP panel stays in the folder it showed |
+| `local-terminal.spec.ts` | the shortcut (macOS: the File menu) opens the default shell |
+| `local-terminal.spec.ts` | the new tab menu lists the installed shells and opens one |
+| `local-terminal.spec.ts` | the welcome screen has a Local terminal button |
 
 ## 6. How to run the tests
 

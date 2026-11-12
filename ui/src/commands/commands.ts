@@ -33,6 +33,7 @@ import {
   Settings,
   SlidersHorizontal,
   SquarePlus,
+  SquareTerminal,
   SquareX,
   TextSelect,
   X,
@@ -50,6 +51,7 @@ import {
   closePane,
   closeTab,
   newSessionDraft,
+  openLocalTerminal,
   reportError,
   openFileManagerFor,
   restartTab,
@@ -88,6 +90,7 @@ export const COMMANDS: CommandInfo[] = [
   c('app.fullscreen', 'Toggle full screen', 'App', Maximize, { keywords: 'fullscreen' }),
   c('app.keygen', 'Key generator…', 'App', KeyRound, { keywords: 'puttygen ssh-keygen keys ed25519 rsa' }),
   c('tab.new', 'New tab…', 'Tab', Plus, { keywords: 'open session' }),
+  c('tab.newLocal', 'New local terminal', 'Tab', SquareTerminal, { keywords: 'shell console cmd powershell pwsh bash zsh wsl' }),
   c('tab.close', 'Close tab', 'Tab', X, { needsPane: true }),
   c('tab.next', 'Next tab', 'Tab', ChevronRight, { needsPane: true }),
   c('tab.prev', 'Previous tab', 'Tab', ChevronLeft, { needsPane: true }),
@@ -221,6 +224,9 @@ function execute(id: CommandId, target?: CommandTarget): void {
     case 'tab.new':
       // Session picker with a "quick connect to <typed host>" fallback.
       ui.openPalette('@');
+      return;
+    case 'tab.newLocal':
+      void openLocalTerminal();
       return;
     case 'tab.close':
       if (tabId) void closeTab(tabId);

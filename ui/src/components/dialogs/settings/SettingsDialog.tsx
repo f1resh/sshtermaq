@@ -23,8 +23,10 @@ import {
 import { api } from '@/bridge/api';
 import { COMMANDS } from '@/commands/commands';
 import { chordOf, formatChord, normalizeChord } from '@/commands/chords';
+import { shortcutLabel } from '@/commands/keybindings';
 import { Button, Checkbox, Modal, NumberInput, Select, TextArea, TextInput, cx, toast } from '@/components/ui';
 import { useSettings } from '@/store/data';
+import { useShells } from '@/store/shells';
 import { useUi } from '@/store/ui';
 import { APP_THEMES } from '@/theme/appThemes';
 import { BUILTIN_SCHEMES } from '@/theme/schemes';
@@ -257,6 +259,7 @@ function TerminalPage() {
           <SegmentedControl value={t.renderer} onChange={(renderer) => update({ terminal: { renderer } })} size="sm" options={[{ value: 'webgl', label: 'GPU (WebGL)' }, { value: 'dom', label: 'DOM' }]} />
         </SettingRow>
       </Section>
+      <DefaultShellSection value={t.defaultShell} onChange={(defaultShell) => update({ terminal: { defaultShell } })} />
     </>
   );
 }
@@ -715,5 +718,24 @@ function DataPage() {
         </SettingRow>
       </Section>
     </>
+  );
+}
+
+/** Settings › Terminal: the shell "New local terminal" opens. */
+function DefaultShellSection({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+  const shells = useShells((s) => s.shells);
+  useEffect(() => void useShells.getState().load(), []);
+  if (!shells?.length) return null;
+  const system = shells.find((s) => s.isDefault);
+  const options = [
+    { value: '', label: system ? `System default (${system.name})` : 'System default' },
+    ...shells.map((s) => ({ value: s.id, label: s.name }))
+  ];
+  return (
+    <Section title="Local terminal">
+      <SettingRow label="Default shell" description={`What "New local terminal" opens (${shortcutLabel('tab.newLocal') || 'Tab menu'}). Others are in the + menu.`}>
+        <Select aria-label="Default shell" value={shells.some((s) => s.id === value) ? value : ''} options={options} onChange={onChange} />
+      </SettingRow>
+    </Section>
   );
 }

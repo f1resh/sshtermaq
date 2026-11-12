@@ -343,7 +343,9 @@ std::string SessionLog::expandPath(const std::string& tmpl, const SessionConfig&
             case 't': out += twoDigits(when.tm_hour) + twoDigits(when.tm_min) + twoDigits(when.tm_sec); break;
             case 'H':
             case 'h': {
-                const std::string host = s.protocol == Protocol::Serial ? s.serial.line : s.host;
+                const std::string host = s.protocol == Protocol::Serial  ? s.serial.line
+                                         : s.protocol == Protocol::Local ? localProgramName(s.local.command)
+                                                                         : s.host;
                 out += sanitizeFileComponent(host);
                 break;
             }
@@ -352,7 +354,10 @@ std::string SessionLog::expandPath(const std::string& tmpl, const SessionConfig&
             case 'S':
             case 's': {
                 std::string name = s.name;
-                if (trim(name).empty()) name = s.protocol == Protocol::Serial ? s.serial.line : s.host;
+                if (trim(name).empty())
+                    name = s.protocol == Protocol::Serial  ? s.serial.line
+                           : s.protocol == Protocol::Local ? localProgramName(s.local.command)
+                                                           : s.host;
                 out += sanitizeFileComponent(name);
                 break;
             }

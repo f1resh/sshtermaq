@@ -21,6 +21,7 @@ import { ContextMenuHost, ToastHost } from '@/components/ui';
 import { initDataStores, useSessions, useSettings } from '@/store/data';
 import { confirmDialog, useUi } from '@/store/ui';
 import { tabTitle, useWorkspace } from '@/store/workspace';
+import { useShells } from '@/store/shells';
 import { restoreWorkspace, startWorkspaceAutosave } from '@/store/workspacePersist';
 import { initConnEvents } from '@/terminal/connEvents';
 import { ThemeController } from '@/theme/ThemeController';
@@ -53,6 +54,7 @@ async function handleCloseRequest() {
 function useHostWiring(ready: boolean) {
   useEffect(() => {
     const ui = useUi.getState();
+    void useShells.getState().load();  // the "New local terminal" menus are built synchronously
     void api.window.isMaximized().then((m) => ui.set({ maximized: !!m })).catch(() => undefined);
     const offs = [
       api.window.onMaximizedChanged((maximized) => useUi.getState().set({ maximized })),

@@ -50,6 +50,8 @@ export interface PaneState {
   bell: boolean;
   /** One-time password (CLI -pw); consumed by the first connection attempt. */
   oneTimePassword?: string;
+  /** Local terminals restored at start-up: the pane waits (status 'idle') until the user starts it (startPane). */
+  deferStart?: boolean;
 }
 
 export interface TabState {
@@ -97,6 +99,8 @@ export interface WorkspaceState {
   splitPane(paneId: string, direction: SplitDirection, session?: SessionConfig, sessionId?: string | null): string;
   duplicatePane(paneId: string, target: OpenTarget): string | undefined;
   restartPane(paneId: string): void;
+  /** Starts a pane that waits for the user (deferStart). */
+  startPane(paneId: string): void;
   resizeSplit(splitId: string, sizes: number[]): void;
   updatePane(paneId: string, patch: Partial<PaneState>): void;
   /** Applies only if connId is the pane's current connection. */
@@ -382,6 +386,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     set((s) => ({
       tabs: s.tabs.map((t) => ({ ...t, layout: mapSplit(t.layout, splitId, (n) => ({ ...n, sizes })) }))
     }));
+  },
+
+  startPane(paneId) {
+    const p = get().panes[paneId];
+    if (p?.deferStart) get().updatePane(paneId, { deferStart: false });
   },
 
   updatePane(paneId, patch) {

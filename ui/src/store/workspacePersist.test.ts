@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDefaultSession } from '@shared/defaults';
+import { createDefaultSession, createLocalSession } from '@shared/defaults';
 import { deserializeWorkspace, serializeWorkspace } from './workspacePersist';
 import { connIdOf, type PaneState, type TabState } from './workspace';
 
@@ -49,5 +49,28 @@ describe('workspace persistence with file manager tabs', () => {
       () => undefined
     );
     expect(Object.values(restored.panes)[0].kind).toBe('terminal');
+  });
+});
+
+describe('workspace persistence with local terminals', () => {
+  it('brings local terminals back waiting to be started, other sessions as before', () => {
+    const command = String.raw`"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo`;
+    const local = createLocalSession({ id: 'pwsh', name: 'PowerShell 7', command, environment: [], isDefault: true });
+    const panes: Record<string, PaneState> = {
+      l1: pane('l1', 'A', { session: local }),
+      s1: pane('s1', 'B')
+    };
+    const tabs: TabState[] = [
+      { id: 'A', layout: { type: 'pane', paneId: 'l1' }, activePaneId: 'l1', broadcast: false },
+      { id: 'B', layout: { type: 'pane', paneId: 's1' }, activePaneId: 's1', broadcast: false }
+    ];
+    const snap = serializeWorkspace({ tabs, panes, activeTabId: 'A' }, () => false);
+    const restored = deserializeWorkspace(JSON.parse(JSON.stringify(snap)), () => undefined);
+    const all = Object.values(restored.panes);
+    const restoredLocal = all.find((p) => p.session.protocol === 'local')!;
+    expect(restoredLocal.deferStart).toBe(true);
+    expect(restoredLocal.status).toBe('idle');
+    expect(restoredLocal.session.local.command).toBe(command);
+    expect(all.find((p) => p.session.protocol === 'ssh')!.deferStart).toBeUndefined();
   });
 });

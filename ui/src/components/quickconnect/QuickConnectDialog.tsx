@@ -99,7 +99,8 @@ export function QuickConnectDialog({ initial, onClose }: QuickConnectDialogProps
     telnet: 'host:port',
     rlogin: 'user@host',
     raw: 'host:port',
-    serial: `${osTerms.serialLine} or ${osTerms.serialExample}`
+    serial: `${osTerms.serialLine} or ${osTerms.serialExample}`,
+    local: ''
   };
 
   return (

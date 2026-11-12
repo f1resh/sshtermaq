@@ -185,7 +185,7 @@ st_library(st_net SOURCES ${net_src} DEPS st_core)
 
 st_glob(transport_src
   ${ST_SRC}/transport/TelnetTransport*.cpp ${ST_SRC}/transport/RloginTransport*.cpp
-  ${ST_SRC}/transport/RawTransport*.cpp ${ST_SRC}/transport/SerialTransport*.cpp
+  ${ST_SRC}/transport/RawTransport*.cpp ${ST_SRC}/transport/SerialTransport*.cpp ${ST_SRC}/transport/LocalTransport*.cpp
   ${ST_SRC}/transport/Telnet*.cpp ${ST_SRC}/transport/Serial*.cpp
   ${ST_SRC}/session/LineDiscipline*.cpp)
 list(REMOVE_DUPLICATES transport_src)

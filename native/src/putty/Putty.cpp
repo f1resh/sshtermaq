@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <iterator>
 
 namespace st::putty {
 
@@ -799,7 +800,8 @@ RegValues sessionToPutty(const SessionConfig& s) {
         v[k] = r;
     };
     static const char* protos[] = {"ssh", "telnet", "rlogin", "raw", "serial"};
-    setS("Protocol", protos[static_cast<int>(s.protocol)]);
+    const auto proto = static_cast<size_t>(s.protocol);
+    setS("Protocol", proto < std::size(protos) ? protos[proto] : "raw");  // local terminals: PuTTY has none
     setS("HostName", s.host);
     setI("PortNumber", s.port);
     setS("UserName", s.username);

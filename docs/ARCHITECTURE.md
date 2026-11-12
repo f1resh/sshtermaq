@@ -12,7 +12,7 @@ SSHTermaq (C++20; Windows: Win32 + WebView2; macOS: AppKit + WKWebView)
 ├─ bridge/     JSON message router  <── web view messages ──>  UI (React + xterm.js, ui/)
 ├─ store/      sessions.json, settings.json, state.json, known_hosts.json, credentials.json (DPAPI)
 ├─ session/    SessionManager: connections, charset, local echo/edit (ldisc), session logging, prompts
-├─ transport/  Telnet, Rlogin, Raw, Serial  (+ TransportFactory)
+├─ transport/  Telnet, Rlogin, Raw, Serial, Local (a shell in a pseudo-terminal)  (+ TransportFactory)
 ├─ net/        Winsock helpers, proxies (SOCKS4/4a/5, HTTP, Telnet, local command, SSH jump)
 ├─ ssh/        libssh transport: auth (agent/Pageant, keys, kbd-int, password), host keys, PTY,
 │              port forwarding L/R/D, X11, agent forwarding, SFTP task posting
@@ -22,8 +22,8 @@ SSHTermaq (C++20; Windows: Win32 + WebView2; macOS: AppKit + WKWebView)
 ├─ sftp/       file manager backend on SSH connections: RemoteFs over SFTP or SCP, transfer engine (queue,
 │              conflicts, resume, move), find, synchronize, edit with auto-upload
 ├─ localfs/    local:* bridge handlers for the file manager (the OS side: platform/ui/LocalFs)
-└─ platform/   OS-specific code only (platform/README.md): sys/ (files, sockets, ...), ui/ (dialogs, shell,
-               drag & drop of local files with internal drops)
+└─ platform/   OS-specific code only (platform/README.md): sys/ (files, sockets, pseudo-terminals: ConPTY /
+               openpty, ...), ui/ (dialogs, shell, drag & drop of local files with internal drops)
 ```
 
 Linking: everything is static, including the C/C++ runtime (`/MT`), except libssh, which ships as `ssh.dll`
@@ -175,7 +175,7 @@ breaks existing installs. Change one only with a migration that reads the old va
 | Module (agent) | Owns |
 |---|---|
 | `ssh` | `native/src/ssh/**`, `native/tests/ssh/**` |
-| `net` | `native/src/net/**`, `native/src/transport/{Telnet,Rlogin,Raw,Serial}*`, `native/src/session/LineDiscipline.*`, `native/tests/net/**` |
+| `net` | `native/src/net/**`, `native/src/transport/{Telnet,Rlogin,Raw,Serial,Local}*`, `native/src/session/LineDiscipline.*`, `native/tests/net/**` |
 | `keys-import` | `native/src/keys/**`, `native/src/putty/**`, `native/src/importers/**`, `native/tests/{keys,putty}/**`, `native/tests/fixtures/**` |
 | `host` | `native/src/app/**`, `native/src/store/**`, `native/src/core/Types.*` (additions), `native/res/**`, `native/tests/{store,app}/**`, `CMakeLists.txt` (additions only) |
 | `session` | `native/src/session/{SessionManager,Charset,SessionLog}.*`, `native/src/transport/TransportFactory.*`, `native/tests/session/**` |

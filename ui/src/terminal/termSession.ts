@@ -526,7 +526,7 @@ export class TermSession {
     }
     this.bindConnection(pane);
     this.status = pane.status;
-    if (pane.status === 'idle' && this.opened && this.element.isConnected && !openedConns.has(pane.connId)) {
+    if (pane.status === 'idle' && !pane.deferStart && this.opened && this.element.isConnected && !openedConns.has(pane.connId)) {
       this.openConnection(pane);
     }
   }
@@ -577,7 +577,8 @@ export class TermSession {
       setTimeout(() => useWorkspace.getState().closePane(this.paneId), 0);
       return;
     }
-    if (!clean && this.reconnectArmed && useSettings.getState().settings.behavior.reconnect === 'auto') {
+    // A local shell that ended is not "reconnected": that would start a new one nobody asked for.
+    if (!clean && this.reconnectArmed && this.session.protocol !== 'local' && useSettings.getState().settings.behavior.reconnect === 'auto') {
       this.scheduleReconnect();
     }
   }
@@ -753,6 +754,11 @@ export class TermSession {
     if (isEnded(this.status)) {
       // Banner shortcut: Enter / R restarts a finished session.
       if (data === '\r' || data === 'r' || data === 'R') this.restart();
+      return;
+    }
+    if (useWorkspace.getState().panes[this.paneId]?.deferStart) {
+      // A local terminal waiting to be started: Enter starts it.
+      if (data === '\r') useWorkspace.getState().startPane(this.paneId);
       return;
     }
     const ws = useWorkspace.getState();

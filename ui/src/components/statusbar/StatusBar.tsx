@@ -9,6 +9,7 @@ import { cx } from '@/components/ui';
 import { connOfFilesPane } from '@/components/files/filesConn';
 import { useUi } from '@/store/ui';
 import { useWorkspace } from '@/store/workspace';
+import { localProgramName } from '@shared/defaults';
 import './statusbar.css';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -43,15 +44,18 @@ export function StatusBar() {
   const endpoint =
     s.protocol === 'serial'
       ? `${s.serial.line} · ${s.serial.baudRate} baud`
-      : `${s.username ? s.username + '@' : ''}${s.host}${s.port && s.port !== 22 ? ':' + s.port : ''}`;
+      : s.protocol === 'local'
+        ? `${localProgramName(s.local.command)} · ${s.local.startDir.trim() || '~'}`
+        : `${s.username ? s.username + '@' : ''}${s.host}${s.port && s.port !== 22 ? ':' + s.port : ''}`;
   const serverInfo = pane.serverInfo?.split('|').map((x) => x.trim()).filter(Boolean).slice(1).join(' · ');
   const status = filesConn?.status ?? pane.status;
+  const label = pane.deferStart && status === 'idle' ? 'Not started' : (STATUS_LABEL[status] ?? status);
 
   return (
     <footer className="statusbar">
       <span className="statusbar__item" title={filesConn?.message ?? pane.statusMessage}>
         <span className={cx('statusbar__dot', `statusbar__dot--${status}`)} />
-        {STATUS_LABEL[status] ?? status}
+        {label}
       </span>
       <span className="statusbar__item">
         <span className="statusbar__proto">{pane.kind === 'files' ? 'files' : s.protocol}</span>

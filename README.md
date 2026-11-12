@@ -11,7 +11,7 @@
 
 <p align="center">
   For sysadmins, network engineers and developers who know PuTTY and want the same settings in a modern workspace,
-  on the PC and on the Mac. It also speaks Telnet, Rlogin, Raw TCP and serial ports.
+  on the PC and on the Mac. It also speaks Telnet, Rlogin, Raw TCP and serial ports, and opens local shells.
 </p>
 
 <p align="center">
@@ -43,6 +43,8 @@
   and so do the hosts in `~/.ssh/config`.
 - **A modern workspace.** Tabs, split panes, input broadcast to all panes, a command palette, quick connect, sessions
   in folders with search, and your tabs restored at the next start.
+- **Local shells next to your servers.** PowerShell, cmd, Git Bash, WSL or zsh in the same tabs and split panes as
+  your SSH sessions.
 - **A file manager built in.**
   - An SFTP panel next to any SSH terminal, on the terminal's own connection (no second login).
   - A WinSCP-style two-pane tab with drag and drop, a transfer queue, resume, edit-on-server and folder sync.
@@ -123,6 +125,7 @@ Get the files from the [latest release](https://github.com/f1resh/sshtermaq/rele
 | Area | What you get |
 |---|---|
 | Protocols | SSH-2, Telnet (full option negotiation), Rlogin, Raw TCP, Serial (COM ports on Windows, `/dev/cu.*` on macOS, all line settings) |
+| Local terminal | Shells on this computer in tabs and split panes: Command Prompt, Windows PowerShell, PowerShell 7, Git Bash, Cygwin, MSYS2 and WSL distributions on Windows (Windows 10 1809+, ConPTY); your login shell (zsh), bash and the others in `/etc/shells` on macOS. Found automatically; any other program as a custom command line. Open with Ctrl+Shift+\` (macOS ⇧⌘T) or from the + menu; save them as sessions with a start folder and environment variables. Restored tabs wait for Enter instead of starting shells by themselves |
 | SSH auth | Key files (OpenSSH, PEM, PuTTY PPK v2/v3 incl. Argon2 encrypted), agents (Pageant and the Windows OpenSSH agent; ssh-agent on macOS), keyboard-interactive (2FA), password; saved passwords encrypted for your user account (Windows DPAPI, macOS Keychain) |
 | Host keys | Known-hosts store with new/changed-key prompts (SHA256 + MD5), logical host names, import from PuTTY and OpenSSH `known_hosts` |
 | Forwarding | Local (-L), remote (-R) and dynamic SOCKS4/4a/5 (-D) port forwarding, agent forwarding, X11 forwarding (the server only gets a fake cookie; the X server gets the real one from Xauthority, or none) |

@@ -72,4 +72,6 @@ std::string userName() {
     return {};
 }
 
+std::string terminalLocale() { return {}; }  // Windows programs take the language from the system
+
 }  // namespace st::sys

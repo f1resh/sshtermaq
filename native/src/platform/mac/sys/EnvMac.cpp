@@ -1,5 +1,6 @@
 #include "platform/sys/Env.h"
 
+#include <CoreFoundation/CoreFoundation.h>
 #include <mach-o/dyld.h>
 #include <sys/stat.h>
 
@@ -32,6 +33,21 @@ fs::path userDataRoot() {
     fs::path home = homeDirectory();
     if (home.empty()) return {};
     return home / "Library" / "Application Support";
+}
+
+std::string terminalLocale() {
+    // The language and region chosen in System Settings, as Terminal.app sets LANG: "en_GB", "ru_RU", ...
+    std::string id;
+    if (CFLocaleRef loc = CFLocaleCopyCurrent()) {
+        if (CFStringRef s = CFLocaleGetIdentifier(loc)) {
+            char buf[128];
+            if (CFStringGetCString(s, buf, sizeof buf, kCFStringEncodingUTF8)) id = buf;
+        }
+        CFRelease(loc);
+    }
+    id = id.substr(0, id.find('@'));  // "en_GB@rg=..." keeps only the language and region
+    if (id.size() < 5 || id[2] != '_') id = "en_US";
+    return id + ".UTF-8";
 }
 
 }  // namespace st::sys
