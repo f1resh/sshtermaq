@@ -224,7 +224,7 @@ export function registerCoreMocks(ctx: MockContext): void {
           { id: 'powershell', name: 'Windows PowerShell', command: String.raw`"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo`, environment: [], isDefault: false },
           { id: 'pwsh', name: 'PowerShell 7', command: String.raw`"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo`, environment: [], isDefault: true },
           { id: 'git-bash', name: 'Git Bash', command: String.raw`"C:\Program Files\Git\bin\bash.exe" --login -i`, environment: [], isDefault: false },
-          { id: 'wsl:Ubuntu', name: 'Ubuntu (WSL)', command: String.raw`"C:\Windows\System32\wsl.exe" -d "Ubuntu" --cd ~`, environment: [], isDefault: false }
+          { id: 'wsl:Ubuntu', name: 'Ubuntu (WSL)', command: String.raw`"C:\Windows\System32\wsl.exe" -d Ubuntu --cd ~`, environment: [], isDefault: false }
         ]
   );
 

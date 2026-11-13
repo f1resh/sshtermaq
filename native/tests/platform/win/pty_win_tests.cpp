@@ -96,3 +96,14 @@ TEST_CASE("pty (Windows): the shell list has Command Prompt and one default", "[
     }));
     REQUIRE(std::count_if(shells.begin(), shells.end(), [](const auto& s) { return s.isDefault; }) == 1);
 }
+
+TEST_CASE("pty (Windows): WSL distributions are named without quotes", "[platform][pty]") {
+    // wsl.exe keeps quotes as part of the name: -d "Ubuntu" fails with WSL_E_DISTRO_NOT_FOUND.
+    for (const auto& s : sys::pty::listShells()) {
+        if (s.id.rfind("wsl:", 0) != 0) continue;
+        const std::string name = s.id.substr(4);
+        INFO(s.command);
+        CHECK(s.command.find(" -d " + name + " ") != std::string::npos);
+        CHECK(s.command.find('"' + name) == std::string::npos);
+    }
+}

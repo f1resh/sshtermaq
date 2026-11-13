@@ -357,7 +357,9 @@ std::vector<Shell> listShells() {
                 if (RegEnumKeyExW(lxss, i, sub, &len, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
                 const std::string name = narrow(regString(lxss, sub, L"DistributionName"));
                 if (name.empty() || name.rfind("docker-desktop", 0) == 0 || !seen.insert(name).second) continue;
-                out.push_back({"wsl:" + name, name + " (WSL)", commandLine(wsl, "-d \"" + name + "\" --cd ~"), {}, false});
+                // Unquoted: wsl.exe parses its own command line and keeps quotes as part of the name
+                // (WSL_E_DISTRO_NOT_FOUND). Distribution names have no spaces (letters, digits, '.', '-', '_').
+                out.push_back({"wsl:" + name, name + " (WSL)", commandLine(wsl, "-d " + name + " --cd ~"), {}, false});
             }
             RegCloseKey(lxss);
         }

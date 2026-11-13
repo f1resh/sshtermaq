@@ -5,7 +5,7 @@
  *   node scripts/app.mjs --steps scripts/checks/local-terminal.mjs            (macOS: the Debug build in build/mac-*)
  *
  * Opens the default shell with the shortcut, runs commands (environment, UTF-8, the window size), checks that `exit`
- * closes the tab, opens a second shell from the + menu, and restarts nothing by itself. Prints "PASS" / "FAIL" lines
+ * closes the tab, opens a second shell from the + menu and, on Windows, a WSL distribution if there is one. Prints "PASS" / "FAIL" lines
  * and throws on the first failure (so app.mjs exits non-zero). Screenshots go next to --out.
  */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -93,5 +93,21 @@ export default async function localTerminalCheck(page, { bridge, platform, out }
   );
   await sleep(1500);
   await shot('second-shell');
+
+  // 5. Windows: a WSL distribution, if there is one, really starts (wsl.exe is picky about its command line).
+  const wsl = shells.find((s) => s.id.startsWith('wsl:'));
+  if (wsl) {
+    await page.click('.newtab__btn--menu');
+    await sleep(400);
+    if (!(await clickMenuItem(wsl.name))) await fail(`the + menu lists ${wsl.name}`);
+    await waitFor(`${wsl.name} shows a prompt`, async () => {
+      const text = await screen();
+      if (/DISTRO_NOT_FOUND|no distribution with the supplied name/i.test(text)) await fail(`WSL refused the distribution name (${wsl.command})`);
+      return /[$#]\s*$/m.test(text);
+    }, 30000);
+    await typeLine('echo "wsl-$((6*7)):$(uname -s)"');
+    await waitFor(`${wsl.name} runs commands`, showing('wsl-42:Linux'));
+    await shot('wsl');
+  }
   console.log('done: every check passed');
 }

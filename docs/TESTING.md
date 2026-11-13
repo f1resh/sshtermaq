@@ -10,7 +10,7 @@ them depends on another.
 
 | Part | What it tests | Framework | Where | Automated | Size | Run time |
 |---|---|---|---|---|---|---|
-| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 231 test cases | about 1 minute |
+| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 232 test cases | about 1 minute |
 | **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 16 files, 142 tests | under 2 seconds |
 | **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart | Playwright Test | `ui/e2e/*.spec.ts` | yes | 9 files, 32 tests, each run twice (64) | about 1–1.5 minutes |
 | **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs`, `ui/scripts/checks/` | no, run by hand | `checks/local-terminal.mjs` | seconds |
@@ -196,7 +196,7 @@ TEST_CASE("ssh: password authentication, shell echo and exit code", "[ssh]") {
 
 ## 5. What is tested
 
-### Native tests (231 test cases)
+### Native tests (232 test cases)
 
 215 run by default; `putty: real registry smoke test` and `codepage (Windows): regenerate the tables` are hidden. The **Needs** column shows the tool without which a
 test case is skipped. On macOS every suite runs; its `platform_ui` has the macOS local files tests (listed after
@@ -304,7 +304,7 @@ Local echo / line editing, proxy rules, sockets, SOCKS5 handshake, Raw / Telnet 
 | local: closing ends the shell, cleanly and once | `[local]` |  | `local_transport_tests.cpp` |
 | local: a missing start folder fails with a readable reason | `[local]` |  | `local_transport_tests.cpp` |
 
-#### platform — `st_test_platform.exe` (26)
+#### platform — `st_test_platform.exe` (27)
 
 The platform layer's tier 0 (`native/src/platform/sys`): what every OS's implementation must do the same way (files and atomic writes, UTF-8 paths, file names, whether letter case counts in a folder, environment, time, secrets, code pages, registry), the pseudo-terminals of local terminals (`[pty]`: output and exit code, input, resize, environment, a non-ASCII start folder, ending the program with what it started, errors, the shell list; Windows: ConPTY with `cmd.exe`; POSIX: `/bin/sh`, also that the program gets default signal handling), plus each OS's own rules: on Windows NTFS names, the Mark-of-the-Web and the check that the code page tables other OSes use are Windows' own (`[.generate]` rewrites them from Windows); on macOS (33 cases there) APFS names, the Local Network hint of failed connects, private atomic writes, executable types and the quarantine attribute (`[.keychain]` tries the real Keychain), the serial port listing, serial ports driven through a pseudo-terminal (data both ways, exclusive use, a vanished device, settings macOS lacks) and the `SSH_AUTH_SOCK` agent client against OpenSSH's `ssh-agent` (skipped without it). Uses no test servers, so it builds on every OS first. *Kind: unit (file system, pseudo-terminals, ssh-agent).* Source: [native/tests/platform](../native/tests/platform) (`common/` plus the OS's folder).
 
@@ -336,6 +336,7 @@ The platform layer's tier 0 (`native/src/platform/sys`): what every OS's impleme
 | pty (Windows): kill ends the program and what it started | `[platform][pty]` |  | `pty_win_tests.cpp` |
 | pty (Windows): a missing program or start folder is a readable error | `[platform][pty]` |  | `pty_win_tests.cpp` |
 | pty (Windows): the shell list has Command Prompt and one default | `[platform][pty]` |  | `pty_win_tests.cpp` |
+| pty (Windows): WSL distributions are named without quotes | `[platform][pty]` | wsl.exe keeps quotes as part of the name | `pty_win_tests.cpp` |
 
 On macOS, `pty_posix_tests.cpp` has the POSIX counterparts (7): output and exit code, command-line splitting, input / resize / environment / a non-ASCII folder, default signal handling for the program, kill hangs it up, readable errors, and the shell list starting with the login shell.
 
@@ -955,7 +956,7 @@ node scripts/app.mjs --steps scripts/checks/local-terminal.mjs
 
 The same steps on both systems (Debug build): the shell list (at least one, exactly one default), the shortcut opens
 the default shell, `TERM_PROGRAM` / `COLORTERM`, non-ASCII text both ways, the window size and (macOS) `LANG` for
-bash-like shells, `exit` closes the tab, a second shell from the + menu. Prints a `PASS` / `FAIL` line per check and
+bash-like shells, `exit` closes the tab, a second shell from the + menu, and on Windows a WSL distribution if there is one. Prints a `PASS` / `FAIL` line per check and
 exits non-zero on the first failure.
 
 ### `shot.mjs`: the UI in a browser, with the mock backend
