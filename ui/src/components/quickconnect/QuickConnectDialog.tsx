@@ -6,11 +6,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Clock, Save, X, Zap } from 'lucide-react';
 import { api } from '@/bridge/api';
 import { Button, Kbd, Modal, cx } from '@/components/ui';
-import { connectSession, createAdHocSession } from '@/commands/actions';
+import { connectSession, createAdHocSession, openLocalTerminal } from '@/commands/actions';
+import { useSettings } from '@/store/data';
+import { pickDefaultShell, useShells } from '@/store/shells';
 import { useUi } from '@/store/ui';
+import { createLocalSession } from '@shared/defaults';
 import type { Protocol } from '@shared/types';
 import { osTerms } from '@shared/platform';
 import { PROTOCOL_LABELS, ProtocolIcon, sessionSubtitle } from '@/components/layout/sessionVisuals';
+import { localPart, resolveLocalTarget, shellToOpen } from './local';
 import { PROTOCOLS, applyQuickConnect, formatQuickConnect, parseQuickConnect, type QuickConnectTarget } from './parse';
 import './quickconnect.css';
 
@@ -63,11 +67,32 @@ export function QuickConnectDialog({ initial, onClose }: QuickConnectDialogProps
     return () => clearTimeout(t);
   }, []);
 
-  const parsed = useMemo(() => parseQuickConnect(text, protocol), [text, protocol]);
-  const effectiveProtocol = parsed.ok ? parsed.target.protocol : protocol;
+  const shells = useShells((s) => s.shells);
+  useEffect(() => void useShells.getState().load(), []);
+  const defaultShellId = useSettings((s) => s.settings.terminal.defaultShell);
+  /** "local:…" typed, or the Local chip: the text names a shell or is a command line. */
+  const localInput = (input: string) => (protocol === 'local' && localPart(input) === null ? input.trim() : localPart(input));
+  const resolveLocal = (input: string) => {
+    const part = localInput(input);
+    if (part === null) return null;
+    const list = shells ?? [];
+    return resolveLocalTarget(part, list, pickDefaultShell(list, defaultShellId));
+  };
+  const local = resolveLocal(text);
+
+  const parsed = useMemo(() => parseQuickConnect(text, protocol === 'local' ? 'ssh' : protocol), [text, protocol]);
+  const effectiveProtocol = local ? 'local' : parsed.ok ? parsed.target.protocol : protocol;
   const preview = useMemo(() => (parsed.ok ? applyQuickConnect(createAdHocSession(), parsed.target) : null), [parsed]);
 
   const connect = (input = text) => {
+    const target = resolveLocal(input);
+    if (target) {
+      const shell = shellToOpen(target);
+      onClose();
+      void openLocalTerminal(shell ?? undefined);
+      void rememberQuickConnect(`local:${localInput(input)}`);
+      return;
+    }
     const r = parseQuickConnect(input, protocol);
     if (!r.ok) {
       setTouched(true);
@@ -79,6 +104,11 @@ export function QuickConnectDialog({ initial, onClose }: QuickConnectDialogProps
   };
 
   const saveAsSession = () => {
+    if (local) {
+      const draft = createLocalSession(shellToOpen(local), useSettings.getState().settings.defaultSession);
+      useUi.getState().openDialog({ type: 'sessionEditor', draft });
+      return;
+    }
     if (!parsed.ok) {
       setTouched(true);
       return;
@@ -100,8 +130,9 @@ export function QuickConnectDialog({ initial, onClose }: QuickConnectDialogProps
     rlogin: 'user@host',
     raw: 'host:port',
     serial: `${osTerms.serialLine} or ${osTerms.serialExample}`,
-    local: ''
+    local: 'shell (pwsh, bash, wsl…) or a command line; empty: the default shell'
   };
+  const chips: Protocol[] = shells?.length ? [...PROTOCOLS, 'local'] : PROTOCOLS;
 
   return (
     <Modal
@@ -113,18 +144,18 @@ export function QuickConnectDialog({ initial, onClose }: QuickConnectDialogProps
       className="qc"
       footer={
         <>
-          <Button variant="ghost" icon={<Save size={14} />} onClick={saveAsSession} disabled={!parsed.ok} className="qc__save">
+          <Button variant="ghost" icon={<Save size={14} />} onClick={saveAsSession} disabled={!parsed.ok && !local} className="qc__save">
             Save as session…
           </Button>
           <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={() => connect()} disabled={!text.trim()}>
+          <Button variant="primary" onClick={() => connect()} disabled={!text.trim() && !local}>
             Connect
           </Button>
         </>
       }
     >
       <div className="qc__protocols" role="radiogroup" aria-label="Protocol">
-        {PROTOCOLS.map((p) => (
+        {chips.map((p) => (
           <button
             key={p}
             role="radio"
@@ -141,7 +172,7 @@ export function QuickConnectDialog({ initial, onClose }: QuickConnectDialogProps
         ))}
       </div>
 
-      <div className={cx('qc__field', touched && !parsed.ok && text.trim() && 'qc__field--invalid')}>
+      <div className={cx('qc__field', touched && !local && !parsed.ok && text.trim() && 'qc__field--invalid')}>
         <ProtocolIcon protocol={effectiveProtocol} size={18} className="qc__field-icon" />
         <input
           ref={inputRef}
@@ -167,9 +198,16 @@ export function QuickConnectDialog({ initial, onClose }: QuickConnectDialogProps
       </div>
 
       <div className="qc__status" aria-live="polite">
-        {!text.trim() ? (
+        {local ? (
+          <span className="qc__preview">
+            <ArrowRight size={13} />
+            {PROTOCOL_LABELS.local} · {local.shell ? local.shell.name : local.command || 'default shell'}
+            {!local.shell && local.command && <span className="qc__muted"> · runs this command line</span>}
+          </span>
+        ) : !text.trim() ? (
           <span className="qc__hint">
-            Examples: <code>deploy@web-01:2222</code> <code>telnet://router</code> <code>[::1]:2222</code> <code>{osTerms.serialExample}</code>
+            Examples: <code>deploy@web-01:2222</code> <code>telnet://router</code> <code>[::1]:2222</code> <code>{osTerms.serialExample}</code>{' '}
+            {!!shells?.length && <code>local:bash</code>}
           </span>
         ) : parsed.ok && preview ? (
           <span className="qc__preview">
@@ -187,10 +225,11 @@ export function QuickConnectDialog({ initial, onClose }: QuickConnectDialogProps
           <div className="qc__history-title">Recent</div>
           {history.map((h) => {
             const r = parseQuickConnect(h);
+            const isLocal = localPart(h) !== null;
             return (
               <div key={h} className="qc__history-row">
-                <button className="qc__history-item" onClick={() => connect(h)} title={`Connect to ${h}`}>
-                  {r.ok ? <ProtocolIcon protocol={r.target.protocol} size={14} /> : <Clock size={14} />}
+                <button className="qc__history-item" onClick={() => connect(h)} title={isLocal ? `Open ${h}` : `Connect to ${h}`}>
+                  {isLocal ? <ProtocolIcon protocol="local" size={14} /> : r.ok ? <ProtocolIcon protocol={r.target.protocol} size={14} /> : <Clock size={14} />}
                   <span className="qc__history-text">{h}</span>
                 </button>
                 <button className="qc__history-remove" aria-label={`Remove ${h} from history`} title="Remove" onClick={() => removeHistory(h)}>

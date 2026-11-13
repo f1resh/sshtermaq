@@ -48,6 +48,8 @@ export interface UiState {
   maximized: boolean;
   /** Tab whose title is being edited inline in the tab strip (null = none). */
   renamingTabId: string | null;
+  /** The pane whose header shows the rename field (split tabs). */
+  renamingPaneId: string | null;
   /** Initial query of the command palette when it opens (e.g. '>' or '@'). */
   paletteQuery: string;
   /**
@@ -63,6 +65,7 @@ export interface UiState {
   setPalette(open: boolean, mode?: UiState['paletteMode']): void;
   setSidebarFilter(v: string): void;
   set(patch: Partial<Pick<UiState, 'fullscreen' | 'windowFocused' | 'maximized' | 'chromeInsets'>>): void;
+  setRenamingPane(paneId: string | null): void;
   setRenamingTab(tabId: string | null): void;
   /** Opens the palette with a prefilled query (mode derived from the prefix). */
   openPalette(query?: string): void;
@@ -82,6 +85,7 @@ export const useUi = create<UiState>((set) => ({
   chromeInsets: { left: isMac ? 78 : 0, right: 0 },
   maximized: false,
   renamingTabId: null,
+  renamingPaneId: null,
   paletteQuery: '',
   focusRequest: null,
   sftpPanels: {},
@@ -92,6 +96,7 @@ export const useUi = create<UiState>((set) => ({
   setSidebarFilter: (sidebarFilter) => set({ sidebarFilter }),
   set: (patch) => set(patch),
   setRenamingTab: (renamingTabId) => set({ renamingTabId }),
+  setRenamingPane: (renamingPaneId) => set({ renamingPaneId }),
   openPalette: (query = '') =>
     set({
       paletteOpen: true,

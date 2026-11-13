@@ -20,6 +20,8 @@ export interface SnapshotPane {
   kind?: 'files';
   localPath?: string;
   remotePath?: string;
+  /** The name the user gave the pane. */
+  customTitle?: string;
 }
 
 export type SnapshotNode =
@@ -64,6 +66,7 @@ export function serializeWorkspace(
         if (p.files?.localPath) pane.localPath = p.files.localPath;
         if (p.files?.remotePath) pane.remotePath = p.files.remotePath;
       }
+      if (p.customTitle) pane.customTitle = p.customTitle;
       return { type: 'pane', pane };
     }
     const kids: SnapshotNode[] = [];
@@ -99,12 +102,14 @@ export function serializeWorkspace(
 
 /**
  * Pure: snapshot -> workspace state. Panes whose saved session no longer exists are dropped.
- * `template` fills fields missing from older ad-hoc snapshots.
+ * `template` fills fields missing from older ad-hoc snapshots. `keepNames` false (settings.behavior.restoreNames)
+ * leaves out the names the user gave tabs and panes; the snapshot keeps them, so turning it back on brings them back.
  */
 export function deserializeWorkspace(
   snap: WorkspaceSnapshot,
   lookup: (id: string) => SessionConfig | undefined,
-  template?: SessionConfig
+  template?: SessionConfig,
+  keepNames = true
 ): { tabs: TabState[]; panes: Record<string, PaneState>; activeTabId: string | null } {
   const tabs: TabState[] = [];
   const panes: Record<string, PaneState> = {};
@@ -134,7 +139,8 @@ export function deserializeWorkspace(
           hasActivity: false,
           bell: false,
           // A local shell is started on purpose, not just because the tab came back.
-          deferStart: session.protocol === 'local' && !files ? true : undefined
+          deferStart: session.protocol === 'local' && !files ? true : undefined,
+          customTitle: (keepNames && n.pane?.customTitle) || undefined
         };
         return { type: 'pane', paneId: id };
       }
@@ -160,7 +166,7 @@ export function deserializeWorkspace(
       id: tabId,
       layout,
       activePaneId: ids[Math.min(Math.max(0, st.activePane | 0), ids.length - 1)],
-      customTitle: st.customTitle || undefined,
+      customTitle: (keepNames && st.customTitle) || undefined,
       color: st.color || undefined,
       broadcast: !!st.broadcast
     });
@@ -171,10 +177,14 @@ export function deserializeWorkspace(
 }
 
 /** Restores the saved workspace (appending to anything already open). Returns the number of tabs restored. */
-export async function restoreWorkspace(lookup: (id: string) => SessionConfig | undefined, template?: SessionConfig): Promise<number> {
+export async function restoreWorkspace(
+  lookup: (id: string) => SessionConfig | undefined,
+  template?: SessionConfig,
+  keepNames = true
+): Promise<number> {
   const snap = await api.app.getState<WorkspaceSnapshot>(WORKSPACE_STATE_KEY);
   if (!snap) return 0;
-  const restored = deserializeWorkspace(snap, lookup, template);
+  const restored = deserializeWorkspace(snap, lookup, template, keepNames);
   if (!restored.tabs.length) return 0;
   useWorkspace.setState((s) => ({
     tabs: [...s.tabs, ...restored.tabs],
@@ -200,18 +210,18 @@ export function startWorkspaceAutosave(enabled: () => boolean, isSaved: (id: str
     last = json;
     api.app.setState(WORKSPACE_STATE_KEY, snap).catch((e) => console.warn('workspace save failed', e));
   };
-  const filesSignature = (panes: Record<string, PaneState>) =>
+  /** What is saved per pane besides the layout: file manager folders and the pane's name. */
+  const paneSignature = (panes: Record<string, PaneState>) =>
     Object.values(panes)
-      .filter((p) => p.kind === 'files')
-      .map((p) => `${p.id}:${p.files?.localPath ?? ''}:${p.files?.remotePath ?? ''}`)
+      .map((p) => `${p.id}:${p.files?.localPath ?? ''}:${p.files?.remotePath ?? ''}:${p.customTitle ?? ''}`)
       .join('|');
   const unsub = useWorkspace.subscribe((s, prev) => {
-    // Only structural changes and file manager folders matter (status / activity updates do not).
+    // Only structural changes, file manager folders and pane names matter (status / activity updates do not).
     if (
       s.tabs === prev.tabs &&
       s.activeTabId === prev.activeTabId &&
       Object.keys(s.panes).length === Object.keys(prev.panes).length &&
-      (s.panes === prev.panes || filesSignature(s.panes) === filesSignature(prev.panes))
+      (s.panes === prev.panes || paneSignature(s.panes) === paneSignature(prev.panes))
     )
       return;
     if (timer) clearTimeout(timer);

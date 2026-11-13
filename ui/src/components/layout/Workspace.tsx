@@ -5,13 +5,13 @@
  * Panes of a split tab get a header bar (title + close). Tabs with an SFTP panel show it on the right; panels of
  * background tabs stay mounted (hidden) so they keep their folder and connection.
  */
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { X } from 'lucide-react';
+import { Pencil, X } from 'lucide-react';
 import { api } from '@/bridge/api';
 import { closePane, liveSftpPanels } from '@/commands/actions';
 import { shortcutLabel } from '@/commands/keybindings';
-import { cx } from '@/components/ui';
+import { cx, showContextMenu } from '@/components/ui';
 import { FileManager } from '@/components/files/FileManager';
 import { SftpPanel } from '@/components/sftp/SftpPanel';
 import { Welcome } from '@/components/welcome/Welcome';
@@ -102,24 +102,80 @@ function Splitter({ geom, tabId, containerRef }: { geom: SplitterGeom; tabId: st
 
 /* -------------------------------------------------------------------------- */
 
-/** Header bar of a pane in a split tab: protocol, status, title, close button. */
+/** The pane name being edited in its header: Enter keeps it, Escape drops it, '' goes back to the automatic title. */
+function PaneRenameInput({ paneId, initial }: { paneId: string; initial: string }) {
+  const [value, setValue] = useState(initial);
+  const ref = useRef<HTMLInputElement>(null);
+  const done = useRef(false);
+  useLayoutEffect(() => {
+    ref.current?.focus();
+    ref.current?.select();
+  }, []);
+  const finish = (commit: boolean) => {
+    if (done.current) return;
+    done.current = true;
+    const p = useWorkspace.getState().panes[paneId];
+    // Committing the automatic title unchanged keeps the pane "automatic".
+    if (commit && p && (value.trim() !== initial || p.customTitle)) useWorkspace.getState().renamePane(paneId, value);
+    useUi.getState().setRenamingPane(null);
+  };
+  const onKeyDown = (e: ReactKeyboardEvent) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') finish(true);
+    else if (e.key === 'Escape') finish(false);
+  };
+  return (
+    <input
+      ref={ref}
+      className="pane-head__rename"
+      value={value}
+      aria-label="Pane name"
+      spellCheck={false}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={onKeyDown}
+      onBlur={() => finish(true)}
+      onMouseDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+    />
+  );
+}
+
+/** Header bar of a pane in a split tab: protocol, status, title (double-click or right-click to rename), close. */
 function PaneHeader({ paneId, active }: { paneId: string; active: boolean }) {
   const titleMode = useSettings((s) => s.settings.appearance.tabTitle);
   const info = useWorkspace(
     useShallow((s) => {
       const p = s.panes[paneId];
-      return p ? { title: paneTitle(p, titleMode), status: p.status, protocol: p.session.protocol } : null;
+      return p ? { title: paneTitle(p, titleMode), status: p.status, protocol: p.session.protocol, named: !!p.customTitle } : null;
     })
   );
+  const renaming = useUi((s) => s.renamingPaneId === paneId);
   if (!info) return null;
   const keys = shortcutLabel('pane.close');
+  const rename = () => useUi.getState().setRenamingPane(paneId);
   return (
-    <div className={cx('pane-head', active && 'pane-head--active')}>
+    <div
+      className={cx('pane-head', active && 'pane-head--active')}
+      onDoubleClick={(e) => {
+        if (!(e.target as HTMLElement).closest('.pane-head__close')) rename();
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        showContextMenu(e.clientX, e.clientY, [
+          { label: 'Rename pane…', icon: <Pencil size={14} />, onClick: rename },
+          { label: 'Use the automatic name', disabled: !info.named, onClick: () => useWorkspace.getState().renamePane(paneId, undefined) }
+        ]);
+      }}
+    >
       <ProtocolIcon protocol={info.protocol} size={12} className="pane-head__icon" />
       <StatusDot status={info.status} />
-      <span className="pane-head__title" title={info.title}>
-        {info.title}
-      </span>
+      {renaming ? (
+        <PaneRenameInput paneId={paneId} initial={info.title} />
+      ) : (
+        <span className="pane-head__title" title={`${info.title}\nDouble-click to rename`}>
+          {info.title}
+        </span>
+      )}
       <button
         className="pane-head__close"
         aria-label="Close pane"

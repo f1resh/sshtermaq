@@ -44,7 +44,7 @@ import {
 import { api } from '@/bridge/api';
 import { terminalRegistry } from '@/terminal/registry';
 import { useUi } from '@/store/ui';
-import { getActivePane, useWorkspace } from '@/store/workspace';
+import { getActivePane, paneIdsOf, useWorkspace } from '@/store/workspace';
 import type { CommandId } from '@shared/types';
 import {
   changePaneSettings,
@@ -105,6 +105,7 @@ export const COMMANDS: CommandInfo[] = [
   c('pane.focusNext', 'Focus next pane', 'Pane', ArrowRight, { needsPane: true }),
   c('pane.focusPrev', 'Focus previous pane', 'Pane', ArrowLeft, { needsPane: true }),
   c('pane.restart', 'Restart session', 'Pane', RotateCw, { needsPane: true, keywords: 'reconnect' }),
+  c('pane.rename', 'Rename pane…', 'Pane', Pencil, { needsPane: true, keywords: 'title name split' }),
   c('pane.toggleBroadcast', 'Toggle broadcast input', 'Pane', Radio, { needsPane: true, keywords: 'send all panes multi' }),
   c('pane.sftp', 'Toggle SFTP panel', 'Pane', FolderOpen, { needsPane: true, keywords: 'files browser side panel upload download sftp scp psftp' }),
   c('pane.fileManager', 'Open file manager (SFTP/SCP)', 'Pane', FolderTree, { needsPane: true, keywords: 'files upload download sftp scp winscp transfer sync' }),
@@ -246,6 +247,16 @@ function execute(id: CommandId, target?: CommandTarget): void {
         ui.setRenamingTab(tabId);
       }
       return;
+    case 'pane.rename': {
+      // A pane of a split tab is named in its header; a tab with one pane has no header: the tab is renamed.
+      const t = ws.tabs.find((x) => x.id === tabId);
+      if (t && paneId && paneIdsOf(t.layout).length > 1) ui.setRenamingPane(paneId);
+      else if (tabId) {
+        ws.activateTab(tabId);
+        ui.setRenamingTab(tabId);
+      }
+      return;
+    }
 
     /* ---- panes ---- */
     case 'pane.splitRight':

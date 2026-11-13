@@ -292,6 +292,13 @@ function BehaviorPage() {
         </SettingRow>
         <ToggleRow label="Confirm before closing connected sessions" checked={b.confirmCloseConnected} onChange={(confirmCloseConnected) => update({ behavior: { confirmCloseConnected } })} />
         <ToggleRow label="Restore tabs on startup" checked={b.restoreTabs} onChange={(restoreTabs) => update({ behavior: { restoreTabs } })} />
+        <ToggleRow
+          label="Keep tab and pane names"
+          description="Names you gave tabs and panes come back with them; off, restored tabs get automatic titles."
+          checked={b.restoreNames}
+          disabled={!b.restoreTabs}
+          onChange={(restoreNames) => update({ behavior: { restoreNames } })}
+        />
       </Section>
       <Section title="Scrolling">
         <ToggleRow label="Scroll to the bottom on output" checked={b.scrollOnOutput} onChange={(scrollOnOutput) => update({ behavior: { scrollOnOutput } })} />

@@ -41,6 +41,7 @@ import {
   mixHex,
   pastePreview,
   reconnectDelayMs,
+  reportedFolder,
   toHex6
 } from './termUtil';
 
@@ -231,6 +232,16 @@ export class TermSession {
       const p = useWorkspace.getState().panes[this.paneId];
       if (p && p.remoteTitle !== title) useWorkspace.getState().updatePane(this.paneId, { remoteTitle: title });
     });
+    // A local shell's current folder (OSC 7 / OSC 9;9), so new local terminals from this pane start there.
+    for (const ident of [7, 9] as const) {
+      this.term.parser.registerOscHandler(ident, (data) => {
+        const p = useWorkspace.getState().panes[this.paneId];
+        if (p?.session.protocol !== 'local') return false;
+        const folder = reportedFolder(ident, data, !isMac);
+        if (folder && p.cwd !== folder) useWorkspace.getState().updatePane(this.paneId, { cwd: folder });
+        return false;
+      });
+    }
     this.term.onSelectionChange(() => this.onSelectionChange());
 
     this.installDomHandlers();

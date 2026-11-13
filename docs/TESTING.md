@@ -10,10 +10,10 @@ them depends on another.
 
 | Part | What it tests | Framework | Where | Automated | Size | Run time |
 |---|---|---|---|---|---|---|
-| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 230 test cases | about 1 minute |
-| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions and restore | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 13 files, 126 tests | under 2 seconds |
-| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals, download / upload under a new name | Playwright Test | `ui/e2e/*.spec.ts` | yes | 7 files, 26 tests, each run twice (52) | about 1–1.5 minutes |
-| **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs` | no, run by hand | no saved scenarios | seconds |
+| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 231 test cases | about 1 minute |
+| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 16 files, 142 tests | under 2 seconds |
+| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload under a new name, renaming tabs and panes, names after a restart | Playwright Test | `ui/e2e/*.spec.ts` | yes | 9 files, 31 tests, each run twice (62) | about 1–1.5 minutes |
+| **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs`, `ui/scripts/checks/` | no, run by hand | `checks/local-terminal.mjs` | seconds |
 
 The browser tests cover the main screens, not every dialog: settings, import, the key generator and the file manager
 have no browser tests yet. There is no CI: tests run when a developer runs them, or through
@@ -196,13 +196,13 @@ TEST_CASE("ssh: password authentication, shell echo and exit code", "[ssh]") {
 
 ## 5. What is tested
 
-### Native tests (230 test cases)
+### Native tests (231 test cases)
 
 215 run by default; `putty: real registry smoke test` and `codepage (Windows): regenerate the tables` are hidden. The **Needs** column shows the tool without which a
 test case is skipped. On macOS every suite runs; its `platform_ui` has the macOS local files tests (listed after
 Windows' below). The other counts are Windows'.
 
-#### app — `st_test_app.exe` (28)
+#### app — `st_test_app.exe` (29)
 
 Command line (PuTTY-compatible options, `ssh://` / `sftp://` URLs, `-load`, `--version`), data-folder resolution (portable / installed / override), the version and build id (`BuildInfo`), the embedded web UI (index parsing, request paths, content types, loading the embedded test files), and the host window policy (`HostController` against a fake window: allowed pages and origins, window events (menu bar commands and title bar insets too), confirming close, saved placement). *Kind: unit.* Source: [native/tests/app](../native/tests/app).
 
@@ -216,6 +216,7 @@ Command line (PuTTY-compatible options, `ssh://` / `sftp://` URLs, `-load`, `--v
 | cli: -load merges saved session, explicit options win regardless of order | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: port forwarding specs | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: serial line and -sercfg | `[app][cli]` |  | `cli_tests.cpp` |
+| cli: -local opens a local terminal (default shell, a shell name or a command line) | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: -m reads the remote command, -pwfile the password | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: logging, misc options, unknown options | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: host options are split off | `[app][cli]` |  | `cli_tests.cpp` |
@@ -539,7 +540,7 @@ Self-tests of the fake servers, validated with independent clients (`plink`, `ps
 | TestSshServer serves SFTP to psftp | `[support][plink]` | PuTTY `psftp` | `support_tests.cpp` |
 | TestSshServer honours local forwarding from plink | `[support][plink]` | PuTTY `plink` | `support_tests.cpp` |
 
-### UI unit tests (123 tests)
+### UI unit tests (142 tests)
 
 #### `actions.test.ts` (7)
 
@@ -647,15 +648,21 @@ Workspace store: automatic tab titles for each Tab titles setting (terminal titl
 | closing panes of a split tab | keeps the active pane when another one closes |
 | closing panes of a split tab | closes the tab with its last pane |
 
-#### `workspacePersist.test.ts` (3)
+#### `workspacePersist.test.ts` (5)
 
-Saving and restoring open tabs, including file manager tabs and snapshots from older versions. Source: [ui/src/store/workspacePersist.test.ts](../ui/src/store/workspacePersist.test.ts).
+Saving and restoring open tabs, including file manager tabs, snapshots from older versions and the names of tabs and panes. Source: [ui/src/store/workspacePersist.test.ts](../ui/src/store/workspacePersist.test.ts).
 
 | Group | Test |
 |---|---|
 | workspace persistence with file manager tabs | keeps the kind and folders, drops the terminal link |
 | workspace persistence with file manager tabs | treats old snapshots as terminals |
 | workspace persistence with local terminals | brings local terminals back waiting to be started, other sessions as before |
+| workspace persistence of names | "Keep tab and pane names" off: the tabs come back with automatic titles, the snapshot keeps the names |
+| workspace persistence of names | tab and pane names come back after a restart |
+
+#### `skipMacFiles.test.ts` (3), `reportedFolder.test.ts` (2), `quickconnect/local.test.ts` (3)
+
+The ".DS_Store and ._ files" default (on for macOS, off for Windows, saved values kept); the folder a local shell reports (OSC 7 / OSC 9;9) turned into a path of this system; quick connect's `local:` targets (a shell by id or name, else a command line). The rename tests are in `workspace.test.ts` (tab and pane names, duplicate keeps them), `workspacePersist.test.ts` (names after a restart) and `macos.test.ts` (the shortcut and the File menu entry).
 
 #### `local.test.ts` (2)
 
@@ -759,7 +766,7 @@ The UI's own errors in the app log (`app:log`): how errors are described, repeat
 | reportError | stops after 50 reports |
 | reportError | reports uncaught errors and unhandled rejections from the window |
 
-### UI browser tests (26 tests, each run as `windows` and `macos`)
+### UI browser tests (31 tests, each run as `windows` and `macos`)
 
 Source: [ui/e2e](../ui/e2e).
 
@@ -791,6 +798,11 @@ Source: [ui/e2e](../ui/e2e).
 | `local-terminal.spec.ts` | the welcome screen has a Local terminal button |
 | `transfer-as.spec.ts` | "Download as…" asks for the name and the transfer uses it |
 | `transfer-as.spec.ts` | "Upload as…" is offered for an item of this computer |
+| `local-terminal.spec.ts` | "local:" plus a shell name opens that shell |
+| `rename.spec.ts` | a split pane is renamed by double-clicking its header, and names the tab |
+| `rename.spec.ts` | the tab menu renames the tab; an empty name brings the automatic title back |
+| `rename-restart.spec.ts` | with "Keep tab and pane names" on (the default), the tab and the pane keep their names (a reload plays the restart: the mock keeps its data in localStorage) |
+| `rename-restart.spec.ts` | with it off, the tabs come back with automatic titles |
 
 ## 6. How to run the tests
 
@@ -933,6 +945,17 @@ errors from the page are printed at the end. Playwright refuses to click a locat
 "New session" exists in the sidebar, its toolbar and the welcome screen, hence `getByRole('main')` above. That line is
 Playwright's and so Windows-only; on macOS find the element with CSS (`page.click(...)`, or `page.evaluate` to pick it
 by its text).
+
+### `checks/local-terminal.mjs`: local terminals in the real app (Windows and macOS)
+
+```
+node scripts/app.mjs --steps scripts/checks/local-terminal.mjs
+```
+
+The same steps on both systems (Debug build): the shell list (at least one, exactly one default), the shortcut opens
+the default shell, `TERM_PROGRAM` / `COLORTERM`, non-ASCII text both ways, the window size and (macOS) `LANG` for
+bash-like shells, `exit` closes the tab, a second shell from the + menu. Prints a `PASS` / `FAIL` line per check and
+exits non-zero on the first failure.
 
 ### `shot.mjs`: the UI in a browser, with the mock backend
 

@@ -109,3 +109,54 @@ describe('closing panes of a split tab', () => {
     expect(useWorkspace.getState().panes).toEqual({});
   });
 });
+
+describe('renaming tabs and panes', () => {
+  beforeEach(() => useWorkspace.setState({ tabs: [], panes: {}, activeTabId: null }));
+  const ws = () => useWorkspace.getState();
+  const open = () => ws().openSession(createDefaultSession({ name: 'web-01', host: 'a.example.test' }));
+
+  it('a tab name replaces the automatic title; clearing it brings the automatic title back', () => {
+    const p = open();
+    const tabId = ws().panes[p].tabId;
+    ws().renameTab(tabId, 'Production');
+    expect(tabTitle(ws().tabs[0], ws().panes)).toBe('Production');
+    ws().renameTab(tabId, '');
+    expect(ws().tabs[0].customTitle).toBeUndefined();
+    expect(tabTitle(ws().tabs[0], ws().panes, 'session')).toBe('web-01');
+  });
+
+  it('a pane name shows in its header and, without a tab name, on the tab', () => {
+    const first = open();
+    const second = ws().splitPane(first, 'row')!;
+    ws().renamePane(second, '  logs  ');
+    expect(ws().panes[second].customTitle).toBe('logs');
+    expect(paneTitle(ws().panes[second], 'terminal')).toBe('logs');
+    ws().activatePane(second);
+    expect(tabTitle(ws().tabs[0], ws().panes)).toBe('logs');
+    ws().renameTab(ws().tabs[0].id, 'Prod');
+    expect(tabTitle(ws().tabs[0], ws().panes)).toBe('Prod');  // the tab's own name wins
+    ws().renamePane(second, '');
+    expect(ws().panes[second].customTitle).toBeUndefined();
+  });
+
+  it('a pane name wins over a fixed window title and the title the server set', () => {
+    const p = pane({ customTitle: 'mine' });
+    p.session.terminal.windowTitle = 'Production DB';
+    for (const mode of ['terminal', 'session', 'host'] as const) expect(paneTitle(p, mode)).toBe('mine');
+  });
+
+  it('duplicating a tab keeps its names; splitting a pane does not copy the pane name', () => {
+    const p = open();
+    ws().renameTab(ws().panes[p].tabId, 'Prod');
+    ws().renamePane(p, 'shell');
+    const copy = ws().duplicatePane(p, 'tab')!;
+    const copyTab = ws().tabs.find((t) => t.id === ws().panes[copy].tabId)!;
+    expect(copyTab.id).not.toBe(ws().panes[p].tabId);
+    expect(copyTab.customTitle).toBe('Prod');
+    expect(ws().panes[copy].customTitle).toBe('shell');
+
+    const split = ws().duplicatePane(p, 'split-right')!;
+    expect(ws().panes[split].tabId).toBe(ws().panes[p].tabId);
+    expect(ws().panes[split].customTitle).toBeUndefined();
+  });
+});

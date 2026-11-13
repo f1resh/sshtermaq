@@ -64,12 +64,18 @@ export const usePrompts = create<PromptsState>((set, get) => ({
 
 /* -------------------------------------------------------------------------- */
 
-let initialized = false;
+let loading: Promise<void> | undefined;
 
-export async function initDataStores(): Promise<void> {
-  if (initialized) return;
-  initialized = true;
+/**
+ * Loads settings and sessions once. Every call waits for that one load: React's StrictMode runs the startup effect
+ * twice in development, and the second call must not report "ready" before the settings are there.
+ */
+export function initDataStores(): Promise<void> {
+  loading ??= loadDataStores();
+  return loading;
+}
 
+async function loadDataStores(): Promise<void> {
   api.sessions.onChanged(() => void useSessions.getState().reload());
   api.settings.onChanged((s) => useSettings.setState({ settings: normalizeSettings(s) }));
   api.prompts.onPrompt((p) => usePrompts.setState((st) => ({ pending: [...st.pending, p] })));

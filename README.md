@@ -125,13 +125,13 @@ Get the files from the [latest release](https://github.com/f1resh/sshtermaq/rele
 | Area | What you get |
 |---|---|
 | Protocols | SSH-2, Telnet (full option negotiation), Rlogin, Raw TCP, Serial (COM ports on Windows, `/dev/cu.*` on macOS, all line settings) |
-| Local terminal | Shells on this computer in tabs and split panes: Command Prompt, Windows PowerShell, PowerShell 7, Git Bash, Cygwin, MSYS2 and WSL distributions on Windows (Windows 10 1809+, ConPTY); your login shell (zsh), bash and the others in `/etc/shells` on macOS. Found automatically; any other program as a custom command line. Open with Ctrl+Shift+\` (macOS ⇧⌘T) or from the + menu; save them as sessions with a start folder and environment variables. Restored tabs wait for Enter instead of starting shells by themselves |
+| Local terminal | Shells on this computer in tabs and split panes: Command Prompt, Windows PowerShell, PowerShell 7, Git Bash, Cygwin, MSYS2 and WSL distributions on Windows (Windows 10 1809+, ConPTY); your login shell (zsh), bash and the others in `/etc/shells` on macOS. Found automatically; any other program as a custom command line. Open with Ctrl+Shift+\` (macOS ⇧⌘T) or from the + menu; save them as sessions with a start folder and environment variables. Also from quick connect (`local:bash`, `local:pwsh`) and the command line (`-local`). New local terminals open in the folder the current shell reports (OSC 7, or OSC 9;9 for PowerShell and cmd), when it reports one. Restored tabs wait for Enter instead of starting shells by themselves |
 | SSH auth | Key files (OpenSSH, PEM, PuTTY PPK v2/v3 incl. Argon2 encrypted), agents (Pageant and the Windows OpenSSH agent; ssh-agent on macOS), keyboard-interactive (2FA), password; saved passwords encrypted for your user account (Windows DPAPI, macOS Keychain) |
 | Host keys | Known-hosts store with new/changed-key prompts (SHA256 + MD5), logical host names, import from PuTTY and OpenSSH `known_hosts` |
 | Forwarding | Local (-L), remote (-R) and dynamic SOCKS4/4a/5 (-D) port forwarding, agent forwarding, X11 forwarding (the server only gets a fake cookie; the X server gets the real one from Xauthority, or none) |
 | Proxies | SOCKS 4/4a/5 (with auth), HTTP CONNECT, Telnet proxy, local proxy command, SSH jump host; exclusion lists |
 | Terminal | PuTTY keyboard modes (Backspace, Home/End, function-key variants, app cursor/keypad), local echo/line editing, charsets (UTF-8, ISO-8859-x, CP125x, KOI8, CP437/866, Shift_JIS, GBK, Big5, ...), bell modes, answerback, find, zoom, copy-on-select, right-click paste, bracketed paste, multi-line paste warning |
-| Sessions | Folders, colors, notes, duplicate, restart, split panes with a title bar and close button, broadcast input to all panes, workspace restore, reconnect, session logging (printable / all / SSH debug, PuTTY `&H &Y &M &D &T &P` placeholders) |
+| Sessions | Folders, colors, notes, duplicate, restart, renamable tabs and split panes (Ctrl+Shift+R, macOS ⇧⌘R; double-click a pane's header; kept after a restart, optionally), split panes with a title bar and close button, broadcast input to all panes, workspace restore, reconnect, session logging (printable / all / SSH debug, PuTTY `&H &Y &M &D &T &P` placeholders) |
 | File manager | See the next table |
 | Appearance | 15 app themes (the default is the neon-on-black SSHTermaq Neon), 30 terminal color schemes, custom scheme editor, configurable keybindings, Mica/Acrylic backdrop on Windows 11 |
 | Keys | Key generator (Ed25519, RSA, ECDSA), inspect and convert between OpenSSH and PPK |
@@ -158,6 +158,7 @@ SSHTermaq.exe [-ssh|-telnet|-rlogin|-raw|-serial] [user@]host[:port] [-P port] [
                [-m file] [-sercfg 115200,8,n,1,N] ...
 SSHTermaq.exe ssh://user@host:2222   telnet://host   @"Saved Session"
 SSHTermaq.exe sftp://user@host/var/www   scp://user@router        (open the file manager)
+SSHTermaq.exe -local ["git bash" | pwsh | "<command line>"]       (a local terminal; alone: the default shell)
 SSHTermaq.exe --version                                          (version and build id, also -V)
 ```
 On macOS the program is `/Applications/SSHTermaq.app/Contents/MacOS/SSHTermaq`, with the same options. A second

@@ -8,7 +8,7 @@ import { choiceDialog } from '@/components/layout/ChoiceDialog';
 import { useSessions, useSettings } from '@/store/data';
 import { confirmDialog, inputDialog, useUi } from '@/store/ui';
 import { pickDefaultShell, useShells } from '@/store/shells';
-import { paneIdsOf, useWorkspace, type OpenTarget, type PaneState } from '@/store/workspace';
+import { getActivePane, paneIdsOf, useWorkspace, type OpenTarget, type PaneState } from '@/store/workspace';
 import { createLocalSession, newId, normalizeFolder, sessionLabel } from '@shared/defaults';
 import type { LocalShellInfo, SessionConfig, SessionView } from '@shared/types';
 
@@ -78,7 +78,11 @@ export async function openLocalTerminal(shell?: LocalShellInfo, target: OpenTarg
     toast.error('No local terminal', 'Local terminals need Windows 10 version 1809 or later.');
     return;
   }
-  useWorkspace.getState().openSession(createLocalSession(chosen, settings.defaultSession), { sessionId: null, target });
+  const session = createLocalSession(chosen, settings.defaultSession);
+  // From a local pane whose shell reported its folder: start there (not for WSL, which has its own paths).
+  const active = getActivePane();
+  if (active?.session.protocol === 'local' && active.cwd && !chosen.id.startsWith('wsl:')) session.local.startDir = active.cwd;
+  useWorkspace.getState().openSession(session, { sessionId: null, target });
 }
 
 export function connectSavedSession(id: string, target: OpenTarget = 'tab', view?: SessionView): void {

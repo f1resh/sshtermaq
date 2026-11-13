@@ -33,3 +33,19 @@ test.describe('local terminals', () => {
     await expect(app.getByRole('tab', { name: new RegExp(SHELLS[os].default) })).toBeVisible();
   });
 });
+
+test.describe('local terminals from quick connect', () => {
+  test('"local:" plus a shell name opens that shell', async ({ app, os }) => {
+    const input = app.getByRole('main').getByRole('textbox').first();
+    await input.fill('local:bash');
+    await input.press('Enter');
+    await expect(app.getByRole('tab', { name: /bash/, selected: true })).toBeVisible();
+    // The Local chip of the quick connect dialog shows which shell a name picks.
+    await app.getByRole('button', { name: 'New tab options' }).click();
+    await app.getByRole('menuitem', { name: /Quick connect/ }).click();
+    const dialog = app.getByRole('dialog', { name: 'Quick connect' });
+    await dialog.getByRole('radio', { name: 'Local' }).click();
+    await dialog.getByRole('textbox').fill(os === 'darwin' ? 'zsh' : 'git');
+    await expect(dialog).toContainText(os === 'darwin' ? 'Local · zsh' : 'Local · Git Bash');
+  });
+});

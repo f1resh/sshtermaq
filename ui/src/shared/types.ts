@@ -396,6 +396,7 @@ export type CommandId =
   | 'pane.focusNext'
   | 'pane.focusPrev'
   | 'pane.restart'
+  | 'pane.rename'
   | 'pane.toggleBroadcast'
   | 'pane.sftp'
   | 'pane.fileManager'
@@ -466,6 +467,8 @@ export interface AppSettings {
     warnOnMultilinePaste: boolean;
     confirmCloseConnected: boolean;
     restoreTabs: boolean;
+    /** With restoreTabs: tab and pane names come back too (otherwise restored tabs get automatic titles). */
+    restoreNames: boolean;
     reconnect: 'off' | 'prompt' | 'auto';
     scrollOnOutput: boolean;
     scrollOnKeystroke: boolean;

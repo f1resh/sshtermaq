@@ -7,10 +7,11 @@ import { api } from '@/bridge/api';
 import { runCommand } from '@/commands/commands';
 import { shortcutLabel } from '@/commands/keybindings';
 import { applyQuickConnect, parseQuickConnect } from '@/components/quickconnect/parse';
-import { connectSavedSession, connectSession, createAdHocSession, newSessionDraft, reportError } from '@/commands/actions';
+import { connectSavedSession, connectSession, createAdHocSession, newSessionDraft, openLocalTerminal, reportError } from '@/commands/actions';
 import { Button, Kbd } from '@/components/ui';
-import { useSessions } from '@/store/data';
-import { useShells } from '@/store/shells';
+import { useSessions, useSettings } from '@/store/data';
+import { localPart, resolveLocalTarget, shellToOpen } from '@/components/quickconnect/local';
+import { pickDefaultShell, useShells } from '@/store/shells';
 import { useUi } from '@/store/ui';
 import { sessionLabel } from '@shared/defaults';
 import { isMac, osTerms } from '@shared/platform';
@@ -53,7 +54,16 @@ export function Welcome() {
     [sessions]
   );
 
-  const connect = () => {
+  const connect = async () => {
+    const part = localPart(value);
+    if (part !== null) {
+      // "local:pwsh", "local:git bash", "local:" (the default shell) or "local:<command line>".
+      const shells = await useShells.getState().load();
+      const target = resolveLocalTarget(part, shells, pickDefaultShell(shells, useSettings.getState().settings.terminal.defaultShell));
+      void openLocalTerminal(shellToOpen(target) ?? undefined);
+      setValue('');
+      return;
+    }
     const parsed = parseQuickConnect(value);
     if (!parsed.ok) {
       setError(parsed.error);
@@ -84,7 +94,7 @@ export function Welcome() {
           className="welcome__connect"
           onSubmit={(e) => {
             e.preventDefault();
-            connect();
+            void connect();
           }}
         >
           {/* macOS: the device path alone; with a baud rate it no longer fits the field in a 1280-wide window */}

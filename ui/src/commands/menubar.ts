@@ -28,6 +28,7 @@ const MENUS: readonly { title: string; entries: readonly Entry[] }[] = [
       ['tab.new', 'New Tab…'],
       ['tab.newLocal', 'New Local Terminal'],
       ['tab.duplicate', 'Duplicate Tab'],
+      ['tab.rename', 'Rename Tab…'],
       '-',
       ['app.importPutty', 'Import from PuTTY…'],
       ['app.keygen', 'Key Generator…'],
