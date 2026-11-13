@@ -244,21 +244,25 @@ export function FileManager({ paneId, visible }: { paneId: string; visible: bool
     else void download(paths, targetDir ?? localPath ?? '', move);
   };
 
-  /** Asks for the name `item` gets in the other pane's folder, then copies it there under that name. */
-  const transferAs = async (side: Side, item: FileItem) => {
+  /**
+   * Asks for the name `item` gets in the other pane's folder, then copies it there under that name; `move` also deletes
+   * it here afterwards (file by file, only what arrived: a file skipped at a conflict stays).
+   */
+  const transferAs = async (side: Side, item: FileItem, move = false) => {
     if (item.type === 'drive' || item.type === 'place') return;
     const upload_ = side === 'local';
+    const verb = move ? 'Move' : upload_ ? 'Upload' : 'Download';
     const name = await inputDialog({
-      title: `${upload_ ? 'Upload' : 'Download'} "${item.name}" as`,
+      title: `${verb} "${item.name}" ${move ? `to ${upload_ ? 'the server' : osTerms.thisComputer} ` : ''}as`,
       label: `Name ${upload_ ? 'on the server' : `on ${osTerms.thisComputer}`}`,
       initial: item.name,
-      confirmLabel: upload_ ? 'Upload' : 'Download',
+      confirmLabel: verb,
       // The destination's naming rules (a server name may contain "\"; this native host refuses it as a target name).
       validate: (v) => nameError(v, upload_ ? 'remote' : 'local') ?? (v.includes('\\') ? 'Names cannot contain "\\"' : null)
     });
     if (!name?.trim()) return;
-    if (upload_) void upload([item.path], remotePath ?? '/', false, name.trim());
-    else void download([item.path], localPath ?? '', false, name.trim());
+    if (upload_) void upload([item.path], remotePath ?? '/', move, name.trim());
+    else void download([item.path], localPath ?? '', move, name.trim());
   };
 
   const remove = async (side: Side, items: FileItem[]) => {
@@ -392,7 +396,7 @@ export function FileManager({ paneId, visible }: { paneId: string; visible: bool
   const opsFor = (side: Side): PaneOps => ({
     openFile: (item) => void openFile(side, item),
     transfer: (items, move) => transfer(side, items, move),
-    transferAs: (item) => void transferAs(side, item),
+    transferAs: (item, move) => void transferAs(side, item, move),
     edit: side === 'remote' ? (item) => void edit(item.path) : undefined,
     remove: (items) => remove(side, items),
     chmod: side === 'remote' ? (item) => setDialog({ type: 'chmod', item }) : undefined,

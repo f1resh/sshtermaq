@@ -144,7 +144,7 @@ The file manager:
 |---|---|
 | Two ways to open it | An SFTP side panel next to any SSH terminal, on the terminal's own connection (no second login); or a WinSCP-style tab with this computer on the left, the server on the right and the transfer queue below, on its own connection or on a terminal's |
 | Protocols | SFTP, with automatic fallback to SCP for servers without SFTP (routers, BusyBox, Dropbear) |
-| Copying and moving | F5 / F6 or drag and drop: between the panes, and from Explorer, Finder or the desktop onto either pane. Local files can also be dragged out. "Upload as…" / "Download as…" (right-click) copy one item under a new name |
+| Copying and moving | F5 / F6 or drag and drop: between the panes, and from Explorer, Finder or the desktop onto either pane. Local files can also be dragged out. "Upload as…" / "Download as…" (right-click) copy one item under a new name, or move it ("… as and delete …") |
 | Conflicts and resume | Overwrite / if newer / skip / resume / rename questions; interrupted transfers resume |
 | File operations | Browse, rename, delete, permissions, bookmarks, find files on the server |
 | Editing on the server | Opens a server file in your editor and uploads it on every save |

@@ -12,7 +12,7 @@ them depends on another.
 |---|---|---|---|---|---|---|
 | **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 231 test cases | about 1 minute |
 | **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 16 files, 142 tests | under 2 seconds |
-| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload under a new name, renaming tabs and panes, names after a restart | Playwright Test | `ui/e2e/*.spec.ts` | yes | 9 files, 31 tests, each run twice (62) | about 1–1.5 minutes |
+| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart | Playwright Test | `ui/e2e/*.spec.ts` | yes | 9 files, 32 tests, each run twice (64) | about 1–1.5 minutes |
 | **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs`, `ui/scripts/checks/` | no, run by hand | `checks/local-terminal.mjs` | seconds |
 
 The browser tests cover the main screens, not every dialog: settings, import, the key generator and the file manager
@@ -459,7 +459,7 @@ File manager backend over SFTP and SCP: browsing, transfers, conflicts, resume, 
 | transfer: uploads merge into existing folders | `[sftp][transfer]` |  | `transfer_tests.cpp` |
 | transfer: folder transfers report the listing before copying | `[sftp][transfer]` |  | `transfer_tests.cpp` |
 | transfer: folder uploads can leave out macOS Finder's files | `[sftp][transfer]` |  | `transfer_tests.cpp` |
-| transfer: upload as / download as give the one item a new name | `[sftp][transfer]` |  | `transfer_tests.cpp` |
+| transfer: upload as / download as give the one item a new name | `[sftp][transfer]` | also moved under a new name (the source goes), and a move skipped at a conflict keeps the source | `transfer_tests.cpp` |
 
 #### ssh — `st_test_ssh.exe` (25)
 
@@ -766,7 +766,7 @@ The UI's own errors in the app log (`app:log`): how errors are described, repeat
 | reportError | stops after 50 reports |
 | reportError | reports uncaught errors and unhandled rejections from the window |
 
-### UI browser tests (31 tests, each run as `windows` and `macos`)
+### UI browser tests (32 tests, each run as `windows` and `macos`)
 
 Source: [ui/e2e](../ui/e2e).
 
@@ -797,7 +797,8 @@ Source: [ui/e2e](../ui/e2e).
 | `local-terminal.spec.ts` | the new tab menu lists the installed shells and opens one |
 | `local-terminal.spec.ts` | the welcome screen has a Local terminal button |
 | `transfer-as.spec.ts` | "Download as…" asks for the name and the transfer uses it |
-| `transfer-as.spec.ts` | "Upload as…" is offered for an item of this computer |
+| `transfer-as.spec.ts` | "Download as and delete on server (move)…" arrives under the new name and leaves the server |
+| `transfer-as.spec.ts` | "Upload as…" is offered for an item of this computer (and its move entry) |
 | `local-terminal.spec.ts` | "local:" plus a shell name opens that shell |
 | `rename.spec.ts` | a split pane is renamed by double-clicking its header, and names the tab |
 | `rename.spec.ts` | the tab menu renames the tab; an empty name brings the automatic title back |

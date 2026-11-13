@@ -359,6 +359,24 @@ TEST_CASE("transfer: upload as / download as give the one item a new name", "[sf
         CHECK_FALSE(fs::exists(r / "site"));
     }
 
+    SECTION("moved under a new name: the source goes, the new name arrives") {
+        CHECK(f.waitDone(f.download("/report.txt", l, Json{{"targetName", "report-2026.txt"}, {"move", true}}))["state"] == "done");
+        CHECK(slurp(l / "report-2026.txt") == "remote report");
+        CHECK_FALSE(fs::exists(r / "report.txt"));
+        CHECK_FALSE(fs::exists(l / "report.txt"));
+        CHECK(f.waitDone(f.upload(l / "site", "/", Json{{"targetName", "site-v2"}, {"move", true}}))["state"] == "done");
+        CHECK(slurp(r / "site-v2" / "index.html") == "<html>");
+        CHECK_FALSE(fs::exists(l / "site"));
+    }
+
+    SECTION("moved under a name that exists, skipped at the conflict: the source stays") {
+        spit(l / "taken.txt", "already here");
+        const Json p = f.waitDone(f.download("/report.txt", l, Json{{"targetName", "taken.txt"}, {"move", true}, {"conflict", "skip"}}));
+        CHECK(p["skipped"] == 1);
+        CHECK(slurp(l / "taken.txt") == "already here");
+        CHECK(slurp(r / "report.txt") == "remote report");
+    }
+
     SECTION("only one item, and only a plain name") {
         CHECK_THROWS(f.h.invoke("sftp:download",
                                 Json::array({f.id, Json::array({"/report.txt", "/report.txt"}), u8(l), Json{{"targetName", "x.txt"}}})));

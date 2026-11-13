@@ -73,8 +73,8 @@ export interface PaneOps {
   openFile(item: FileItem): void;
   /** F5 / F6: to the other pane's folder. */
   transfer(items: FileItem[], move: boolean): void;
-  /** "Upload as…" / "Download as…": one item to the other pane's folder under a name the user types. */
-  transferAs(item: FileItem): void;
+  /** "Upload as…" / "Download as…": one item to the other pane's folder under a name the user types; `move` deletes it here afterwards. */
+  transferAs(item: FileItem, move?: boolean): void;
   /** F4 (remote): edit with auto-upload. */
   edit?(item: FileItem): void;
   remove(items: FileItem[]): Promise<void>;
@@ -353,6 +353,11 @@ export const FilePane = forwardRef<FilePaneHandle, FilePaneProps>(function FileP
           { label: side === 'local' ? `Upload to ${other}` : `Download to ${other}`, shortcut: 'F5', disabled: special, onClick: () => ops.transfer(list, false) },
           { label: side === 'local' ? 'Upload and delete here (move)' : 'Download and delete on server (move)', shortcut: 'F6', disabled: special, onClick: () => ops.transfer(list, true) },
           { label: side === 'local' ? 'Upload as…' : 'Download as…', disabled: !one || special, onClick: () => one && ops.transferAs(one) },
+          {
+            label: side === 'local' ? 'Upload as and delete here (move)…' : 'Download as and delete on server (move)…',
+            disabled: !one || special,
+            onClick: () => one && ops.transferAs(one, true)
+          },
           ...(ops.menuExtras?.(list) ?? []),
           { type: 'separator' },
           { label: 'Rename…', shortcut: 'F2', disabled: !one || special, onClick: () => one && beginRename(one) },
