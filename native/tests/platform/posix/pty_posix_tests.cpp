@@ -47,7 +47,10 @@ TEST_CASE("pty (POSIX): input, resize, environment and a non-ASCII start folder"
     Scratch tmp;
     const auto dir = tmp.path() / sys::toPath("папка ünï");
     std::filesystem::create_directories(dir);
-    sys::pty::Options o = sh("", sys::fromPath(dir));
+    // --noediting: /bin/sh on macOS is bash 3.2, whose line editor now and then puts the old window size back when
+    // the resize arrives while it sets up a line (stty then reads 24 80; about 1 run in 40 under load). This test is
+    // about our resize reaching the terminal, not about bash.
+    sys::pty::Options o = sh("--noediting", sys::fromPath(dir));
     o.environment = {{"ST_PTY_TEST", "value-42"}, {"PS1", "$ "}};
     PtyRun run;
     REQUIRE(run.start(o));
