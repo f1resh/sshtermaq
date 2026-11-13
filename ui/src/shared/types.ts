@@ -737,6 +737,8 @@ export interface TransferOptions {
   deleteToRecycleBin?: boolean;
   /** Folder uploads leave out .DS_Store and "._*" files. Default false. */
   skipMacFiles?: boolean;
+  /** "Upload as" / "Download as": the name the one transferred item gets at the destination. */
+  targetName?: string;
 }
 
 export interface FileStat {

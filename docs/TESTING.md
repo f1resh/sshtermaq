@@ -10,9 +10,9 @@ them depends on another.
 
 | Part | What it tests | Framework | Where | Automated | Size | Run time |
 |---|---|---|---|---|---|---|
-| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 229 test cases | about 1 minute |
+| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 230 test cases | about 1 minute |
 | **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions and restore | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 13 files, 126 tests | under 2 seconds |
-| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals | Playwright Test | `ui/e2e/*.spec.ts` | yes | 6 files, 24 tests, each run twice (48) | about 1–1.5 minutes |
+| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals, download / upload under a new name | Playwright Test | `ui/e2e/*.spec.ts` | yes | 7 files, 26 tests, each run twice (52) | about 1–1.5 minutes |
 | **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs` | no, run by hand | no saved scenarios | seconds |
 
 The browser tests cover the main screens, not every dialog: settings, import, the key generator and the file manager
@@ -196,7 +196,7 @@ TEST_CASE("ssh: password authentication, shell echo and exit code", "[ssh]") {
 
 ## 5. What is tested
 
-### Native tests (229 test cases)
+### Native tests (230 test cases)
 
 215 run by default; `putty: real registry smoke test` and `codepage (Windows): regenerate the tables` are hidden. The **Needs** column shows the tool without which a
 test case is skipped. On macOS every suite runs; its `platform_ui` has the macOS local files tests (listed after
@@ -429,7 +429,7 @@ Charset decoding/encoding, session logging, the session manager (ordering, batch
 | session manager: closeAll tears everything down | `[manager]` |  | `sessionmanager_tests.cpp` |
 | session manager: bridge handlers | `[manager]` |  | `sessionmanager_tests.cpp` |
 
-#### sftp — `st_test_sftp.exe` (23)
+#### sftp — `st_test_sftp.exe` (24)
 
 File manager backend over SFTP and SCP: browsing, transfers, conflicts, resume, move, find, synchronize, edit. *Kind: integration (test SSH server).* Source: [native/tests/sftp](../native/tests/sftp).
 
@@ -458,6 +458,7 @@ File manager backend over SFTP and SCP: browsing, transfers, conflicts, resume, 
 | transfer: uploads merge into existing folders | `[sftp][transfer]` |  | `transfer_tests.cpp` |
 | transfer: folder transfers report the listing before copying | `[sftp][transfer]` |  | `transfer_tests.cpp` |
 | transfer: folder uploads can leave out macOS Finder's files | `[sftp][transfer]` |  | `transfer_tests.cpp` |
+| transfer: upload as / download as give the one item a new name | `[sftp][transfer]` |  | `transfer_tests.cpp` |
 
 #### ssh — `st_test_ssh.exe` (25)
 
@@ -758,7 +759,7 @@ The UI's own errors in the app log (`app:log`): how errors are described, repeat
 | reportError | stops after 50 reports |
 | reportError | reports uncaught errors and unhandled rejections from the window |
 
-### UI browser tests (24 tests, each run as `windows` and `macos`)
+### UI browser tests (26 tests, each run as `windows` and `macos`)
 
 Source: [ui/e2e](../ui/e2e).
 
@@ -788,6 +789,8 @@ Source: [ui/e2e](../ui/e2e).
 | `local-terminal.spec.ts` | the shortcut (macOS: the File menu) opens the default shell |
 | `local-terminal.spec.ts` | the new tab menu lists the installed shells and opens one |
 | `local-terminal.spec.ts` | the welcome screen has a Local terminal button |
+| `transfer-as.spec.ts` | "Download as…" asks for the name and the transfer uses it |
+| `transfer-as.spec.ts` | "Upload as…" is offered for an item of this computer |
 
 ## 6. How to run the tests
 

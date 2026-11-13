@@ -185,6 +185,38 @@ export function SftpPanel({ paneId, visible, onClose }: SftpPanelProps) {
       toast.error('Upload failed', errorText(e));
     }
   };
+  /** "Download as…": the system's Save dialog picks the folder and the name. */
+  const downloadAs = async (item: FileItem) => {
+    if (!sftpId) return;
+    const target = await api.dialog.saveFile({ title: `Download "${item.name}" as`, defaultPath: item.name });
+    if (!target) return;
+    const cut = Math.max(target.lastIndexOf('/'), target.lastIndexOf('\\'));
+    try {
+      await api.sftp.download(sftpId, [item.path], target.slice(0, cut), { ...transferOpts(), targetName: target.slice(cut + 1) });
+    } catch (e) {
+      toast.error('Download failed', errorText(e));
+    }
+  };
+  /** "Upload file as…": a file from this computer, then the name it gets in the folder on screen. */
+  const uploadAs = async () => {
+    if (!sftpId) return;
+    const local = await api.dialog.openFile({ title: `Upload a file to ${path}` });
+    if (!local) return;
+    const own = local.slice(Math.max(local.lastIndexOf('/'), local.lastIndexOf('\\')) + 1);
+    const name = await inputDialog({
+      title: `Upload "${own}" as`,
+      label: 'Name on the server',
+      initial: own,
+      confirmLabel: 'Upload',
+      validate: (v) => nameError(v, 'remote')
+    });
+    if (!name?.trim()) return;
+    try {
+      await api.sftp.upload(sftpId, path, [local], { ...transferOpts(), targetName: name.trim() });
+    } catch (e) {
+      toast.error('Upload failed', errorText(e));
+    }
+  };
   const mkdir = async () => {
     if (!sftpId) return;
     const name = await inputDialog({ title: 'New folder', label: 'Folder name', confirmLabel: 'Create', validate: (v) => nameError(v, 'remote') });
@@ -296,6 +328,7 @@ export function SftpPanel({ paneId, visible, onClose }: SftpPanelProps) {
           { label: one?.isDir ? 'Open' : 'Open with default app', disabled: !one, onClick: () => one && open(one) },
           { label: 'Edit (upload on save)', shortcut: 'F4', disabled: !one || one.isDir, onClick: () => one && edit(one) },
           { label: list.length > 1 ? `Download ${list.length} items…` : 'Download…', onClick: () => void download(list) },
+          { label: 'Download as…', disabled: !one || one.isDir, onClick: () => one && void downloadAs(one) },
           { type: 'separator' },
           { label: 'Rename…', shortcut: 'F2', disabled: !one, onClick: () => one && void rename(one) },
           { label: 'Permissions…', disabled: !one, onClick: () => one && setChmodItem(one) },
@@ -305,6 +338,7 @@ export function SftpPanel({ paneId, visible, onClose }: SftpPanelProps) {
         ]
       : [
           { label: 'Upload files…', onClick: () => void upload() },
+          { label: 'Upload file as…', onClick: () => void uploadAs() },
           { label: 'New folder…', onClick: () => void mkdir() },
           { label: 'Refresh', shortcut: 'F5', onClick: () => void refresh() },
           { label: 'Copy current path', onClick: () => api.app.writeClipboard(path) }

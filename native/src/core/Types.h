@@ -527,9 +527,11 @@ struct TransferOptions {
     bool deleteToRecycleBin = true;
     /** Folder uploads leave out .DS_Store and "._*" files (Finder's folder settings, macOS resource-fork copies). */
     bool skipMacFiles = false;
+    /** "Upload as" / "Download as": the name the one transferred item gets at the destination ('' = its own name). */
+    std::string targetName;
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TransferOptions, conflict, move, preserveTimestamps, deleteToRecycleBin,
-                                                skipMacFiles)
+                                                skipMacFiles, targetName)
 
 struct FileStat {
     std::string path;
