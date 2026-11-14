@@ -59,7 +59,9 @@ void applyInitialAppearance(ui::HostWindow& window, const Json& settings) {
         window.setThemeSource("light");
     else
         window.setThemeSource("dark");
-    window.setBackgroundMaterial(appearance.value("backgroundMaterial", std::string("none")));
+    // Mica / Acrylic are off since 1.1.0 (BACKDROPS_ENABLED in ui/src/theme/ThemeController.tsx): a saved
+    // appearance.backgroundMaterial is kept but not applied. Planned again for 1.2.0 (docs/notes/v1.2.0.md).
+    window.setBackgroundMaterial("none");
     const double scale = appearance.value("uiScale", 1.0);
     if (scale > 0) window.setUiScale(scale);
 }

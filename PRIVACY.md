@@ -21,7 +21,7 @@ SSHTermaq keeps these in its data folder (Windows: `%APPDATA%\SSHTermaq`; macOS:
 - passwords you choose to save, encrypted for your user account (Windows DPAPI; on macOS with a key kept in your
   login Keychain);
 - session logs, only when you turn logging on for a session;
-- an application log of program events, which contains no passwords.
+- an application log of program events and of the connections you open (server address and port, start, end and errors), which contains no user names or passwords and is never sent anywhere.
 
 Deleting the data folder (or uninstalling the app from the Microsoft Store, which removes its package data) removes all
 of it.

@@ -133,7 +133,7 @@ Get the files from the [latest release](https://github.com/f1resh/sshtermaq/rele
 | Terminal | PuTTY keyboard modes (Backspace, Home/End, function-key variants, app cursor/keypad), local echo/line editing, charsets (UTF-8, ISO-8859-x, CP125x, KOI8, CP437/866, Shift_JIS, GBK, Big5, ...), bell modes, answerback, find, zoom, copy-on-select, right-click paste, bracketed paste, multi-line paste warning |
 | Sessions | Folders, colors, notes, duplicate, restart, renamable tabs and split panes (Ctrl+Shift+R, macOS ⇧⌘R; double-click a pane's header; kept after a restart, optionally), split panes with a title bar and close button, broadcast input to all panes, workspace restore, reconnect, session logging (printable / all / SSH debug, PuTTY `&H &Y &M &D &T &P` placeholders) |
 | File manager | See the next table |
-| Appearance | 15 app themes (the default is the neon-on-black SSHTermaq Neon), 30 terminal color schemes, custom scheme editor, configurable keybindings, Mica/Acrylic backdrop on Windows 11 |
+| Appearance | 15 app themes (the default is the neon-on-black SSHTermaq Neon), 30 terminal color schemes, custom scheme editor, configurable keybindings |
 | Keys | Key generator (Ed25519, RSA, ECDSA), inspect and convert between OpenSSH and PPK |
 | Import/export | PuTTY registry and `.reg` files, PuTTY for macOS / Unix's `~/.putty`, `~/.ssh/config` (ProxyJump, forwards, ...), JSON backup; export sessions to a PuTTY `.reg` file |
 | Links | `ssh://`, `sftp://`, `scp://` and `telnet://` links open in SSHTermaq |
@@ -258,7 +258,7 @@ How everything is tested, the full list of tests and how to run each part: [docs
     - SSH: all auth methods incl. Pageant, host keys, shell, exec, resize, signals, L/R/D forwarding, jump hosts;
     - keys: PPK v2/v3, cross-checked with PuTTY's `plink`;
     - PuTTY import: host-key conversion verified against `ssh-keygen` fingerprints;
-    - SFTP; the host window's policy; the platform layer (files, local files, drag & drop).
+    - SFTP; local terminals (ConPTY on Windows, pseudo-terminals on macOS); the host window's policy; the platform layer (files, local files, drag & drop).
   - Integration tests run against an in-process libssh test server (`native/tests/support`), itself validated with
     PuTTY's `plink` and `psftp`.
   - `st_testserver.exe --port 2222` runs that server standalone for manual testing (user `test`, password `secret`).
@@ -268,7 +268,8 @@ How everything is tested, the full list of tests and how to run each part: [docs
 - **UI (Vitest):** `cd ui; npm test`. Includes the bridge contract test: the native host and the mock backend answer
   the same channels.
 - **UI in a browser (Playwright):** `cd ui; npm run test:e2e` runs the UI against the mock backend in Edge, in both
-  the Windows and the macOS layout.
+  the Windows and the macOS layout: sessions, terminals, local terminals, the SFTP panel and file manager, import,
+  the key generator and settings. `cd ui; npm run coverage` shows the UI's line coverage by area.
 - **End-to-end:** `node ui/scripts/app.mjs --steps <file>` drives the real app over the WebView2 DevTools protocol.
 
 ## Architecture

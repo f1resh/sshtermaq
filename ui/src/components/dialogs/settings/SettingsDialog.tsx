@@ -30,7 +30,7 @@ import { useShells } from '@/store/shells';
 import { useUi } from '@/store/ui';
 import { APP_THEMES } from '@/theme/appThemes';
 import { BUILTIN_SCHEMES } from '@/theme/schemes';
-import { useSystemDark } from '@/theme/ThemeController';
+import { BACKDROPS_ENABLED, useSystemDark } from '@/theme/ThemeController';
 import { resolveAppTheme, resolveTerminalScheme } from '@/theme/resolve';
 import { DEFAULT_KEYBINDINGS, newId } from '@shared/defaults';
 import { isMac, osTerms } from '@shared/platform';
@@ -136,8 +136,9 @@ function AppearancePage() {
         <ColorSwatches value={a.accentColor} onChange={(accentColor) => update({ appearance: { accentColor } })} noneLabel="Theme default" />
       </Section>
       <Section title="Window">
-        {/* Windows only: the macOS window has no such backdrop (HostWindowMac ignores the setting). */}
-        {!isMac && (
+        {/* Windows only: the macOS window has no such backdrop (HostWindowMac ignores the setting). Hidden while
+            BACKDROPS_ENABLED is off. */}
+        {!isMac && BACKDROPS_ENABLED && (
           <SettingRow label="Background material" description="Mica and Acrylic use the Windows 11 translucent window backdrop.">
             <SegmentedControl
               value={a.backgroundMaterial}

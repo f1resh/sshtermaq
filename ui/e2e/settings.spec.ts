@@ -70,8 +70,8 @@ test.describe('settings', () => {
 
   test('rows only one system has', async ({ app, os }) => {
     const dialog = await openSettings(app);
-    // Windows: the Mica / Acrylic backdrop (the macOS window has none).
-    await expect(dialog.getByText('Background material', { exact: true })).toHaveCount(os === 'win32' ? 1 : 0);
+    // The Mica / Acrylic backdrop is off on both since 1.1.0 (BACKDROPS_ENABLED); when it is back, Windows only.
+    await expect(dialog.getByText('Background material', { exact: true })).toHaveCount(0);
     // macOS: Option as Meta.
     await section(dialog, 'Terminal');
     await expect(dialog.getByText('Use Option as Meta key', { exact: true })).toHaveCount(os === 'darwin' ? 1 : 0);

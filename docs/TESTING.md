@@ -856,7 +856,7 @@ Source: [ui/e2e](../ui/e2e).
 | `settings.spec.ts` | every section opens |
 | `settings.spec.ts` | a theme is applied to the window at once and kept after a restart |
 | `settings.spec.ts` | switches are saved (copy on select, restore tabs enabling "Keep tab and pane names", confirm before deleting) |
-| `settings.spec.ts` | rows only one system has (the backdrop on Windows, Option as Meta on macOS) |
+| `settings.spec.ts` | rows only one system has (Option as Meta on macOS; the Mica / Acrylic backdrop is hidden on both while it is off) |
 | `settings.spec.ts` | a new key binding works at once; "Reset to default" brings the old one back |
 
 ## 6. How to run the tests
