@@ -6,10 +6,12 @@
 #   dist/SSHTermaq-<ver>-mac-<arch>.dSYM.zip  the debug symbols (to read crash reports), not for users
 #   dist/SSHTermaq-<ver>-mac-<arch>.dmg       with --dmg: a disk image of the app, an Applications link and the texts
 #
-# Usage: scripts/macos/build.sh [--arch arm64|x64|all] [--tests] [--sign [--no-notarize]] [--dmg] [--skip-ui]
+# Usage: scripts/macos/build.sh [--arch arm64|x64|all] [--tests] [--e2e] [--sign [--no-notarize]] [--dmg] [--skip-ui]
 #                               [--no-zip] [--no-prompt]
 #   --arch        which builds (default: all; x64 runs under Rosetta on Apple silicon)
-#   --tests       run the UI and native test suites first (the other architecture's under Rosetta when it can)
+#   --tests       run the core tests first: UI unit tests (Vitest) and native (CTest; the other architecture's under
+#                 Rosetta when it can)
+#   --e2e         also run the end-to-end tests: UI typecheck and Playwright in Chrome (about 5 minutes)
 #   --sign        sign with your Developer ID and notarize (scripts/macos/sign.sh; checked before building); with
 #                 --dmg the disk images too
 #   --no-notarize with --sign: sign only
@@ -27,6 +29,7 @@ export PATH="$root/.tools/bin:$PATH"
 
 arch=all
 tests=0
+e2e=0
 skip_ui=0
 zip=1
 prompt=1
@@ -37,13 +40,14 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --arch) arch="${2:-}"; shift 2 ;;
     --tests) tests=1; shift ;;
+    --e2e) e2e=1; shift ;;
     --skip-ui) skip_ui=1; shift ;;
     --no-zip) zip=0; shift ;;
     --no-prompt) prompt=0; shift ;;
     --sign) sign=1; shift ;;
     --no-notarize) sign_flags=(--no-notarize); shift ;;
     --dmg) dmg=1; shift ;;
-    -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -103,6 +107,19 @@ if [ "$skip_ui" = 0 ]; then
   )
 fi
 [ -f ui/dist/index.html ] || die "ui/dist is missing (run without --skip-ui)"
+
+# ---- end-to-end tests (--e2e): the UI in Chrome against the mock backend, both layouts (docs/TESTING.md) --------------
+if [ "$e2e" = 1 ]; then
+  step "End-to-end tests"
+  # Chained with && on purpose: set -e does not apply inside a ( ... ) || die block.
+  # The typecheck includes the tests in ui/e2e.
+  (
+    cd ui &&
+      { [ -d node_modules ] || npm ci --no-audit --no-fund; } &&
+      npm run typecheck &&
+      npm run test:e2e
+  ) || die "end-to-end tests failed (report: ui/playwright-report)"
+fi
 
 # ---- per architecture --------------------------------------------------------------------------------------------------
 made=()

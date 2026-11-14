@@ -11,6 +11,8 @@
  * kept between runs and never deleted, and every test starts by clearing the site's stored data: the mock backend
  * keeps its state in localStorage, so each test starts from the mock's seed data.
  */
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test as base, chromium, expect, type BrowserContext, type Page } from '@playwright/test';
@@ -57,19 +59,44 @@ export const test = base.extend<{ os: HostOs; app: Page }>({
   },
 
   /** The UI, loaded and showing the welcome screen, as on `os`. Fails the test on uncaught errors in the page. */
-  app: async ({ page, os }, use) => {
+  app: async ({ page, os }, use, testInfo) => {
     await page.addInitScript(({ platform, userAgent }) => {
       Object.defineProperty(Navigator.prototype, 'platform', { get: () => platform });
       Object.defineProperty(Navigator.prototype, 'userAgent', { get: () => userAgent });
     }, navigatorOf[os]);
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
+    // `npm run coverage` (scripts/coverage.mjs) sets PW_COV: record which code of the UI each test runs.
+    const covDir = process.env.PW_COV;
+    if (covDir) await page.coverage.startJSCoverage({ resetOnNavigation: false });
     await page.goto('/');
-    await expect(page.getByRole('tree', { name: 'Sessions' })).toBeVisible();
+    // The first load (Vite compiling on demand) can take longer than the usual 5 s while 3 workers run, more so
+    // with coverage on: give it 15.
+    await expect(page.getByRole('tree', { name: 'Sessions' })).toBeVisible({ timeout: 15_000 });
     await use(page);
+    if (covDir) await saveCoverage(covDir, await page.coverage.stopJSCoverage(), testInfo.testId);
     expect(errors, 'uncaught errors in the page').toEqual([]);
   }
 });
+
+/**
+ * Writes the V8 coverage of one test: the ranges per module in `<dir>/runs/<test>.json`, and each module's source once
+ * (with Vite's inline source map) in `<dir>/sources/<hash>.js`, which scripts/coverage.mjs maps back to `src/`.
+ */
+async function saveCoverage(dir: string, entries: { url: string; source?: string; functions: unknown[] }[], testId: string): Promise<void> {
+  mkdirSync(join(dir, 'runs'), { recursive: true });
+  mkdirSync(join(dir, 'sources'), { recursive: true });
+  const runs = [];
+  for (const e of entries) {
+    const path = new URL(e.url).pathname;
+    if (!path.startsWith('/src/') || path.startsWith('/src/bridge/mock/') || !e.source) continue;
+    const hash = createHash('sha1').update(e.source).digest('hex');
+    const file = join(dir, 'sources', `${hash}.js`);
+    if (!existsSync(file)) writeFileSync(file, e.source);
+    runs.push({ path, hash, functions: e.functions });
+  }
+  writeFileSync(join(dir, 'runs', `${testId}.json`), JSON.stringify(runs));
+}
 
 export { expect };
 

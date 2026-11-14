@@ -175,7 +175,10 @@ export function registerCoreMocks(ctx: MockContext): void {
       return '';
     }
   });
-  ctx.on('app:writeClipboard', (text: string) => void navigator.clipboard?.writeText(text).catch(() => undefined));
+  ctx.on('app:writeClipboard', (text: string) => {
+    (globalThis as { __mockClipboard?: string }).__mockClipboard = text; // what the Playwright tests read back
+    void navigator.clipboard?.writeText(text).catch(() => undefined);
+  });
   ctx.handle('app:logDirectory', () => 'C:\\Users\\mock\\AppData\\Roaming\\SSHTermaq\\logs');
   ctx.handle('app:readFileDataUrl', () => null);
   ctx.handle('app:openExternal', (url: string) => void globalThis.open?.(url, '_blank'));
@@ -205,12 +208,27 @@ export function registerCoreMocks(ctx: MockContext): void {
   // The macOS menu bar the UI asked for, for the Playwright tests (ui/e2e).
   ctx.on('window:setMenuBar', (menus: unknown) => void ((globalThis as { __mockMenuBar?: unknown }).__mockMenuBar = menus));
 
-  /* dialogs */
-  ctx.handle('dialog:openFile', () => null);
-  ctx.handle('dialog:openFiles', () => []);
-  ctx.handle('dialog:openDirectory', () => null);
-  ctx.handle('dialog:saveFile', () => null);
-  ctx.handle('dialog:saveTextFile', () => null);
+  /* dialogs: cancelled, unless a Playwright test (ui/e2e) set the next answer with __mockDialog(kind, answer) */
+  const answers = new Map<string, unknown[]>();
+  const next = <T>(kind: string, cancelled: T): T => {
+    const queue = answers.get(kind);
+    return queue?.length ? (queue.shift() as T) : cancelled;
+  };
+  const saved: { path: string; content: string; secret: boolean }[] = [];
+  Object.assign(globalThis, {
+    __mockDialog: (kind: string, answer: unknown) => answers.set(kind, [...(answers.get(kind) ?? []), answer]),
+    /** What dialog:saveTextFile wrote (path, content, secret), oldest first. */
+    __mockSaved: saved
+  });
+  ctx.handle('dialog:openFile', () => next<string | null>('openFile', null));
+  ctx.handle('dialog:openFiles', () => next<string[]>('openFiles', []));
+  ctx.handle('dialog:openDirectory', () => next<string | null>('openDirectory', null));
+  ctx.handle('dialog:saveFile', () => next<string | null>('saveFile', null));
+  ctx.handle('dialog:saveTextFile', (content: string, _opts?: unknown, secret?: boolean) => {
+    const path = next<string | null>('saveTextFile', null);
+    if (path) saved.push({ path, content, secret: !!secret });
+    return path;
+  });
 
   /* local shells */
   ctx.handle('shells:list', () =>

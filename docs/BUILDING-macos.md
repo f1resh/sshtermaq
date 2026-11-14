@@ -108,8 +108,8 @@ On the way it moves the debug information into the dSYM, strips the app, signs i
 processor only, nothing loaded from outside macOS and the app (only `/System/Library`, `/usr/lib` and the bundled
 libssh), a valid signature and the version in `Info.plist`.
 
-Options: `--arch arm64` or `--arch x64` builds one, `--tests` runs the UI and native test suites first (Release),
-`--sign` signs with your Developer ID and notarizes (section 7), `--sign --no-notarize` only signs, `--dmg` also makes
+Options: `--arch arm64` or `--arch x64` builds one, `--tests` runs the core tests first (UI unit tests, native suites in Release),
+`--e2e` the end-to-end tests (UI typecheck and the browser tests in Chrome, about 5 minutes), `--sign` signs with your Developer ID and notarizes (section 7), `--sign --no-notarize` only signs, `--dmg` also makes
 the disk images (made with macOS's `hdiutil`; signed and notarized too with `--sign`), `--skip-ui` reuses
 `ui/dist`, `--no-zip` leaves the folders only, `--no-prompt` skips the version check (also skipped without a terminal).
 
@@ -126,7 +126,7 @@ staples the ticket to the app (so it opens offline too) and checks it as Gatekee
 same for each disk image (a signature of its own, notarization, ticket), so that the download itself is accepted, not
 only the app inside. `sign.sh` also works on its own, on apps and disk images:
 `scripts/macos/sign.sh dist/SSHTermaq-<version>-mac-arm64/SSHTermaq.app`. A release with everything:
-`scripts/macos/build.sh --tests --sign --dmg`.
+`scripts/macos/build.sh --tests --e2e --sign --dmg`.
 
 Once per Mac:
 

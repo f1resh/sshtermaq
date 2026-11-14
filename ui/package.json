@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc -p e2e/tsconfig.json",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "coverage": "node scripts/coverage.mjs",
     "preview": "vite preview"
   },
   "devDependencies": {
@@ -17,6 +18,7 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",
     "@vitejs/plugin-react": "5.2.0",
+    "@vitest/coverage-v8": "4.1.11",
     "@xterm/addon-fit": "0.10.0",
     "@xterm/addon-search": "0.15.0",
     "@xterm/addon-unicode11": "0.8.0",

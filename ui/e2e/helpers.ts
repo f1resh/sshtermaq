@@ -39,6 +39,41 @@ export async function useDomRenderer(page: Page): Promise<void> {
   });
 }
 
+type DialogKind = 'openFile' | 'openFiles' | 'openDirectory' | 'saveFile' | 'saveTextFile';
+
+/**
+ * Sets the answer of the next system file dialog of `kind` (the mock answers "cancelled" otherwise): a path, a list
+ * of paths for openFiles, or null.
+ */
+export async function mockDialog(page: Page, kind: DialogKind, answer: string | string[] | null): Promise<void> {
+  await page.evaluate(
+    ([k, a]) => (globalThis as unknown as { __mockDialog(kind: string, answer: unknown): void }).__mockDialog(k as string, a),
+    [kind, answer] as const
+  );
+}
+
+/** What the app saved through the Save dialog (dialog:saveTextFile), oldest first. */
+export function savedFiles(page: Page): Promise<{ path: string; content: string; secret: boolean }[]> {
+  return page.evaluate(() => (globalThis as unknown as { __mockSaved: { path: string; content: string; secret: boolean }[] }).__mockSaved);
+}
+
+/** Changes settings through the app's own bridge module, as the settings dialog would. */
+export async function updateSettings(page: Page, patch: Record<string, unknown>): Promise<void> {
+  await page.evaluate(async (p) => {
+    const module = '/src/bridge/api.ts';
+    const { api } = (await import(module)) as typeof import('../src/bridge/api');
+    await api.settings.update(p);
+  }, patch);
+}
+
+/** Connects web-01 (the mock's demo server) in a tab and opens its SFTP panel; returns the panel. */
+export async function openSftpPanel(page: Page): Promise<Locator> {
+  await sessionItem(page, 'web-01').dblclick();
+  await page.getByRole('contentinfo').getByRole('button', { name: 'SFTP', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Path' })).toHaveValue('/home/demo');
+  return page.locator('.sftp').first();
+}
+
 /** Answers a "Close tab?" / "Close pane?" question with Close, if one is shown. */
 export async function confirmClose(page: Page): Promise<void> {
   const dialog = page.getByRole('dialog', { name: /^Close .*\?$/ });

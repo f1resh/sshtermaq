@@ -224,7 +224,7 @@ Step-by-step setup, Visual Studio usage and troubleshooting: [docs/BUILDING.md](
 & "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\vcpkg\vcpkg.exe" install --triplet x64-windows-st --overlay-triplets=triplets --x-install-root=vcpkg_installed
 
 # everything: UI + native Release + dist\SSHTermaq-<version>-win-x64 (+ zip); asks you to check the version first
-.\scripts\windows\build.ps1    # -Tests runs all test suites first, -Portable adds portable.flag, -Installer adds setup.exe,
+.\scripts\windows\build.ps1    # -Tests runs the core tests first (-E2E: also the browser tests), -Portable adds portable.flag, -Installer adds setup.exe,
                                # -Sign signs the exe, ssh.dll and the installer (setup: docs/BUILDING.md, section 10)
 ```
 

@@ -12,12 +12,13 @@ them depends on another.
 |---|---|---|---|---|---|---|
 | **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 232 test cases | about 1 minute |
 | **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 16 files, 142 tests | under 2 seconds |
-| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart | Playwright Test | `ui/e2e/*.spec.ts` | yes | 9 files, 32 tests, each run twice (64) | about 1–1.5 minutes |
+| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart, the SFTP panel, the two-pane file manager, import and export, the key generator, settings | Playwright Test | `ui/e2e/*.spec.ts` | yes | 14 files, 70 tests, each run twice (140) | about 5 minutes |
 | **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs`, `ui/scripts/checks/` | no, run by hand | `checks/local-terminal.mjs` | seconds |
 
-The browser tests cover the main screens, not every dialog: settings, import, the key generator and the file manager
-have no browser tests yet. There is no CI: tests run when a developer runs them, or through
-`scripts\windows\build.ps1 -Tests` (native and UI unit tests; not the browser tests). See
+The browser tests cover the main screens and dialogs, not yet the host key and password prompts or the color scheme
+editor. There is no CI: tests run when a developer runs them, or through the build scripts:
+`scripts\windows\build.ps1 -Tests` / `scripts/macos/build.sh --tests` run the core tests (native and UI unit tests),
+`-E2E` / `--e2e` the end-to-end tests (UI typecheck and the browser tests). See
 [section 8](#8-what-is-not-covered).
 
 ## 2. Tools and libraries
@@ -87,6 +88,13 @@ by `cmake/EmbedUi.cmake`), so loading the embedded UI is tested against the real
 - **Only pure logic is tested**, because there is no DOM: functions that turn input into output without React or the
   native host.
 
+### UI coverage
+
+`npm run coverage` (in `ui`, about 6 minutes) runs the unit tests and the browser tests with coverage and prints the
+UI's line coverage by area: unit tests, browser tests and both (`ui/scripts/coverage.mjs`; the browser part is recorded
+by `e2e/fixtures.ts` when `PW_COV` is set). `npm run coverage -- --report` prints the last table again. Output in
+`ui/coverage/` (`summary.md`, `summary.json`; not in git). 2026-11-14: 69 % of 6,546 lines.
+
 ### UI browser tests
 
 - **Folder:** [ui/e2e](../ui/e2e), files named `<area>.spec.ts`; configuration in
@@ -105,9 +113,13 @@ by `cmake/EmbedUi.cmake`), so loading the embedded UI is tested against the real
   delete them.
 - **Finding elements:** by role and accessible name, as a user sees them (`getByRole('dialog', { name: … })`), not by
   CSS classes. Shared actions are in [e2e/helpers.ts](../ui/e2e/helpers.ts).
-- **Playing the host:** for what only the native host does, the mock offers two hooks: `__mockEmit(channel, ...args)`
-  sends an event as the host would (the macOS menu bar's `window:onMenuCommand`), and `__mockMenuBar` holds the menu
-  bar the UI last sent.
+- **Playing the host:** for what only the native host does, the mock offers hooks:
+  - `__mockEmit(channel, ...args)` sends an event as the host would (the macOS menu bar's `window:onMenuCommand`);
+  - `__mockMenuBar` holds the menu bar the UI last sent;
+  - `__mockDialog(kind, answer)` sets the answer of the next system file dialog (`openFile`, `openFiles`,
+    `openDirectory`, `saveFile`, `saveTextFile`; otherwise they answer "cancelled"); helper `mockDialog`;
+  - `__mockSaved` lists what `dialog:saveTextFile` wrote (path, content, owner-only); helper `savedFiles`;
+  - `__mockClipboard` holds the last text the UI copied (`app:writeClipboard`), so no clipboard permission is needed.
 - **Terminal text:** xterm.js draws on a canvas by default; tests that read the terminal switch to its DOM renderer
   first (`useDomRenderer`), whose rows are plain text.
 - **Failures:** the list in the console, an HTML report in `ui/playwright-report`, and a trace of each failing test in
@@ -767,7 +779,7 @@ The UI's own errors in the app log (`app:log`): how errors are described, repeat
 | reportError | stops after 50 reports |
 | reportError | reports uncaught errors and unhandled rejections from the window |
 
-### UI browser tests (32 tests, each run as `windows` and `macos`)
+### UI browser tests (70 tests, each run as `windows` and `macos`)
 
 Source: [ui/e2e](../ui/e2e).
 
@@ -805,6 +817,44 @@ Source: [ui/e2e](../ui/e2e).
 | `rename.spec.ts` | the tab menu renames the tab; an empty name brings the automatic title back |
 | `rename-restart.spec.ts` | with "Keep tab and pane names" on (the default), the tab and the pane keep their names (a reload plays the restart: the mock keeps its data in localStorage) |
 | `rename-restart.spec.ts` | with it off, the tabs come back with automatic titles |
+| `sftp-panel.spec.ts` | navigates: open a folder, up, Home, breadcrumbs, a typed path, Backspace; a missing folder shows the error |
+| `sftp-panel.spec.ts` | hidden files are shown on request; columns sort both ways |
+| `sftp-panel.spec.ts` | new folder, rename with F2, delete with and without the question ("Confirm before deleting" off) |
+| `sftp-panel.spec.ts` | the permissions dialog changes a mode, by checkbox and in octal; Cancel changes nothing |
+| `sftp-panel.spec.ts` | download: the transfer runs, finishes, and "Clear finished" removes it |
+| `sftp-panel.spec.ts` | upload: the toolbar button, and "Upload file as…" with a new name; a cancelled picker does nothing |
+| `sftp-panel.spec.ts` | an upload onto an existing name asks: Skip leaves it, Rename… keeps both |
+| `sftp-panel.spec.ts` | "Download as…" takes the name from the Save dialog; not offered for folders |
+| `sftp-panel.spec.ts` | context menus: Copy path, Copy current path, Refresh |
+| `sftp-panel.spec.ts` | "Open in the file manager" opens the two-pane file manager for the same server |
+| `sftp-panel.spec.ts` | the panel closes with its button |
+| `sftp-panel.spec.ts` | a Telnet session has no SFTP panel button |
+| `file-manager.spec.ts` | navigates the server: open, back, forward, up, Home, a typed path (Ctrl+L / ⌘L) |
+| `file-manager.spec.ts` | copies with F5 both ways and moves with F6 (the "move" tag, "All done") |
+| `file-manager.spec.ts` | a conflict asks (Overwrite); the toolbar choice "skip" answers without asking |
+| `file-manager.spec.ts` | a running transfer can be cancelled and retried; "Clear finished" empties the list |
+| `file-manager.spec.ts` | bookmarks: add a folder, go back to it, remove it |
+| `file-manager.spec.ts` | new folder (F7), rename in place (F2), delete with the question |
+| `file-manager.spec.ts` | find files on the server (wildcards, the count, no matches), and go to a result |
+| `file-manager.spec.ts` | synchronize: compare shows the differences, then runs them as transfers (the "sync" tag) |
+| `file-manager.spec.ts` | hidden files on request; a terminal to the same server from the toolbar |
+| `file-manager.spec.ts` | the local side lists the computer ("This PC" with the drives / the home folder), and filters |
+| `import.spec.ts` | offers the sources of this system and counts the PuTTY sessions |
+| `import.spec.ts` | PuTTY: notes, filter, select, import into the PuTTY folder (sessions and host keys) |
+| `import.spec.ts` | existing sessions at the top level: marked, and replaced when chosen |
+| `import.spec.ts` | OpenSSH config into a folder of its own, with the notes of a host; "Import more" |
+| `import.spec.ts` | a .reg file and a JSON backup show their previews |
+| `import.spec.ts` | a session exports to a PuTTY .reg file and to JSON |
+| `keygen.spec.ts` | generates an Ed25519 key: public key, fingerprint, and a warning without a passphrase |
+| `keygen.spec.ts` | RSA offers key sizes, ECDSA curves |
+| `keygen.spec.ts` | the passphrase must be confirmed and match |
+| `keygen.spec.ts` | saves the private key (OpenSSH, .ppk) owner-only and the public key; a cancelled Save saves nothing; copies the public key |
+| `keygen.spec.ts` | loads an existing key: a missing file, the passphrase of an encrypted one, then converts it to .ppk |
+| `settings.spec.ts` | every section opens |
+| `settings.spec.ts` | a theme is applied to the window at once and kept after a restart |
+| `settings.spec.ts` | switches are saved (copy on select, restore tabs enabling "Keep tab and pane names", confirm before deleting) |
+| `settings.spec.ts` | rows only one system has (the backdrop on Windows, Option as Meta on macOS) |
+| `settings.spec.ts` | a new key binding works at once; "Reset to default" brings the old one back |
 
 ## 6. How to run the tests
 
@@ -836,8 +886,10 @@ Catch2 options, for any `st_test_*.exe`:
 one, choose *Set as Startup Project*, and press F5 to debug it. To debug a single test case, put its name or tag into
 *Properties* → *Debugging* → *Command Arguments*.
 
-**Release build:** `.\scripts\windows\build.ps1 -Tests` runs the UI tests, then builds everything in Release and runs
-`ctest` (every native suite and the platform boundary check) before packaging; it stops when anything fails.
+**Release build:** `.\scripts\windows\build.ps1 -Tests` runs the UI unit tests, then builds everything in Release and
+runs `ctest` (every native suite and the platform boundary check) before packaging; `-E2E` also runs the UI typecheck
+(with `ui/e2e`) and the browser tests (`npm run test:e2e`, about 5 minutes). It stops when anything fails. macOS:
+`scripts/macos/build.sh --tests --e2e`.
 
 ### UI unit tests
 
@@ -986,13 +1038,17 @@ complete at that point. A Node `DEP0190` deprecation warning at the start is har
 ## 8. What is not covered
 
 - **UI behaviour:** the browser tests (section 5) cover the welcome screen, the session editor, the sidebar, the
-  command palette, terminals and split panes, against the mock backend. Not covered yet: the settings, import and key
-  generator dialogs, the file manager and SFTP panel, themes, drag and drop, and the host-specific code (the real
-  WebView2 / WKWebView bridge client). They are checked by hand with the scripts in section 7.
+  command palette, terminals and split panes, against the mock backend. Since 2026-11-14 also the SFTP panel, the file manager, import and export, the key
+  generator and the settings dialog. Not covered yet: the host key and password / 2FA prompts, the color scheme editor,
+  drag and drop, and the host-specific code (the real WebView2 / WKWebView bridge client). They are checked by hand with the scripts in section 7.
 - **Native parts without tests:** the main window and WebView2 host (`platform/win/ui/HostWindowWin`; its policy, `app/HostController`, is tested), the core bridge handlers
   (`app/CoreHandlers`: sessions, settings, known hosts, window, ...), native file dialogs (`platform/ui/Dialogs`), the import
   bridge handlers (`importers/ImportHandlers`) and the serial port transport (needs hardware). The logic underneath
   most of them (storage, importers) is tested.
+- **Serial ports with real hardware: never confirmed.** On Windows no serial session has been tested with a real
+  COM port (USB adapter: FTDI, CP210x, CH340) at all; on macOS only through pseudo-terminals in the `platform` tests,
+  never with an adapter. Whoever has an adapter: connect a serial session (line settings, typing both ways, Break)
+  and record the result here (release checklist, sections 2 and 3, has the steps).
 - **No continuous integration:** nothing runs the tests automatically.
 
 ## 9. Adding tests
