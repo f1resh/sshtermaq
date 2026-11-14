@@ -10,8 +10,10 @@
   ./scripts/windows/build.ps1            # UI + native Release + dist/SSHTermaq-<ver>-win-x64 (+ .zip)
   ./scripts/windows/build.ps1 -SkipUi    # reuse ui/dist
   ./scripts/windows/build.ps1 -Portable  # also drop portable.flag so the app keeps its data next to the exe
-  ./scripts/windows/build.ps1 -Tests     # run the native and UI test suites first
+  ./scripts/windows/build.ps1 -Tests     # run the core tests first: native (CTest) and UI unit tests (Vitest)
+  ./scripts/windows/build.ps1 -E2E       # also run the end-to-end tests: UI typecheck and Playwright in Edge (~5 min)
   ./scripts/windows/build.ps1 -Installer # also build dist/SSHTermaq-<ver>-setup.exe (Inno Setup 6)
+  ./scripts/windows/build.ps1 -Msix      # also build dist/SSHTermaq-<ver>-win-x64.msix for the Microsoft Store (msix.ps1)
   ./scripts/windows/build.ps1 -Sign      # sign SSHTermaq.exe, ssh.dll and the installer (scripts/windows/sign.ps1)
   ./scripts/windows/build.ps1 -NoPrompt  # do not wait for Enter at the version check
 #>
@@ -19,9 +21,11 @@ param(
     [switch]$SkipUi,
     [switch]$Portable,
     [switch]$Tests,
+    [switch]$E2E,
     [switch]$NoZip,
     [switch]$Installer,
     [switch]$Sign,
+    [switch]$Msix,
     [switch]$NoPrompt
 )
 
@@ -31,6 +35,13 @@ Set-Location $root
 
 $cmake = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
 if (-not (Test-Path $cmake)) { $cmake = (Get-Command cmake -ErrorAction Stop).Source }
+
+# npm: from PATH, else the Node.js that Visual Studio ships (it is not on PATH, not even in the developer shell).
+$vsNode = 'C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VisualStudio\NodeJs'
+if (-not $SkipUi -and -not (Get-Command npm -ErrorAction SilentlyContinue)) {
+    if (-not (Test-Path (Join-Path $vsNode 'npm.cmd'))) { throw 'npm not found: install Node.js 22 LTS (winget install OpenJS.NodeJS.LTS)' }
+    $env:Path = "$vsNode;$env:Path"
+}
 
 # ---- version --------------------------------------------------------------------------------------
 # The version is set only in CMakeLists.txt; the build number (commit count) and the commit come from git, as in
@@ -84,6 +95,17 @@ if (-not $SkipUi) {
     Pop-Location
 }
 if (-not (Test-Path ui/dist/index.html)) { throw 'ui/dist is missing (run without -SkipUi)' }
+
+# ---- end-to-end tests (-E2E): the UI in Edge against the mock backend, both layouts (docs/TESTING.md) --------
+if ($E2E) {
+    Push-Location ui
+    if (-not (Test-Path node_modules)) { npm install --no-audit --no-fund | Out-Host }
+    npm run typecheck | Out-Host               # includes the tests in ui/e2e
+    if ($LASTEXITCODE) { Pop-Location; throw 'UI typecheck failed' }
+    npm run test:e2e | Out-Host
+    if ($LASTEXITCODE) { Pop-Location; throw 'End-to-end tests failed (report: ui/playwright-report)' }
+    Pop-Location
+}
 
 # ---- native ---------------------------------------------------------------------------------------
 $testsFlag = if ($Tests) { 'ON' } else { 'OFF' }
@@ -153,4 +175,10 @@ if ($Installer) {
     & $iscc @isccArgs (Join-Path $PSScriptRoot 'installer.iss') | Out-Host
     if ($LASTEXITCODE) { throw 'Installer build failed' }
     Write-Host "Created $(Join-Path $root "dist/SSHTermaq-$version-setup.exe")" -ForegroundColor Green
+}
+
+# ---- Microsoft Store package -------------------------------------------------------------------------
+if ($Msix) {
+    if ($Portable) { throw '-Msix and -Portable do not go together (the package keeps its data in the user profile)' }
+    & (Join-Path $PSScriptRoot 'msix.ps1') -Source $dist
 }

@@ -7,9 +7,10 @@ import { toast } from '@/components/ui';
 import { choiceDialog } from '@/components/layout/ChoiceDialog';
 import { useSessions, useSettings } from '@/store/data';
 import { confirmDialog, inputDialog, useUi } from '@/store/ui';
-import { paneIdsOf, useWorkspace, type OpenTarget, type PaneState } from '@/store/workspace';
-import { newId, normalizeFolder, sessionLabel } from '@shared/defaults';
-import type { SessionConfig, SessionView } from '@shared/types';
+import { pickDefaultShell, useShells } from '@/store/shells';
+import { getActivePane, paneIdsOf, useWorkspace, type OpenTarget, type PaneState } from '@/store/workspace';
+import { createLocalSession, newId, normalizeFolder, sessionLabel } from '@shared/defaults';
+import type { LocalShellInfo, SessionConfig, SessionView } from '@shared/types';
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -63,6 +64,25 @@ export function connectSession(
     api.sessions.save({ ...saved, lastUsedAt: Date.now() }).catch((e) => console.warn('lastUsedAt update failed', e));
   }
   return paneId;
+}
+
+/**
+ * A local terminal with `shell` (from shells:list), else the default shell (settings.terminal.defaultShell). Unsaved,
+ * like a quick connection; it starts right away, because the user asked for it.
+ */
+export async function openLocalTerminal(shell?: LocalShellInfo, target: OpenTarget = 'tab'): Promise<void> {
+  const shells = await useShells.getState().load();
+  const settings = useSettings.getState().settings;
+  const chosen = shell ?? pickDefaultShell(shells, settings.terminal.defaultShell);
+  if (!chosen) {
+    toast.error('No local terminal', 'Local terminals need Windows 10 version 1809 or later.');
+    return;
+  }
+  const session = createLocalSession(chosen, settings.defaultSession);
+  // From a local pane whose shell reported its folder: start there (not for WSL, which has its own paths).
+  const active = getActivePane();
+  if (active?.session.protocol === 'local' && active.cwd && !chosen.id.startsWith('wsl:')) session.local.startDir = active.cwd;
+  useWorkspace.getState().openSession(session, { sessionId: null, target });
 }
 
 export function connectSavedSession(id: string, target: OpenTarget = 'tab', view?: SessionView): void {

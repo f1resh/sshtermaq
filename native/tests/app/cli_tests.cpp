@@ -403,3 +403,22 @@ TEST_CASE("paths: portable vs installed vs override", "[app][paths]") {
     REQUIRE_FALSE(p.portable);
     REQUIRE(p.dataDir == tmp.path() / "custom");
 }
+
+TEST_CASE("cli: -local opens a local terminal (default shell, a shell name or a command line)", "[app][cli]") {
+    auto r = parse({"-local"});
+    REQUIRE(r.request);
+    CHECK(r.request->session.protocol == Protocol::Local);
+    CHECK(r.request->session.local.command.empty());  // the UI picks the default shell
+    CHECK(r.request->session.host.empty());
+    CHECK(r.errors.empty());
+
+    r = parse({"-local", "git bash"});
+    REQUIRE(r.request);
+    CHECK(r.request->session.local.command == "git bash");
+
+    // A following option is not the command; options still apply.
+    r = parse({"-local", "-v"});
+    REQUIRE(r.request);
+    CHECK(r.request->session.local.command.empty());
+    CHECK(r.verbose);
+}

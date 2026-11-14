@@ -4,7 +4,7 @@
  * overlays: connecting card, disconnected banner, authentication prompts, find bar and the context menu.
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Loader2, Plug, RotateCcw, ScrollText, X } from 'lucide-react';
+import { Loader2, Play, Plug, RotateCcw, ScrollText, SquareTerminal, X } from 'lucide-react';
 import { api } from '@/bridge/api';
 import { runCommand } from '@/commands/commands';
 import { Button, showContextMenu, type MenuItem } from '@/components/ui';
@@ -12,6 +12,7 @@ import { shortcutLabel } from '@/commands/keybindings';
 import { usePrompts } from '@/store/data';
 import { useUi } from '@/store/ui';
 import { useWorkspace } from '@/store/workspace';
+import { localProgramName } from '@shared/defaults';
 import type { SpecialCommandDef } from '@shared/types';
 import { lastEventLogOf, PANE_PROMPT_KINDS, watchEventLog } from './connEvents';
 import { FindBar } from './FindBar';
@@ -146,9 +147,31 @@ export function TerminalPane({ paneId, active, visible }: TerminalPaneProps) {
   }, [session, session?.reconnectAt]);
 
   const status = pane?.status ?? 'idle';
-  const connecting = status === 'idle' || status === 'connecting' || status === 'authenticating';
+  const waiting = status === 'idle' && !!pane?.deferStart;
+  const connecting = !waiting && (status === 'idle' || status === 'connecting' || status === 'authenticating');
   const ended = status === 'disconnected' || status === 'error';
-  const host = pane ? (pane.session.protocol === 'serial' ? pane.session.serial.line : pane.session.host) : '';
+  const local = pane?.session.protocol === 'local';
+  const host = !pane
+    ? ''
+    : pane.session.protocol === 'serial'
+      ? pane.session.serial.line
+      : local
+        ? localProgramName(pane.session.local.command)
+        : pane.session.host;
+
+  // Enter starts a local terminal that waits to be started.
+  useEffect(() => {
+    if (!waiting || !visible || !active || !pane) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.altKey || e.metaKey || e.key !== 'Enter') return;
+      if (useUi.getState().dialog) return;
+      e.preventDefault();
+      e.stopPropagation();
+      useWorkspace.getState().startPane(pane.id);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [waiting, visible, active, pane]);
 
   // Enter / R restarts an ended session (PuTTY-like), Esc closes the find bar.
   useEffect(() => {
@@ -180,7 +203,7 @@ export function TerminalPane({ paneId, active, visible }: TerminalPaneProps) {
             <Loader2 size={18} className="term-spin" />
             <div className="term-card__body">
               <div className="term-card__title">
-                {status === 'authenticating' ? 'Authenticating' : 'Connecting to'} <b>{host}</b>
+                {status === 'authenticating' ? 'Authenticating' : local ? 'Starting' : 'Connecting to'} <b>{host}</b>
               </div>
               {lastLine && <div className="term-card__detail">{lastLine}</div>}
             </div>
@@ -191,13 +214,31 @@ export function TerminalPane({ paneId, active, visible }: TerminalPaneProps) {
         </div>
       )}
 
+      {waiting && (
+        <div className="term-overlay term-overlay--center">
+          <div className="term-card">
+            <SquareTerminal size={18} />
+            <div className="term-card__body">
+              <div className="term-card__title">
+                <b>{host}</b> is not running
+              </div>
+              <div className="term-card__detail">{pane?.session.local.startDir.trim() || '~'}</div>
+            </div>
+            <Button size="sm" variant="primary" icon={<Play size={14} />} onClick={() => pane && useWorkspace.getState().startPane(pane.id)} title="Start (Enter)">
+              Start
+            </Button>
+          </div>
+        </div>
+      )}
+
       {ended && !prompt && (
         <div className={`term-banner term-banner--${status}`}>
           <Plug size={15} />
           <div className="term-banner__text">
-            <b>{status === 'error' ? 'Connection failed' : 'Session ended'}</b>
+            <b>{status === 'error' ? (local ? 'Could not start' : 'Connection failed') : local ? 'Process ended' : 'Session ended'}</b>
             <span>
-              {pane?.statusMessage || (status === 'error' ? 'The connection was lost.' : 'The remote side closed the connection.')}
+              {pane?.statusMessage ||
+                (local ? 'The program has ended.' : status === 'error' ? 'The connection was lost.' : 'The remote side closed the connection.')}
               {reconnectIn !== null && ` — reconnecting in ${reconnectIn}s`}
             </span>
           </div>

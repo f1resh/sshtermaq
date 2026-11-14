@@ -543,6 +543,7 @@ std::string exportPuttyReg(const std::vector<SessionConfig>& sessions) {
     std::vector<putty::RegKey> keys;
     std::set<std::string> used;
     for (const auto& s : sessions) {
+        if (s.protocol == Protocol::Local) continue;  // PuTTY has no local terminals
         std::string name = s.name.empty() ? sessionLabel(s) : s.name;
         if (!s.folder.empty()) name = s.folder + "/" + name;  // PuTTY has no folders; keep the path in the name
         std::string unique = name;

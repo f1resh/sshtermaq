@@ -10,6 +10,7 @@
 #include "core/Threading.h"
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -67,6 +68,9 @@ public:
 private:
     void post(std::string text);  // thread-safe, delivers to sink on UI thread
     void respond(int64_t id, bool ok, const Json& payload);
+    /** App log line for a rejected invoke: once per channel and message per minute, so expected failures (a missing
+     *  folder, a refused connection) cannot flood the log. Thread-safe. */
+    void logFailure(const std::string& channel, const std::string& message);
 
     Dispatcher& dispatcher_;
     std::function<void(const std::string&)> sink_;
@@ -74,6 +78,8 @@ private:
     std::unordered_map<std::string, InvokeHandler> invokes_;
     std::unordered_map<std::string, SendHandler> sends_;
     std::shared_ptr<std::atomic<bool>> alive_;
+    std::mutex failuresMutex_;
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point> failures_;  // logFailure's last line per key
 };
 
 }  // namespace st

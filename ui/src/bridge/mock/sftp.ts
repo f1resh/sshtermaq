@@ -423,13 +423,14 @@ export function registerSftpMocks(ctx: MockContext): void {
     const dirPath = localDir ?? mockLocal.join(mockLocal.home, 'Downloads');
     return remotePaths.map((rp) => {
       const node = fs.lookup(rp);
-      const localPath = mockLocal.join(dirPath, baseName(rp));
+      const name = opts?.targetName?.trim() || baseName(rp);
+      const localPath = mockLocal.join(dirPath, name);
       const existing = lfs.stat(localPath);
       return enqueue(
         {
           sftpId: id,
           direction: 'download',
-          name: baseName(rp),
+          name,
           localPath,
           remotePath: rp,
           total: fs.sizeOf(rp),
@@ -445,7 +446,7 @@ export function registerSftpMocks(ctx: MockContext): void {
     session(id);
     const picked = localPaths ?? [mockLocal.join(mockLocal.home, 'Documents/quarterly-report.xlsx')];
     return picked.map((lp) => {
-      const name = lp.split(/[\\/]/).pop() || 'upload.bin';
+      const name = opts?.targetName?.trim() || lp.split(/[\\/]/).pop() || 'upload.bin';
       const remotePath = join(normalize(remoteDir), name);
       const local = lfs.stat(lp);
       const existing = fs.lookup(remotePath);

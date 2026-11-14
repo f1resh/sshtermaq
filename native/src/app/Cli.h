@@ -5,6 +5,7 @@
 //   SSHTermaq.exe -serial COM3 -sercfg 115200,8,n,1,N
 //   SSHTermaq.exe -load "session name" | @sessionname
 //   SSHTermaq.exe telnet://host[:port]/   (also ssh://[user@]host[:port])
+//   SSHTermaq.exe -local ["shell name" | "command line"]   (a local terminal; not a PuTTY option)
 //
 // Supported PuTTY options: -ssh -telnet -rlogin -raw -serial, -P port, -l user, -pw password, -pwfile file,
 // -i keyfile, -load name, -L/-R/-D (PuTTY/OpenSSH syntax), -A/-a, -X/-x, -C, -4/-6, -N, -m file, -t/-T,

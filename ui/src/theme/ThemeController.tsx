@@ -15,6 +15,14 @@ import type { AppTheme, ColorScheme, SessionConfig } from '@shared/types';
 import { applyAppTheme } from './applyTheme';
 import { resolveAppTheme, resolveTerminalScheme } from './resolve';
 
+/**
+ * Mica / Acrylic window backdrops (Windows 11, settings.appearance.backgroundMaterial). Off since 1.1.0: with a
+ * backdrop, Windows also draws its own caption buttons under the app's (doubled), and the backdrop follows Windows'
+ * light/dark mode instead of the app's theme. Fixing that is planned for 1.2.0 (docs/notes/v1.2.0.md). While off, a
+ * saved value is kept but not applied, and the setting is not shown.
+ */
+export const BACKDROPS_ENABLED = false;
+
 interface SystemThemeState {
   dark: boolean;
   known: boolean;
@@ -72,8 +80,8 @@ export function ThemeController(): null {
   useEffect(() => initSystemTheme(), []);
 
   // In a plain browser (mock) there is no translucent window behind the page, so materials are only
-  // rendered inside the native host.
-  const material = isNativeHost() ? appearance.backgroundMaterial : 'none';
+  // rendered inside the native host. Off for now (BACKDROPS_ENABLED).
+  const material = BACKDROPS_ENABLED && isNativeHost() ? appearance.backgroundMaterial : 'none';
 
   useEffect(() => {
     applyAppTheme(theme, appearance.accentColor || undefined, material);
@@ -89,7 +97,7 @@ export function ThemeController(): null {
 
   useEffect(() => {
     if (!loaded) return;
-    api.app.setBackgroundMaterial(appearance.backgroundMaterial);
+    api.app.setBackgroundMaterial(BACKDROPS_ENABLED ? appearance.backgroundMaterial : 'none');
   }, [loaded, appearance.backgroundMaterial]);
 
   useEffect(() => {

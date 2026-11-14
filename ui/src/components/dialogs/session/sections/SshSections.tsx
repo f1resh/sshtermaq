@@ -31,7 +31,7 @@ import {
   ToggleRow,
   type SegmentOption
 } from '../../common/controls';
-import { isMac } from '@shared/platform';
+import { isMac, osTerms } from '@shared/platform';
 import { errorMessage } from '../../common/hooks';
 import { useEditor } from '../editorContext';
 import { algoRows, moveRow, valueForRows, type AlgoRow } from '../algoModel';
@@ -223,7 +223,7 @@ function SavedPasswordSection() {
   return (
     <Section
       title="Saved password"
-      description="Encrypted with Windows DPAPI for your user account and used automatically when the server asks for a password."
+      description={`Encrypted with ${osTerms.encryptedWith} and used automatically when the server asks for a password.`}
     >
       <div className="dlg-rows">
         <SettingRow

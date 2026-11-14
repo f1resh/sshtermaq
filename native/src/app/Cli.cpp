@@ -347,6 +347,8 @@ CliResult parseCommandLine(const std::vector<std::string>& args, const CliContex
     std::string password;
     bool verbose = false;
     bool fileView = false;   // sftp:// / scp:// URL
+    bool localRequested = false;  // -local
+    std::string localCommand;
     std::string remotePath;  // its path part
 
     for (size_t i = 0; i < args.size(); ++i) {
@@ -373,6 +375,12 @@ CliResult parseCommandLine(const std::vector<std::string>& args, const CliContex
                 protocol = Protocol::Raw;
             } else if (a == "-serial") {
                 protocol = Protocol::Serial;
+            } else if (a == "-local") {
+                // A local terminal: "-local" alone is the default shell; a following argument that is not an option
+                // names a shell ("pwsh", "git bash") or is a command line. The UI resolves the name.
+                protocol = Protocol::Local;
+                localRequested = true;
+                if (i + 1 < args.size() && !args[i + 1].empty() && args[i + 1][0] != '-') localCommand = args[++i];
             } else if (a == "-ssh-connection" || a == "-supdup") {
                 res.errors.push_back("protocol " + a.substr(1) + " is not supported");
             } else if (a == "-1") {
@@ -505,8 +513,15 @@ CliResult parseCommandLine(const std::vector<std::string>& args, const CliContex
     if (!password.empty() && s.protocol != Protocol::Ssh)
         res.warnings.push_back("-pw only works with SSH (ignored for this protocol)");
 
-    const bool hasTarget = s.protocol == Protocol::Serial ? !s.serial.line.empty() : !s.host.empty();
-    if ((positional || loaded) && hasTarget) {
+    if (s.protocol == Protocol::Local) {
+        s.local.command = localCommand;
+        s.host.clear();
+        s.port = 0;
+    }
+    const bool hasTarget = s.protocol == Protocol::Local    ? localRequested
+                           : s.protocol == Protocol::Serial ? !s.serial.line.empty()
+                                                            : !s.host.empty();
+    if ((positional || loaded || localRequested) && hasTarget) {
         OpenRequest req;
         req.session = std::move(s);
         if (loaded) req.savedSessionId = loaded->id;

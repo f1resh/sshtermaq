@@ -124,11 +124,11 @@ try {
   await page.waitForSelector('.app', { timeout: 15000 });
   await page.waitForTimeout(800);
 
+  mkdirSync(dirname(out), { recursive: true });  // before the steps: they save screenshots next to --out too
   if (steps) {
     const mod = await import(pathToFileURL(resolve(process.cwd(), steps)).href);
     await mod.default(page, { out, exe, dataDir, bridge, platform: process.platform });
   }
-  mkdirSync(dirname(out), { recursive: true });
   await page.screenshot({ path: out });
   console.log(`screenshot: ${out}`);
   const errors = logs.filter((l) => l.startsWith('[error]') || l.startsWith('[pageerror]'));

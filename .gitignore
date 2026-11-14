@@ -22,3 +22,10 @@ notes.md
 
 # macOS Finder metadata
 .DS_Store
+
+Dist_old/
+
+# Playwright (ui/e2e)
+/ui/test-results/
+/ui/playwright-report/
+/ui/coverage/

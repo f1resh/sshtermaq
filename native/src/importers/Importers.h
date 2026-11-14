@@ -25,7 +25,7 @@ std::vector<KnownHost> parseOpenSshKnownHosts(const std::string& content, int& s
 
 ImportResult applyImport(Store& store, const ImportRequest& req);
 
-/** UTF-16LE .reg bytes for the given sessions. */
+/** UTF-16LE .reg bytes for the given sessions (local terminals are left out: PuTTY has none). */
 std::string exportPuttyReg(const std::vector<SessionConfig>& sessions);
 /** Our JSON backup format (pretty printed). */
 std::string exportJsonBackup(const Json& sessions, const std::vector<std::string>& folders);

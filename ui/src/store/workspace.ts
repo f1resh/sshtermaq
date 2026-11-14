@@ -50,6 +50,12 @@ export interface PaneState {
   bell: boolean;
   /** One-time password (CLI -pw); consumed by the first connection attempt. */
   oneTimePassword?: string;
+  /** Local terminals restored at start-up: the pane waits (status 'idle') until the user starts it (startPane). */
+  deferStart?: boolean;
+  /** The name the user gave this pane (split tabs); shown instead of its automatic title. */
+  customTitle?: string;
+  /** Local terminals: the folder the shell last reported (OSC 7 / OSC 9;9); new local terminals from it start there. */
+  cwd?: string;
 }
 
 export interface TabState {
@@ -92,11 +98,15 @@ export interface WorkspaceState {
   activatePane(paneId: string): void;
   moveTab(fromIndex: number, toIndex: number): void;
   renameTab(tabId: string, title?: string): void;
+  /** Names a pane ('' / undefined: back to its automatic title). */
+  renamePane(paneId: string, title?: string): void;
   setTabColor(tabId: string, color?: string): void;
   toggleBroadcast(tabId: string): void;
   splitPane(paneId: string, direction: SplitDirection, session?: SessionConfig, sessionId?: string | null): string;
   duplicatePane(paneId: string, target: OpenTarget): string | undefined;
   restartPane(paneId: string): void;
+  /** Starts a pane that waits for the user (deferStart). */
+  startPane(paneId: string): void;
   resizeSplit(splitId: string, sizes: number[]): void;
   updatePane(paneId: string, patch: Partial<PaneState>): void;
   /** Applies only if connId is the pane's current connection. */
@@ -188,10 +198,11 @@ export function tabTitle(tab: TabState, panes: Record<string, PaneState>, mode: 
 }
 
 /**
- * Automatic title of a pane: the session's fixed window title, else by `mode` (settings.appearance.tabTitle):
- * the title the server set (when allowed), the session name, or the host / serial line.
+ * Title of a pane: the name the user gave it, else the session's fixed window title, else by `mode`
+ * (settings.appearance.tabTitle): the title the server set (when allowed), the session name, or the host / serial line.
  */
 export function paneTitle(p: PaneState, mode: TabTitleMode = 'terminal'): string {
+  if (p.customTitle) return p.customTitle;
   const s = p.session;
   const host = s.protocol === 'serial' ? s.serial.line : s.host;
   if (p.kind === 'files') return (mode === 'host' ? host : sessionLabel(s)) || host || 'Files';
@@ -326,6 +337,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     set((s) => ({ tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, customTitle: title || undefined } : t)) }));
   },
 
+  renamePane(paneId, title) {
+    const p = get().panes[paneId];
+    if (p) get().updatePane(paneId, { customTitle: title?.trim() || undefined });
+  },
+
   setTabColor(tabId, color) {
     set((s) => ({ tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, color: color || undefined } : t)) }));
   },
@@ -347,11 +363,22 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   duplicatePane(paneId, target) {
     const src = get().panes[paneId];
     if (!src) return undefined;
-    if (src.kind === 'files') {
-      // A file manager duplicates into a new file manager tab with its own connection.
-      return get().openSession(src.session, { view: 'files', sessionId: src.sessionId, remotePath: src.files?.remotePath, localPath: src.files?.localPath });
+    // A local shell's copy starts in the folder the shell is in now, when it reported one.
+    const session =
+      src.session.protocol === 'local' && src.cwd ? { ...src.session, local: { ...src.session.local, startDir: src.cwd } } : src.session;
+    const copy =
+      src.kind === 'files'
+        ? // A file manager duplicates into a new file manager tab with its own connection.
+          get().openSession(src.session, { view: 'files', sessionId: src.sessionId, remotePath: src.files?.remotePath, localPath: src.files?.localPath })
+        : get().openSession(session, { target, besidePaneId: paneId, sessionId: src.sessionId });
+    // A duplicated tab keeps the names the user gave (a pane split off the same tab does not: two panes, one name).
+    const made = get().panes[copy];
+    if (made && made.tabId !== src.tabId) {
+      const srcTab = get().tabs.find((t) => t.id === src.tabId);
+      if (srcTab?.customTitle) get().renameTab(made.tabId, srcTab.customTitle);
+      if (src.customTitle) get().renamePane(copy, src.customTitle);
     }
-    return get().openSession(src.session, { target, besidePaneId: paneId, sessionId: src.sessionId });
+    return copy;
   },
 
   restartPane(paneId) {
@@ -382,6 +409,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     set((s) => ({
       tabs: s.tabs.map((t) => ({ ...t, layout: mapSplit(t.layout, splitId, (n) => ({ ...n, sizes })) }))
     }));
+  },
+
+  startPane(paneId) {
+    const p = get().panes[paneId];
+    if (p?.deferStart) get().updatePane(paneId, { deferStart: false });
   },
 
   updatePane(paneId, patch) {

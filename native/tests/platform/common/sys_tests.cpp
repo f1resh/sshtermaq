@@ -17,6 +17,9 @@ TEST_CASE("platform: names", "[platform]") {
     const std::string os = sys::osName(), arch = sys::archName();
     REQUIRE((os == "win32" || os == "darwin"));
     REQUIRE((arch == "x64" || arch == "arm64"));
+    const std::string version = sys::osVersion();
+    REQUIRE(version.rfind(os == "win32" ? "Windows " : "macOS ", 0) == 0);
+    REQUIRE(version.find("unknown") == std::string::npos);
 }
 
 TEST_CASE("env: executable, folders, variables", "[platform][env]") {

@@ -33,14 +33,32 @@ void write(const char* level, const std::string& msg) {
 }
 }  // namespace
 
+std::filesystem::path previousLogFile(const std::filesystem::path& file) {
+    std::filesystem::path previous = file;
+    previous.replace_extension();
+    previous += ".1";
+    previous += file.extension();
+    return previous;
+}
+
 void init(const std::filesystem::path& file) {
     std::lock_guard lock(g_mutex);
     std::error_code ec;
+    if (g_file.is_open()) g_file.close();
     std::filesystem::create_directories(file.parent_path(), ec);
-    // Keep the log small: truncate when > 2 MB.
-    auto mode = std::ios::app;
-    if (std::filesystem::exists(file, ec) && std::filesystem::file_size(file, ec) > 2 * 1024 * 1024) mode = std::ios::trunc;
-    g_file.open(file, std::ios::out | mode);
+    // Keep the log small: past 2 MB it becomes <name>.1.log (replacing the one before) and a new log starts, so the
+    // lines before the problem a user reports are still there.
+    if (std::filesystem::exists(file, ec) && std::filesystem::file_size(file, ec) > kRotateBytes) {
+        // Fails while another instance has the file open (a second start forwarding its command line): then keep
+        // appending, the next start rotates it.
+        std::filesystem::rename(file, previousLogFile(file), ec);
+    }
+    g_file.open(file, std::ios::out | std::ios::app);
+}
+
+void close() {
+    std::lock_guard lock(g_mutex);
+    if (g_file.is_open()) g_file.close();
 }
 
 void info(const std::string& msg) { write("INFO", msg); }

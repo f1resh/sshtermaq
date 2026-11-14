@@ -11,6 +11,7 @@
 #include "core/Strings.h"
 #include "importers/ImportHandlers.h"
 #include "localfs/LocalFsService.h"
+#include "platform/Platform.h"
 #include "platform/sys/Fs.h"
 #include "platform/sys/Net.h"
 #include "platform/ui/App.h"
@@ -58,7 +59,9 @@ void applyInitialAppearance(ui::HostWindow& window, const Json& settings) {
         window.setThemeSource("light");
     else
         window.setThemeSource("dark");
-    window.setBackgroundMaterial(appearance.value("backgroundMaterial", std::string("none")));
+    // Mica / Acrylic are off since 1.1.0 (BACKDROPS_ENABLED in ui/src/theme/ThemeController.tsx): a saved
+    // appearance.backgroundMaterial is kept but not applied. Planned again for 1.2.0 (docs/notes/v1.2.0.md).
+    window.setBackgroundMaterial("none");
     const double scale = appearance.value("uiScale", 1.0);
     if (scale > 0) window.setUiScale(scale);
 }
@@ -86,8 +89,8 @@ int runApp(const std::vector<std::string>& args) {
 
     AppPaths paths = initAppPaths(host.dataDir);
     applog::init(paths.logsDir / "sshtermaq.log");
-    applog::info("SSHTermaq " + describeBuild(buildInfo()) + " starting, data dir: " +
-                 sys::fromPath(paths.dataDir) + (paths.portable ? " (portable)" : ""));
+    applog::info("SSHTermaq " + describeBuild(buildInfo()) + " starting on " + sys::osVersion() + " " +
+                 sys::archName() + ", data dir: " + sys::fromPath(paths.dataDir) + (paths.portable ? " (portable)" : ""));
     for (const auto& e : host.errors) applog::warn("Command line: " + e);
 
     ui::InstanceLock instance(instanceKey(paths.dataDir));
@@ -127,7 +130,13 @@ int runApp(const std::vector<std::string>& args) {
         registerCoreHandlers({bridge, store, controller, paths, openRequests});
 
         controller.activeSessionCount = [&sessions] { return sessions.activeCount(); };
-        controller.onPageLoading = [&openRequests] { openRequests.reset(); };
+        controller.onPageLoading = [&openRequests, &window, logged = false]() mutable {
+            openRequests.reset();
+            if (!logged) {  // known once the web view exists; rendering problems often depend on it
+                logged = true;
+                applog::info("Web view: " + window.browserVersion());
+            }
+        };
         window.onSecondInstance = [&store, &openRequests](const std::vector<std::string>& a,
                                                           const std::filesystem::path& cwd) {
             HostOptions h = parseHostOptions(a);

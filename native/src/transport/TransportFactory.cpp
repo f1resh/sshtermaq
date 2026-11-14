@@ -4,6 +4,7 @@
 #include "net/Proxy.h"
 #include "ssh/SshJump.h"
 #include "ssh/SshTransport.h"
+#include "transport/LocalTransport.h"
 #include "transport/RawTransport.h"
 #include "transport/RloginTransport.h"
 #include "transport/SerialTransport.h"
@@ -23,6 +24,7 @@ std::unique_ptr<Transport> createTransport(TransportContext ctx) {
         case Protocol::Rlogin: return makeRloginTransport(std::move(ctx));
         case Protocol::Raw: return makeRawTransport(std::move(ctx));
         case Protocol::Serial: return makeSerialTransport(std::move(ctx));
+        case Protocol::Local: return makeLocalTransport(std::move(ctx));
     }
     throw std::invalid_argument("Unsupported protocol");
 }

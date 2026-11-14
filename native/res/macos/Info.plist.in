@@ -65,14 +65,14 @@
   <key>NSLocalNetworkUsageDescription</key>
   <string>SSHTermaq connects to the hosts on your local network that you open sessions to.</string>
   <key>NSDesktopFolderUsageDescription</key>
-  <string>SSHTermaq transfers files to and from your Desktop when you ask it to.</string>
+  <string>SSHTermaq uses your Desktop when you transfer files there, or when a program in a local terminal opens it.</string>
   <key>NSDocumentsFolderUsageDescription</key>
-  <string>SSHTermaq transfers files to and from your Documents folder when you ask it to.</string>
+  <string>SSHTermaq uses your Documents folder when you transfer files there, or when a program in a local terminal opens it.</string>
   <key>NSDownloadsFolderUsageDescription</key>
-  <string>SSHTermaq transfers files to and from your Downloads folder when you ask it to.</string>
+  <string>SSHTermaq uses your Downloads folder when you transfer files there, or when a program in a local terminal opens it.</string>
   <key>NSRemovableVolumesUsageDescription</key>
-  <string>SSHTermaq transfers files to and from removable drives when you ask it to.</string>
+  <string>SSHTermaq uses removable drives when you transfer files there, or when a program in a local terminal opens them.</string>
   <key>NSNetworkVolumesUsageDescription</key>
-  <string>SSHTermaq transfers files to and from network volumes when you ask it to.</string>
+  <string>SSHTermaq uses network volumes when you transfer files there, or when a program in a local terminal opens them.</string>
 </dict>
 </plist>

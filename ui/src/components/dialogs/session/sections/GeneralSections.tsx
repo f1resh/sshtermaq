@@ -2,9 +2,10 @@
  * Session editor: Session, Connection and Proxy sections.
  */
 import { useMemo } from 'react';
-import { Cable, Lock, LogIn, Network, Plus, Trash2, Usb } from 'lucide-react';
+import { Cable, Lock, LogIn, Network, Plus, SquareTerminal, Trash2, Usb } from 'lucide-react';
 import { Button, IconButton, NumberInput, Select, TextArea, TextInput } from '@/components/ui';
 import { DEFAULT_PORTS, normalizeFolder, sessionLabel } from '@shared/defaults';
+import { osTerms } from '@shared/platform';
 import type { AddressFamily, Protocol, ProxyType, SessionView, TriState } from '@shared/types';
 import {
   Callout,
@@ -20,6 +21,7 @@ import {
 } from '../../common/controls';
 import { useEditor } from '../editorContext';
 import { fallbackSessionName, splitHostInput, switchProtocol } from '../sessionModel';
+import { LocalFields } from './localFields';
 import { BaudRateInput, SerialLineInput } from './serialInputs';
 
 const OPEN_AS_OPTIONS: readonly SegmentOption<SessionView>[] = [
@@ -32,7 +34,8 @@ export const PROTOCOL_OPTIONS: readonly SegmentOption<Protocol>[] = [
   { value: 'telnet', label: 'Telnet', icon: <Network size={14} /> },
   { value: 'rlogin', label: 'Rlogin', icon: <LogIn size={14} /> },
   { value: 'raw', label: 'Raw', icon: <Cable size={14} /> },
-  { value: 'serial', label: 'Serial', icon: <Usb size={14} /> }
+  { value: 'serial', label: 'Serial', icon: <Usb size={14} /> },
+  { value: 'local', label: 'Local', icon: <SquareTerminal size={14} />, title: 'A shell on this computer (cmd, PowerShell, bash, zsh, …)' }
 ];
 
 const TRISTATE_OPTIONS: readonly SegmentOption<TriState>[] = [
@@ -51,7 +54,7 @@ const FAMILY_OPTIONS: readonly SegmentOption<AddressFamily>[] = [
 
 export function SessionSection() {
   const { draft, update, fieldError, warning, isDefault, folders } = useEditor();
-  const network = draft.protocol !== 'serial';
+  const network = draft.protocol !== 'serial' && draft.protocol !== 'local';
   const folderOptions = useMemo<ComboOption[]>(
     () => [{ value: '', label: '(root)' }, ...folders.map((f) => ({ value: f }))],
     [folders]
@@ -147,6 +150,8 @@ export function SessionSection() {
               </FormField>
             )}
           </FieldGrid>
+        ) : draft.protocol === 'local' ? (
+          <LocalFields />
         ) : (
           <FieldGrid cols={2}>
             <FormField label="Serial line" error={fieldError('serial.line')} htmlFor="se-line">
@@ -202,80 +207,99 @@ const TERM_TYPES: ComboOption[] = [
 export function ConnectionSection() {
   const { draft, update, fieldError, warning, isDefault } = useEditor();
   const c = draft.connection;
-  const showEnv = isDefault || draft.protocol === 'ssh' || draft.protocol === 'telnet';
+  const local = !isDefault && draft.protocol === 'local';
+  const showEnv = isDefault || draft.protocol === 'ssh' || draft.protocol === 'telnet' || local;
   const showTerm = isDefault || draft.protocol !== 'raw';
 
   return (
     <>
-      <Section title="Network">
-        <FieldGrid cols={2}>
-          <FormField
-            label="Keepalive interval"
-            hint="Seconds between keepalive packets, 0 = off"
-            error={fieldError('connection.keepaliveSeconds')}
-          >
-            <div className="dlg-suffixed">
-              <NumberInput value={c.keepaliveSeconds} min={0} max={86400} onChange={(n) => update((d) => void (d.connection.keepaliveSeconds = n))} />
-              <span className="dlg-suffixed__suffix">s</span>
-            </div>
-          </FormField>
-          <FormField label="Connect timeout" hint="0 = no timeout" error={fieldError('connection.connectTimeoutSeconds')}>
-            <div className="dlg-suffixed">
-              <NumberInput
-                value={c.connectTimeoutSeconds}
-                min={0}
-                max={3600}
-                onChange={(n) => update((d) => void (d.connection.connectTimeoutSeconds = n))}
-              />
-              <span className="dlg-suffixed__suffix">s</span>
-            </div>
-          </FormField>
-          <FormField label="Internet protocol version">
-            <SegmentedControl value={c.addressFamily} options={FAMILY_OPTIONS} onChange={(v) => update((d) => void (d.connection.addressFamily = v))} />
-          </FormField>
-        </FieldGrid>
-        <div className="dlg-rows">
-          <ToggleRow
-            label="Disable Nagle's algorithm (TCP_NODELAY)"
-            description="Send keystrokes immediately instead of batching small packets."
-            checked={c.tcpNoDelay}
-            onChange={(v) => update((d) => void (d.connection.tcpNoDelay = v))}
-          />
-          <ToggleRow
-            label="Enable TCP keepalives (SO_KEEPALIVE)"
-            description="Let the operating system detect dead connections."
-            checked={c.tcpKeepalive}
-            onChange={(v) => update((d) => void (d.connection.tcpKeepalive = v))}
-          />
-        </div>
-      </Section>
+      {local && (
+        <Section title="Terminal">
+          <FieldGrid cols={2}>
+            <FormField label="Terminal type (TERM)" hint="What programs in this shell are told they run in">
+              <ComboInput mono value={c.terminalType} options={TERM_TYPES} onChange={(v) => update((d) => void (d.connection.terminalType = v))} />
+            </FormField>
+          </FieldGrid>
+        </Section>
+      )}
 
-      <Section title="Identity">
-        <FieldGrid cols={2}>
-          <FormField label="Logical host name" hint="Used instead of the host name when checking host keys" span="all">
-            <TextInput
-              value={c.logicalHostname}
-              placeholder={draft.host || '(same as host)'}
-              onChange={(v) => update((d) => void (d.connection.logicalHostname = v))}
+      {!local && (
+        <Section title="Network">
+          <FieldGrid cols={2}>
+            <FormField
+              label="Keepalive interval"
+              hint="Seconds between keepalive packets, 0 = off"
+              error={fieldError('connection.keepaliveSeconds')}
+            >
+              <div className="dlg-suffixed">
+                <NumberInput value={c.keepaliveSeconds} min={0} max={86400} onChange={(n) => update((d) => void (d.connection.keepaliveSeconds = n))} />
+                <span className="dlg-suffixed__suffix">s</span>
+              </div>
+            </FormField>
+            <FormField label="Connect timeout" hint="0 = no timeout" error={fieldError('connection.connectTimeoutSeconds')}>
+              <div className="dlg-suffixed">
+                <NumberInput
+                  value={c.connectTimeoutSeconds}
+                  min={0}
+                  max={3600}
+                  onChange={(n) => update((d) => void (d.connection.connectTimeoutSeconds = n))}
+                />
+                <span className="dlg-suffixed__suffix">s</span>
+              </div>
+            </FormField>
+            <FormField label="Internet protocol version">
+              <SegmentedControl value={c.addressFamily} options={FAMILY_OPTIONS} onChange={(v) => update((d) => void (d.connection.addressFamily = v))} />
+            </FormField>
+          </FieldGrid>
+          <div className="dlg-rows">
+            <ToggleRow
+              label="Disable Nagle's algorithm (TCP_NODELAY)"
+              description="Send keystrokes immediately instead of batching small packets."
+              checked={c.tcpNoDelay}
+              onChange={(v) => update((d) => void (d.connection.tcpNoDelay = v))}
             />
-          </FormField>
-          {showTerm && (
-            <>
-              <FormField label="Terminal type (TERM)">
-                <ComboInput mono value={c.terminalType} options={TERM_TYPES} onChange={(v) => update((d) => void (d.connection.terminalType = v))} />
-              </FormField>
-              <FormField label="Terminal speed" hint="Reported to the server, e.g. 38400,38400">
-                <TextInput className="mono-input" value={c.terminalSpeed} onChange={(v) => update((d) => void (d.connection.terminalSpeed = v))} />
-              </FormField>
-            </>
-          )}
-        </FieldGrid>
-      </Section>
+            <ToggleRow
+              label="Enable TCP keepalives (SO_KEEPALIVE)"
+              description="Let the operating system detect dead connections."
+              checked={c.tcpKeepalive}
+              onChange={(v) => update((d) => void (d.connection.tcpKeepalive = v))}
+            />
+          </div>
+        </Section>
+      )}
+
+      {!local && (
+        <Section title="Identity">
+          <FieldGrid cols={2}>
+            <FormField label="Logical host name" hint="Used instead of the host name when checking host keys" span="all">
+              <TextInput
+                value={c.logicalHostname}
+                placeholder={draft.host || '(same as host)'}
+                onChange={(v) => update((d) => void (d.connection.logicalHostname = v))}
+              />
+            </FormField>
+            {showTerm && (
+              <>
+                <FormField label="Terminal type (TERM)">
+                  <ComboInput mono value={c.terminalType} options={TERM_TYPES} onChange={(v) => update((d) => void (d.connection.terminalType = v))} />
+                </FormField>
+                <FormField label="Terminal speed" hint="Reported to the server, e.g. 38400,38400">
+                  <TextInput className="mono-input" value={c.terminalSpeed} onChange={(v) => update((d) => void (d.connection.terminalSpeed = v))} />
+                </FormField>
+              </>
+            )}
+          </FieldGrid>
+        </Section>
+      )}
 
       {showEnv && (
         <Section
           title="Environment variables"
-          description="Sent to the server when the session starts (SSH: may require AcceptEnv on the server; Telnet: NEW-ENVIRON)."
+          description={
+            local
+              ? 'Set for the shell, on top of this computer’s environment (an empty value removes a variable).'
+              : 'Sent to the server when the session starts (SSH: may require AcceptEnv on the server; Telnet: NEW-ENVIRON).'
+          }
           actions={
             <Button
               size="sm"
@@ -436,7 +460,7 @@ export function ProxySection() {
                 <FormField label="Username" span={2}>
                   <TextInput value={p.username} onChange={(v) => update((d) => void (d.proxy.username = v))} placeholder="(none)" />
                 </FormField>
-                <FormField label="Password" span={2} hint="Stored encrypted (Windows DPAPI)">
+                <FormField label="Password" span={2} hint={`Stored encrypted (${osTerms.secretStore})`}>
                   <TextInput type="password" value={p.password} onChange={(v) => update((d) => void (d.proxy.password = v))} placeholder="(none)" autoComplete="new-password" />
                 </FormField>
               </>

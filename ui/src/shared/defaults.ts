@@ -1,5 +1,5 @@
 import { isMac } from './platform';
-import type { AppSettings, CommandId, PortForward, Protocol, SessionConfig } from './types';
+import type { AppSettings, CommandId, LocalShellInfo, PortForward, Protocol, SessionConfig } from './types';
 
 export const APP_NAME = 'SSHTermaq';
 
@@ -8,7 +8,8 @@ export const DEFAULT_PORTS: Record<Protocol, number> = {
   telnet: 23,
   rlogin: 513,
   raw: 0,
-  serial: 0
+  serial: 0,
+  local: 0
 };
 
 export function newId(): string {
@@ -101,6 +102,10 @@ export function createDefaultSession(overrides: Partial<SessionConfig> = {}): Se
       parity: 'none',
       flowControl: 'xonxoff'
     },
+    local: {
+      command: '',
+      startDir: ''
+    },
     terminal: {
       autoWrap: true,
       localEcho: 'auto',
@@ -162,11 +167,12 @@ export const PC_KEYBINDINGS: Record<CommandId, string> = {
   'app.fullscreen': 'F11',
   'app.keygen': '',
   'tab.new': 'Ctrl+Shift+T',
+  'tab.newLocal': 'Ctrl+Shift+`',
   'tab.close': 'Ctrl+Shift+W',
   'tab.next': 'Ctrl+Tab',
   'tab.prev': 'Ctrl+Shift+Tab',
   'tab.duplicate': 'Ctrl+Shift+D',
-  'tab.rename': '',
+  'tab.rename': 'Ctrl+Shift+R',
   'tab.goto1': 'Ctrl+Alt+1',
   'tab.goto2': 'Ctrl+Alt+2',
   'tab.goto3': 'Ctrl+Alt+3',
@@ -182,6 +188,7 @@ export const PC_KEYBINDINGS: Record<CommandId, string> = {
   'pane.focusNext': 'Alt+Shift+ArrowRight',
   'pane.focusPrev': 'Alt+Shift+ArrowLeft',
   'pane.restart': '',
+  'pane.rename': '',
   'pane.toggleBroadcast': '',
   'pane.sftp': 'Ctrl+Shift+S',
   'pane.fileManager': '',
@@ -210,11 +217,12 @@ export const MAC_KEYBINDINGS: Record<CommandId, string> = {
   'app.fullscreen': 'Ctrl+Meta+F',
   'app.keygen': '',
   'tab.new': 'Meta+T',
+  'tab.newLocal': 'Shift+Meta+T',
   'tab.close': 'Meta+W',
   'tab.next': 'Shift+Meta+]',
   'tab.prev': 'Shift+Meta+[',
   'tab.duplicate': '',
-  'tab.rename': '',
+  'tab.rename': 'Shift+Meta+R',
   'tab.goto1': 'Meta+1',
   'tab.goto2': 'Meta+2',
   'tab.goto3': 'Meta+3',
@@ -230,6 +238,7 @@ export const MAC_KEYBINDINGS: Record<CommandId, string> = {
   'pane.focusNext': 'Alt+Meta+ArrowRight',
   'pane.focusPrev': 'Alt+Meta+ArrowLeft',
   'pane.restart': '',
+  'pane.rename': '',
   'pane.toggleBroadcast': 'Alt+Meta+I',
   'pane.sftp': 'Shift+Meta+S',
   'pane.fileManager': '',
@@ -277,7 +286,8 @@ export function createDefaultSettings(): AppSettings {
       drawBoldTextInBrightColors: true,
       minimumContrastRatio: 1,
       padding: 6,
-      optionAsMeta: false
+      optionAsMeta: false,
+      defaultShell: ''
     },
     behavior: {
       copyOnSelect: true,
@@ -287,6 +297,7 @@ export function createDefaultSettings(): AppSettings {
       warnOnMultilinePaste: true,
       confirmCloseConnected: true,
       restoreTabs: false,
+      restoreNames: true,
       reconnect: 'prompt',
       scrollOnOutput: false,
       scrollOnKeystroke: true,
@@ -303,7 +314,8 @@ export function createDefaultSettings(): AppSettings {
       confirmDelete: true,
       deleteToRecycleBin: true,
       preserveTimestamps: true,
-      skipMacFiles: true,
+      // Finder's .DS_Store / ._ files exist only on macOS; elsewhere a ._ file is a real file.
+      skipMacFiles: isMac,
       parallelTransfers: 2
     }
   };
@@ -364,10 +376,53 @@ export function normalizeFolder(folder: string | undefined | null): string {
     .join('/');
 }
 
+/**
+ * A local terminal's program name for labels (as native localProgramName): `"C:\...\pwsh.exe" -NoLogo` → "pwsh",
+ * "/bin/zsh -l" → "zsh"; '' → "Local terminal".
+ */
+export function localProgramName(command: string): string {
+  const c = command.trim();
+  if (!c) return 'Local terminal';
+  let program: string;
+  if (c[0] === '"' || c[0] === "'") {
+    const end = c.indexOf(c[0], 1);
+    program = c.slice(1, end < 0 ? undefined : end);
+  } else {
+    program = c.split(/[ \t]/)[0];
+  }
+  program = program.slice(Math.max(program.lastIndexOf('/'), program.lastIndexOf('\\')) + 1);
+  if (/\.exe$/i.test(program)) program = program.slice(0, -4);
+  return program || 'Local terminal';
+}
+
+/**
+ * A new local terminal session for `shell` (from shells:list), based on `template` (settings.defaultSession): no
+ * name (it is labelled after the program), and the tab closes when the shell exits cleanly, as terminal apps do.
+ */
+export function createLocalSession(shell: LocalShellInfo | null, template?: SessionConfig): SessionConfig {
+  const s = normalizeSession({}, template);
+  s.id = newId();
+  s.name = '';
+  s.protocol = 'local';
+  s.host = '';
+  s.port = 0;
+  s.username = '';
+  s.openAs = 'terminal';
+  s.local = { command: shell?.command ?? '', startDir: '' };
+  s.connection.environment = shell ? shell.environment.map((v) => ({ ...v })) : [];
+  s.translation.charset = 'UTF-8';
+  s.terminal.closeOnExit = 'clean';
+  s.logging.mode = 'off';
+  return s;
+}
+
 /** Human-friendly label for a session (name, else user@host:port). */
-export function sessionLabel(s: Pick<SessionConfig, 'name' | 'host' | 'port' | 'username' | 'protocol' | 'serial'>): string {
+export function sessionLabel(
+  s: Pick<SessionConfig, 'name' | 'host' | 'port' | 'username' | 'protocol' | 'serial'> & { local?: SessionConfig['local'] }
+): string {
   if (s.name) return s.name;
   if (s.protocol === 'serial') return s.serial.line;
+  if (s.protocol === 'local') return localProgramName(s.local?.command ?? '');
   const user = s.username ? `${s.username}@` : '';
   const port = s.port && s.port !== DEFAULT_PORTS[s.protocol] ? `:${s.port}` : '';
   return `${user}${s.host}${port}`;

@@ -33,6 +33,7 @@ import {
   Settings,
   SlidersHorizontal,
   SquarePlus,
+  SquareTerminal,
   SquareX,
   TextSelect,
   X,
@@ -43,13 +44,14 @@ import {
 import { api } from '@/bridge/api';
 import { terminalRegistry } from '@/terminal/registry';
 import { useUi } from '@/store/ui';
-import { getActivePane, useWorkspace } from '@/store/workspace';
+import { getActivePane, paneIdsOf, useWorkspace } from '@/store/workspace';
 import type { CommandId } from '@shared/types';
 import {
   changePaneSettings,
   closePane,
   closeTab,
   newSessionDraft,
+  openLocalTerminal,
   reportError,
   openFileManagerFor,
   restartTab,
@@ -88,6 +90,7 @@ export const COMMANDS: CommandInfo[] = [
   c('app.fullscreen', 'Toggle full screen', 'App', Maximize, { keywords: 'fullscreen' }),
   c('app.keygen', 'Key generator…', 'App', KeyRound, { keywords: 'puttygen ssh-keygen keys ed25519 rsa' }),
   c('tab.new', 'New tab…', 'Tab', Plus, { keywords: 'open session' }),
+  c('tab.newLocal', 'New local terminal', 'Tab', SquareTerminal, { keywords: 'shell console cmd powershell pwsh bash zsh wsl' }),
   c('tab.close', 'Close tab', 'Tab', X, { needsPane: true }),
   c('tab.next', 'Next tab', 'Tab', ChevronRight, { needsPane: true }),
   c('tab.prev', 'Previous tab', 'Tab', ChevronLeft, { needsPane: true }),
@@ -102,6 +105,7 @@ export const COMMANDS: CommandInfo[] = [
   c('pane.focusNext', 'Focus next pane', 'Pane', ArrowRight, { needsPane: true }),
   c('pane.focusPrev', 'Focus previous pane', 'Pane', ArrowLeft, { needsPane: true }),
   c('pane.restart', 'Restart session', 'Pane', RotateCw, { needsPane: true, keywords: 'reconnect' }),
+  c('pane.rename', 'Rename pane…', 'Pane', Pencil, { needsPane: true, keywords: 'title name split' }),
   c('pane.toggleBroadcast', 'Toggle broadcast input', 'Pane', Radio, { needsPane: true, keywords: 'send all panes multi' }),
   c('pane.sftp', 'Toggle SFTP panel', 'Pane', FolderOpen, { needsPane: true, keywords: 'files browser side panel upload download sftp scp psftp' }),
   c('pane.fileManager', 'Open file manager (SFTP/SCP)', 'Pane', FolderTree, { needsPane: true, keywords: 'files upload download sftp scp winscp transfer sync' }),
@@ -222,6 +226,9 @@ function execute(id: CommandId, target?: CommandTarget): void {
       // Session picker with a "quick connect to <typed host>" fallback.
       ui.openPalette('@');
       return;
+    case 'tab.newLocal':
+      void openLocalTerminal();
+      return;
     case 'tab.close':
       if (tabId) void closeTab(tabId);
       return;
@@ -240,6 +247,16 @@ function execute(id: CommandId, target?: CommandTarget): void {
         ui.setRenamingTab(tabId);
       }
       return;
+    case 'pane.rename': {
+      // A pane of a split tab is named in its header; a tab with one pane has no header: the tab is renamed.
+      const t = ws.tabs.find((x) => x.id === tabId);
+      if (t && paneId && paneIdsOf(t.layout).length > 1) ui.setRenamingPane(paneId);
+      else if (tabId) {
+        ws.activateTab(tabId);
+        ui.setRenamingTab(tabId);
+      }
+      return;
+    }
 
     /* ---- panes ---- */
     case 'pane.splitRight':

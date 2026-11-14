@@ -20,7 +20,31 @@ export function detectPlatform(g: unknown = globalThis): HostPlatform {
 export const hostPlatform: HostPlatform = detectPlatform();
 export const isMac = hostPlatform === 'darwin';
 
-/** The OS's own words in labels: the local side, its file browser and where local deletes go. */
+/**
+ * The OS's own words in labels: the local side, its file browser, where local deletes go, a serial line as
+ * examples name it (alone, and as quick-connect input with a baud rate), and what encrypts saved passwords (short, and
+ * as the end of "Encrypted with ..."; platform/sys/Secret.h).
+ */
 export const osTerms = isMac
-  ? { computer: 'Computer', ThisComputer: 'This Mac', thisComputer: 'this Mac', fileBrowser: 'Finder', trash: 'Trash' }
-  : { computer: 'This PC', ThisComputer: 'This PC', thisComputer: 'this PC', fileBrowser: 'Explorer', trash: 'Recycle Bin' };
+  ? {
+      computer: 'Computer',
+      ThisComputer: 'This Mac',
+      thisComputer: 'this Mac',
+      fileBrowser: 'Finder',
+      trash: 'Trash',
+      serialLine: '/dev/cu.usbserial-1410',
+      serialExample: '/dev/cu.usbserial-1410?baud=115200',
+      secretStore: 'key in your login Keychain',
+      encryptedWith: 'a key kept in your login Keychain'
+    }
+  : {
+      computer: 'This PC',
+      ThisComputer: 'This PC',
+      thisComputer: 'this PC',
+      fileBrowser: 'Explorer',
+      trash: 'Recycle Bin',
+      serialLine: 'COM3',
+      serialExample: 'serial://COM3?baud=115200',
+      secretStore: 'Windows DPAPI',
+      encryptedWith: 'Windows DPAPI for your user account'
+    };

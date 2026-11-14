@@ -1,4 +1,5 @@
 import { createDefaultSession, createDefaultSettings, deepMerge, normalizeFolder, normalizeSession } from '@shared/defaults';
+import { isMac } from '@shared/platform';
 import type { AppSettings, KnownHost, SessionConfig } from '@shared/types';
 import type { MockContext } from './index';
 
@@ -174,11 +175,18 @@ export function registerCoreMocks(ctx: MockContext): void {
       return '';
     }
   });
-  ctx.on('app:writeClipboard', (text: string) => void navigator.clipboard?.writeText(text).catch(() => undefined));
+  ctx.on('app:writeClipboard', (text: string) => {
+    (globalThis as { __mockClipboard?: string }).__mockClipboard = text; // what the Playwright tests read back
+    void navigator.clipboard?.writeText(text).catch(() => undefined);
+  });
   ctx.handle('app:logDirectory', () => 'C:\\Users\\mock\\AppData\\Roaming\\SSHTermaq\\logs');
   ctx.handle('app:readFileDataUrl', () => null);
   ctx.handle('app:openExternal', (url: string) => void globalThis.open?.(url, '_blank'));
+  ctx.handle('app:openPath', (path: string) => void console.info('[mock] open', path));
+  ctx.on('app:showItemInFolder', (path: string) => console.info('[mock] show in folder', path));
   ctx.on('app:confirmClose', () => undefined);
+  ctx.on('app:quit', () => console.info('[mock] quit'));
+  ctx.on('app:log', (level: string, message: string) => console.warn(`[mock] app log (${level})`, message));
   ctx.on('app:setThemeSource', () => undefined);
   ctx.on('app:setBackgroundMaterial', () => undefined);
   ctx.on('app:setUiScale', () => undefined);
@@ -197,14 +205,46 @@ export function registerCoreMocks(ctx: MockContext): void {
   ctx.on('window:setTitle', (t: string) => (document.title = t));
   ctx.on('window:flash', () => undefined);
   ctx.on('window:setTitleBarLayout', () => undefined);
-  ctx.on('window:setMenuBar', () => undefined);
+  // The macOS menu bar the UI asked for, for the Playwright tests (ui/e2e).
+  ctx.on('window:setMenuBar', (menus: unknown) => void ((globalThis as { __mockMenuBar?: unknown }).__mockMenuBar = menus));
 
-  /* dialogs */
-  ctx.handle('dialog:openFile', () => null);
-  ctx.handle('dialog:openFiles', () => []);
-  ctx.handle('dialog:openDirectory', () => null);
-  ctx.handle('dialog:saveFile', () => null);
-  ctx.handle('dialog:saveTextFile', () => null);
+  /* dialogs: cancelled, unless a Playwright test (ui/e2e) set the next answer with __mockDialog(kind, answer) */
+  const answers = new Map<string, unknown[]>();
+  const next = <T>(kind: string, cancelled: T): T => {
+    const queue = answers.get(kind);
+    return queue?.length ? (queue.shift() as T) : cancelled;
+  };
+  const saved: { path: string; content: string; secret: boolean }[] = [];
+  Object.assign(globalThis, {
+    __mockDialog: (kind: string, answer: unknown) => answers.set(kind, [...(answers.get(kind) ?? []), answer]),
+    /** What dialog:saveTextFile wrote (path, content, secret), oldest first. */
+    __mockSaved: saved
+  });
+  ctx.handle('dialog:openFile', () => next<string | null>('openFile', null));
+  ctx.handle('dialog:openFiles', () => next<string[]>('openFiles', []));
+  ctx.handle('dialog:openDirectory', () => next<string | null>('openDirectory', null));
+  ctx.handle('dialog:saveFile', () => next<string | null>('saveFile', null));
+  ctx.handle('dialog:saveTextFile', (content: string, _opts?: unknown, secret?: boolean) => {
+    const path = next<string | null>('saveTextFile', null);
+    if (path) saved.push({ path, content, secret: !!secret });
+    return path;
+  });
+
+  /* local shells */
+  ctx.handle('shells:list', () =>
+    isMac
+      ? [
+          { id: '/bin/zsh', name: 'zsh', command: '/bin/zsh -l', environment: [], isDefault: true },
+          { id: '/bin/bash', name: 'bash', command: '/bin/bash -l', environment: [], isDefault: false }
+        ]
+      : [
+          { id: 'cmd', name: 'Command Prompt', command: String.raw`"C:\Windows\System32\cmd.exe"`, environment: [], isDefault: false },
+          { id: 'powershell', name: 'Windows PowerShell', command: String.raw`"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo`, environment: [], isDefault: false },
+          { id: 'pwsh', name: 'PowerShell 7', command: String.raw`"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo`, environment: [], isDefault: true },
+          { id: 'git-bash', name: 'Git Bash', command: String.raw`"C:\Program Files\Git\bin\bash.exe" --login -i`, environment: [], isDefault: false },
+          { id: 'wsl:Ubuntu', name: 'Ubuntu (WSL)', command: String.raw`"C:\Windows\System32\wsl.exe" -d Ubuntu --cd ~`, environment: [], isDefault: false }
+        ]
+  );
 
   /* serial */
   ctx.handle('serial:listPorts', () => [

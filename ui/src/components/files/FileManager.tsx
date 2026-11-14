@@ -11,7 +11,7 @@ import { api } from '@/bridge/api';
 import { connectSession } from '@/commands/actions';
 import { Button, IconButton, Select, cx, showContextMenu, toast, type MenuItem } from '@/components/ui';
 import { useSessions, useSettings, usePrompts } from '@/store/data';
-import { confirmDialog } from '@/store/ui';
+import { confirmDialog, inputDialog } from '@/store/ui';
 import { useWorkspace } from '@/store/workspace';
 import { PANE_PROMPT_KINDS } from '@/terminal/connEvents';
 import { PromptOverlay } from '@/terminal/PromptOverlay';
@@ -23,7 +23,7 @@ import { connOfFilesPane } from './filesConn';
 import { isFinal, useFiles } from './filesStore';
 import { FilePane, type FilePaneHandle, type PaneOps } from './FilePane';
 import { FindDialog } from './FindDialog';
-import { local, remote, type Crumb, type FileItem, type Side } from './paths';
+import { local, nameError, remote, type Crumb, type FileItem, type Side } from './paths';
 import { listShortcut } from './listKeys';
 import { localSource, remoteSource } from './sources';
 import { SyncDialog } from './SyncDialog';
@@ -208,12 +208,12 @@ export function FileManager({ paneId, visible }: { paneId: string; visible: bool
     deleteToRecycleBin: fs.deleteToRecycleBin
   });
 
-  const upload = async (paths: string[], remoteDir: string, move = false) => {
+  const upload = async (paths: string[], remoteDir: string, move = false, targetName?: string) => {
     if (!sftpId) {
       toast.warning('Not connected', 'Connect to the server first.');
       return;
     }
-    const opts = transferOpts(move);
+    const opts = { ...transferOpts(move), targetName };
     try {
       const ids = await api.sftp.upload(sftpId, remoteDir, paths, opts);
       useFiles.getState().rememberRetry(ids, { kind: 'upload', sftpId, sources: paths, targetDir: remoteDir, opts });
@@ -222,13 +222,13 @@ export function FileManager({ paneId, visible }: { paneId: string; visible: bool
     }
   };
 
-  const download = async (paths: string[], localDir: string, move = false) => {
+  const download = async (paths: string[], localDir: string, move = false, targetName?: string) => {
     if (!sftpId) return;
     if (!localDir) {
       toast.warning('Choose a folder', 'Open a folder on the left before downloading.');
       return;
     }
-    const opts = transferOpts(move);
+    const opts = { ...transferOpts(move), targetName };
     try {
       const ids = await api.sftp.download(sftpId, paths, localDir, opts);
       useFiles.getState().rememberRetry(ids, { kind: 'download', sftpId, sources: paths, targetDir: localDir, opts });
@@ -242,6 +242,27 @@ export function FileManager({ paneId, visible }: { paneId: string; visible: bool
     if (!paths.length) return;
     if (side === 'local') void upload(paths, targetDir ?? remotePath ?? '/', move);
     else void download(paths, targetDir ?? localPath ?? '', move);
+  };
+
+  /**
+   * Asks for the name `item` gets in the other pane's folder, then copies it there under that name; `move` also deletes
+   * it here afterwards (file by file, only what arrived: a file skipped at a conflict stays).
+   */
+  const transferAs = async (side: Side, item: FileItem, move = false) => {
+    if (item.type === 'drive' || item.type === 'place') return;
+    const upload_ = side === 'local';
+    const verb = move ? 'Move' : upload_ ? 'Upload' : 'Download';
+    const name = await inputDialog({
+      title: `${verb} "${item.name}" ${move ? `to ${upload_ ? 'the server' : osTerms.thisComputer} ` : ''}as`,
+      label: `Name ${upload_ ? 'on the server' : `on ${osTerms.thisComputer}`}`,
+      initial: item.name,
+      confirmLabel: verb,
+      // The destination's naming rules (a server name may contain "\"; this native host refuses it as a target name).
+      validate: (v) => nameError(v, upload_ ? 'remote' : 'local') ?? (v.includes('\\') ? 'Names cannot contain "\\"' : null)
+    });
+    if (!name?.trim()) return;
+    if (upload_) void upload([item.path], remotePath ?? '/', move, name.trim());
+    else void download([item.path], localPath ?? '', move, name.trim());
   };
 
   const remove = async (side: Side, items: FileItem[]) => {
@@ -375,6 +396,7 @@ export function FileManager({ paneId, visible }: { paneId: string; visible: bool
   const opsFor = (side: Side): PaneOps => ({
     openFile: (item) => void openFile(side, item),
     transfer: (items, move) => transfer(side, items, move),
+    transferAs: (item, move) => void transferAs(side, item, move),
     edit: side === 'remote' ? (item) => void edit(item.path) : undefined,
     remove: (items) => remove(side, items),
     chmod: side === 'remote' ? (item) => setDialog({ type: 'chmod', item }) : undefined,

@@ -39,6 +39,9 @@ export function createMockBackend(): Transport {
     }
   };
 
+  // The Playwright tests (ui/e2e) play the host's part with this, e.g. a macOS menu bar command.
+  (globalThis as { __mockEmit?: MockContext['emit'] }).__mockEmit = ctx.emit;
+
   registerCoreMocks(ctx);
   registerConnMocks(ctx);
   registerSftpMocks(ctx);

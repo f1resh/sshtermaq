@@ -10,12 +10,16 @@ them depends on another.
 
 | Part | What it tests | Framework | Where | Automated | Size | Run time |
 |---|---|---|---|---|---|---|
-| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 217 test cases | about 1 minute |
-| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 10 files, 110 tests | under 1 second |
-| **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs` | no, run by hand | no saved scenarios | seconds |
+| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 232 test cases | about 1 minute |
+| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 16 files, 142 tests | under 2 seconds |
+| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart, the SFTP panel, the two-pane file manager, import and export, the key generator, settings | Playwright Test | `ui/e2e/*.spec.ts` | yes | 14 files, 73 tests, each run twice (146, of which 2 macOS-only skip in the Windows layout) | about 5 minutes |
+| **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs`, `ui/scripts/checks/` | no, run by hand | `checks/local-terminal.mjs` | seconds |
 
-There are no automated tests of UI behaviour (clicking through screens, rendering, dialogs), and there is no CI:
-tests run when a developer runs them, or through `scripts\windows\build.ps1 -Tests`. See [section 8](#8-what-is-not-covered).
+The browser tests cover the main screens and dialogs, not yet the host key and password prompts or the color scheme
+editor. There is no CI: tests run when a developer runs them, or through the build scripts:
+`scripts\windows\build.ps1 -Tests` / `scripts/macos/build.sh --tests` run the core tests (native and UI unit tests),
+`-E2E` / `--e2e` the end-to-end tests (UI typecheck and the browser tests). See
+[section 8](#8-what-is-not-covered).
 
 ## 2. Tools and libraries
 
@@ -25,6 +29,7 @@ tests run when a developer runs them, or through `scripts\windows\build.ps1 -Tes
 | CTest | ships with CMake | runs all native suites in one command |
 | libssh server API | 0.12 (vcpkg) | the in-process SSH test server (`native/tests/support`) |
 | [Vitest](https://vitest.dev/) | 4.1 | UI unit tests, run in Node (no browser, no DOM) |
+| [Playwright Test](https://playwright.dev/docs/intro) (`@playwright/test`) | 1.62 | UI browser tests: the test runner, assertions, traces of failing tests; uses the installed Edge (Windows) or Chrome |
 | TypeScript compiler | 5.9 | `npm run typecheck`: static check of the whole UI |
 | [Playwright](https://playwright.dev/) (`playwright-core`) | 1.62 | end-to-end and screenshot scripts; drives Microsoft Edge or the app's WebView2 over the DevTools protocol |
 
@@ -83,6 +88,43 @@ by `cmake/EmbedUi.cmake`), so loading the embedded UI is tested against the real
 - **Only pure logic is tested**, because there is no DOM: functions that turn input into output without React or the
   native host.
 
+### UI coverage
+
+`npm run coverage` (in `ui`, about 6 minutes) runs the unit tests and the browser tests with coverage and prints the
+UI's line coverage by area: unit tests, browser tests and both (`ui/scripts/coverage.mjs`; the browser part is recorded
+by `e2e/fixtures.ts` when `PW_COV` is set). `npm run coverage -- --report` prints the last table again. Output in
+`ui/coverage/` (`summary.md`, `summary.json`; not in git). 2026-11-14: 69 % of 6,546 lines.
+
+### UI browser tests
+
+- **Folder:** [ui/e2e](../ui/e2e), files named `<area>.spec.ts`; configuration in
+  [ui/playwright.config.ts](../ui/playwright.config.ts).
+- **What runs:** Playwright starts Vite on port 5174 (not 5173, so a running `npm run dev` is not in the way) and
+  opens the UI in the installed Edge on Windows, Chrome elsewhere (`PW_CHANNEL` overrides it). The UI runs against the
+  mock backend, as in `npm run dev`.
+- **Two layouts:** every test runs in the projects `windows` and `macos`. [e2e/fixtures.ts](../ui/e2e/fixtures.ts)
+  makes the page report that system to `src/shared/platform.ts`, so the macOS layout (no caption buttons, native menu
+  bar, ⌘ shortcuts, Finder / Keychain words) is tested on a Windows PC as well.
+- **Fresh state:** each test starts from the mock's seed data: the fixture clears the site's stored data, where the
+  mock keeps its state.
+- **Browser profiles:** each test worker reuses one profile folder in the system temp folder
+  (`sshtermaq-e2e-profile-<n>`). Playwright's own temporary profiles can't be used on Windows: Edge and Chrome give some
+  of their folders permissions that only the browser's sandbox can use, and Playwright then hangs for minutes trying to
+  delete them.
+- **Finding elements:** by role and accessible name, as a user sees them (`getByRole('dialog', { name: … })`), not by
+  CSS classes. Shared actions are in [e2e/helpers.ts](../ui/e2e/helpers.ts).
+- **Playing the host:** for what only the native host does, the mock offers hooks:
+  - `__mockEmit(channel, ...args)` sends an event as the host would (the macOS menu bar's `window:onMenuCommand`);
+  - `__mockMenuBar` holds the menu bar the UI last sent;
+  - `__mockDialog(kind, answer)` sets the answer of the next system file dialog (`openFile`, `openFiles`,
+    `openDirectory`, `saveFile`, `saveTextFile`; otherwise they answer "cancelled"); helper `mockDialog`;
+  - `__mockSaved` lists what `dialog:saveTextFile` wrote (path, content, owner-only); helper `savedFiles`;
+  - `__mockClipboard` holds the last text the UI copied (`app:writeClipboard`), so no clipboard permission is needed.
+- **Terminal text:** xterm.js draws on a canvas by default; tests that read the terminal switch to its DOM renderer
+  first (`useDomRenderer`), whose rows are plain text.
+- **Failures:** the list in the console, an HTML report in `ui/playwright-report`, and a trace of each failing test in
+  `ui/test-results/<test>/trace.zip` (`npx playwright show-trace <file>`: every step with a snapshot of the page).
+
 ### End-to-end and visual scripts
 
 Two Node scripts in [ui/scripts](../ui/scripts), described in [section 7](#7-end-to-end-and-visual-checks). They
@@ -94,7 +136,11 @@ The two halves talk over the JSON bridge (`ui/src/shared/ipc.ts`). Each side tes
 
 - **Native side:** `TestBridge` sends the same JSON requests the UI sends and checks the responses and events
   (`session manager: bridge handlers`, `localfs: bridge handlers`, the file manager tests).
-- **UI side:** in a normal browser the UI talks to a mock backend (`ui/src/bridge/mock`) instead of the host.
+- **UI side:** in a normal browser the UI talks to a mock backend (`ui/src/bridge/mock`) instead of the host; the
+  browser tests run against it.
+- **The contract between them:** [ui/src/bridge/contract.test.ts](../ui/src/bridge/contract.test.ts) checks that the
+  native host (its handler registrations and `emit` calls, read from `native/src`) and the mock backend both answer
+  exactly the channels of `API_SCHEMA`, with the right kind. A channel added on one side only fails this test.
 
 Only the end-to-end script `app.mjs` exercises both halves together.
 
@@ -162,13 +208,13 @@ TEST_CASE("ssh: password authentication, shell echo and exit code", "[ssh]") {
 
 ## 5. What is tested
 
-### Native tests (217 test cases)
+### Native tests (232 test cases)
 
 215 run by default; `putty: real registry smoke test` and `codepage (Windows): regenerate the tables` are hidden. The **Needs** column shows the tool without which a
 test case is skipped. On macOS every suite runs; its `platform_ui` has the macOS local files tests (listed after
 Windows' below). The other counts are Windows'.
 
-#### app — `st_test_app.exe` (28)
+#### app — `st_test_app.exe` (29)
 
 Command line (PuTTY-compatible options, `ssh://` / `sftp://` URLs, `-load`, `--version`), data-folder resolution (portable / installed / override), the version and build id (`BuildInfo`), the embedded web UI (index parsing, request paths, content types, loading the embedded test files), and the host window policy (`HostController` against a fake window: allowed pages and origins, window events (menu bar commands and title bar insets too), confirming close, saved placement). *Kind: unit.* Source: [native/tests/app](../native/tests/app).
 
@@ -182,6 +228,7 @@ Command line (PuTTY-compatible options, `ssh://` / `sftp://` URLs, `-load`, `--v
 | cli: -load merges saved session, explicit options win regardless of order | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: port forwarding specs | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: serial line and -sercfg | `[app][cli]` |  | `cli_tests.cpp` |
+| cli: -local opens a local terminal (default shell, a shell name or a command line) | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: -m reads the remote command, -pwfile the password | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: logging, misc options, unknown options | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: host options are split off | `[app][cli]` |  | `cli_tests.cpp` |
@@ -203,9 +250,9 @@ Command line (PuTTY-compatible options, `ssh://` / `sftp://` URLs, `-load`, `--v
 | ui: content types by extension | `[app][ui]` |  | `ui_tests.cpp` |
 | ui: files embedded as resources are found by path | `[app][ui]` |  | `ui_tests.cpp` |
 
-#### core — `st_test_core.exe` (5)
+#### core — `st_test_core.exe` (6)
 
-Strings (UTF-8 paths, UTF-8 validation, UTF-16LE), crypto helpers, session defaults and lenient JSON parsing, bridge message routing. *Kind: unit.* Source: [native/tests/core](../native/tests/core).
+Strings (UTF-8 paths, UTF-8 validation, UTF-16LE), crypto helpers, session defaults and lenient JSON parsing, bridge message routing, app log rotation. *Kind: unit.* Source: [native/tests/core](../native/tests/core).
 
 | Test case | Tags | Needs (skipped without) | File |
 |---|---|---|---|
@@ -214,6 +261,7 @@ Strings (UTF-8 paths, UTF-8 validation, UTF-16LE), crypto helpers, session defau
 | crypto: base64 + fingerprint | — |  | `core_tests.cpp` |
 | types: session defaults and lenient parsing | — |  | `core_tests.cpp` |
 | bridge: invoke, send and events | — |  | `core_tests.cpp` |
+| log: a full log is kept as `<name>.1.log` and a new one starts | — |  | `core_tests.cpp` |
 
 #### keys — `st_test_keys.exe` (7)
 
@@ -229,9 +277,9 @@ Key generation, PuTTY PPK v2/v3 read/write and encryption, OpenSSH <-> PPK conve
 | plink authenticates with PPK files written by us | `[keys][plink]` | PuTTY `plink` | `keys_tests.cpp` |
 | detectKeyFormat | `[keys]` |  | `keys_tests.cpp` |
 
-#### net — `st_test_net.exe` (27)
+#### net — `st_test_net.exe` (32)
 
-Local echo / line editing, proxy rules, sockets, SOCKS5 handshake, Raw / Telnet / Rlogin against scripted servers, and the socket semantics every OS must reproduce (`[edge]`: partial writes, idle CPU, FIN and RST, urgent data, many sockets, proxy commands). *Kind: unit + integration.* Source: [native/tests/net](../native/tests/net).
+Local echo / line editing, proxy rules, sockets, SOCKS5 handshake, Raw / Telnet / Rlogin against scripted servers, the local terminal transport with this computer's default shell (Windows: PowerShell; macOS: the login shell), and the socket semantics every OS must reproduce (`[edge]`: partial writes, idle CPU, FIN and RST, urgent data, many sockets, proxy commands). *Kind: unit + integration.* Source: [native/tests/net](../native/tests/net).
 
 | Test case | Tags | Needs (skipped without) | File |
 |---|---|---|---|
@@ -262,10 +310,15 @@ Local echo / line editing, proxy rules, sockets, SOCKS5 handshake, Raw / Telnet 
 | edge: connections work while many other sockets are open | `[net][edge]` |  | `semantics_tests.cpp` |
 | edge: a proxy command's output reaches the session, its errors the event log | `[net][edge][proxy]` |  | `semantics_tests.cpp` |
 | edge: closing the session ends a running proxy command promptly | `[net][edge][proxy]` |  | `semantics_tests.cpp` |
+| local: program names for labels | `[local]` |  | `local_transport_tests.cpp` |
+| local: there is a default shell | `[local]` |  | `local_transport_tests.cpp` |
+| local: the default shell runs, takes input and reports its exit code | `[local]` |  | `local_transport_tests.cpp` |
+| local: closing ends the shell, cleanly and once | `[local]` |  | `local_transport_tests.cpp` |
+| local: a missing start folder fails with a readable reason | `[local]` |  | `local_transport_tests.cpp` |
 
-#### platform — `st_test_platform.exe` (20)
+#### platform — `st_test_platform.exe` (27)
 
-The platform layer's tier 0 (`native/src/platform/sys`): what every OS's implementation must do the same way (files and atomic writes, UTF-8 paths, file names, whether letter case counts in a folder, environment, time, secrets, code pages, registry), plus each OS's own rules: on Windows NTFS names, the Mark-of-the-Web and the check that the code page tables other OSes use are Windows' own (`[.generate]` rewrites them from Windows); on macOS (26 cases there) APFS names, the Local Network hint of failed connects, private atomic writes, executable types and the quarantine attribute (`[.keychain]` tries the real Keychain), the serial port listing, serial ports driven through a pseudo-terminal (data both ways, exclusive use, a vanished device, settings macOS lacks) and the `SSH_AUTH_SOCK` agent client against OpenSSH's `ssh-agent` (skipped without it). Uses no test servers, so it builds on every OS first. *Kind: unit (file system, pseudo-terminals, ssh-agent).* Source: [native/tests/platform](../native/tests/platform) (`common/` plus the OS's folder).
+The platform layer's tier 0 (`native/src/platform/sys`): what every OS's implementation must do the same way (files and atomic writes, UTF-8 paths, file names, whether letter case counts in a folder, environment, time, secrets, code pages, registry), the pseudo-terminals of local terminals (`[pty]`: output and exit code, input, resize, environment, a non-ASCII start folder, ending the program with what it started, errors, the shell list; Windows: ConPTY with `cmd.exe`; POSIX: `/bin/sh`, also that the program gets default signal handling), plus each OS's own rules: on Windows NTFS names, the Mark-of-the-Web and the check that the code page tables other OSes use are Windows' own (`[.generate]` rewrites them from Windows); on macOS (33 cases there) APFS names, the Local Network hint of failed connects, private atomic writes, executable types and the quarantine attribute (`[.keychain]` tries the real Keychain), the serial port listing, serial ports driven through a pseudo-terminal (data both ways, exclusive use, a vanished device, settings macOS lacks) and the `SSH_AUTH_SOCK` agent client against OpenSSH's `ssh-agent` (skipped without it). Uses no test servers, so it builds on every OS first. *Kind: unit (file system, pseudo-terminals, ssh-agent).* Source: [native/tests/platform](../native/tests/platform) (`common/` plus the OS's folder).
 
 | Test case | Tags | Needs (skipped without) | File |
 |---|---|---|---|
@@ -289,6 +342,15 @@ The platform layer's tier 0 (`native/src/platform/sys`): what every OS's impleme
 | codepage (Windows): the single-byte tables are Windows' own | `[platform][codepage]` |  | `codepage_win_tests.cpp` |
 | codepage (Windows): the lead bytes are Windows' own | `[platform][codepage]` |  | `codepage_win_tests.cpp` |
 | codepage (Windows): regenerate the tables | `[.generate]` | hidden: runs only when its tag is given (rewrites the tables) | `codepage_win_tests.cpp` |
+| pty (Windows): ConPTY is there on the Windows versions we build for | `[platform][pty]` |  | `pty_win_tests.cpp` |
+| pty (Windows): runs a program, passes its output and exit code | `[platform][pty]` |  | `pty_win_tests.cpp` |
+| pty (Windows): input, resize, environment and a non-ASCII start folder | `[platform][pty]` |  | `pty_win_tests.cpp` |
+| pty (Windows): kill ends the program and what it started | `[platform][pty]` |  | `pty_win_tests.cpp` |
+| pty (Windows): a missing program or start folder is a readable error | `[platform][pty]` |  | `pty_win_tests.cpp` |
+| pty (Windows): the shell list has Command Prompt and one default | `[platform][pty]` |  | `pty_win_tests.cpp` |
+| pty (Windows): WSL distributions are named without quotes | `[platform][pty]` | wsl.exe keeps quotes as part of the name | `pty_win_tests.cpp` |
+
+On macOS, `pty_posix_tests.cpp` has the POSIX counterparts (7): output and exit code, command-line splitting, input / resize / environment / a non-ASCII folder, default signal handling for the program, kill hangs it up, readable errors, and the shell list starting with the login shell.
 
 #### platform_ui — `st_test_platform_ui.exe` (8)
 
@@ -381,7 +443,7 @@ Charset decoding/encoding, session logging, the session manager (ordering, batch
 | session manager: closeAll tears everything down | `[manager]` |  | `sessionmanager_tests.cpp` |
 | session manager: bridge handlers | `[manager]` |  | `sessionmanager_tests.cpp` |
 
-#### sftp — `st_test_sftp.exe` (23)
+#### sftp — `st_test_sftp.exe` (24)
 
 File manager backend over SFTP and SCP: browsing, transfers, conflicts, resume, move, find, synchronize, edit. *Kind: integration (test SSH server).* Source: [native/tests/sftp](../native/tests/sftp).
 
@@ -410,6 +472,7 @@ File manager backend over SFTP and SCP: browsing, transfers, conflicts, resume, 
 | transfer: uploads merge into existing folders | `[sftp][transfer]` |  | `transfer_tests.cpp` |
 | transfer: folder transfers report the listing before copying | `[sftp][transfer]` |  | `transfer_tests.cpp` |
 | transfer: folder uploads can leave out macOS Finder's files | `[sftp][transfer]` |  | `transfer_tests.cpp` |
+| transfer: upload as / download as give the one item a new name | `[sftp][transfer]` | also moved under a new name (the source goes), and a move skipped at a conflict keeps the source | `transfer_tests.cpp` |
 
 #### ssh — `st_test_ssh.exe` (25)
 
@@ -490,7 +553,7 @@ Self-tests of the fake servers, validated with independent clients (`plink`, `ps
 | TestSshServer serves SFTP to psftp | `[support][plink]` | PuTTY `psftp` | `support_tests.cpp` |
 | TestSshServer honours local forwarding from plink | `[support][plink]` | PuTTY `plink` | `support_tests.cpp` |
 
-### UI unit tests (110 tests)
+### UI unit tests (142 tests)
 
 #### `actions.test.ts` (7)
 
@@ -598,14 +661,30 @@ Workspace store: automatic tab titles for each Tab titles setting (terminal titl
 | closing panes of a split tab | keeps the active pane when another one closes |
 | closing panes of a split tab | closes the tab with its last pane |
 
-#### `workspacePersist.test.ts` (2)
+#### `workspacePersist.test.ts` (5)
 
-Saving and restoring open tabs, including file manager tabs and snapshots from older versions. Source: [ui/src/store/workspacePersist.test.ts](../ui/src/store/workspacePersist.test.ts).
+Saving and restoring open tabs, including file manager tabs, snapshots from older versions and the names of tabs and panes. Source: [ui/src/store/workspacePersist.test.ts](../ui/src/store/workspacePersist.test.ts).
 
 | Group | Test |
 |---|---|
 | workspace persistence with file manager tabs | keeps the kind and folders, drops the terminal link |
 | workspace persistence with file manager tabs | treats old snapshots as terminals |
+| workspace persistence with local terminals | brings local terminals back waiting to be started, other sessions as before |
+| workspace persistence of names | "Keep tab and pane names" off: the tabs come back with automatic titles, the snapshot keeps the names |
+| workspace persistence of names | tab and pane names come back after a restart |
+
+#### `skipMacFiles.test.ts` (3), `reportedFolder.test.ts` (2), `quickconnect/local.test.ts` (3)
+
+The ".DS_Store and ._ files" default (on for macOS, off for Windows, saved values kept); the folder a local shell reports (OSC 7 / OSC 9;9) turned into a path of this system; quick connect's `local:` targets (a shell by id or name, else a command line). The rename tests are in `workspace.test.ts` (tab and pane names, duplicate keeps them), `workspacePersist.test.ts` (names after a restart) and `macos.test.ts` (the shortcut and the File menu entry).
+
+#### `local.test.ts` (2)
+
+Local terminal helpers: program names for labels and new local sessions from a shell. Source: [ui/src/shared/local.test.ts](../ui/src/shared/local.test.ts).
+
+| Group | Test |
+|---|---|
+| local terminals | names the program for labels |
+| local terminals | builds an unsaved session from a shell, keeping the template |
 
 #### `keymap.test.ts` (37)
 
@@ -673,6 +752,113 @@ About: the build number with the commit (marking uncommitted changes) and the bu
 | About: version and build id | shows nothing when the host sent no build id |
 | About: version and build id | shows the build time in local time, and nothing for a missing or invalid time |
 
+#### `contract.test.ts` (7)
+
+The bridge contract: `API_SCHEMA` against the native host's sources and the mock backend. Source: [ui/src/bridge/contract.test.ts](../ui/src/bridge/contract.test.ts).
+
+| Group | Test |
+|---|---|
+| native host | handles every invoke and send channel, and nothing else |
+| native host | registers each channel with its kind (on() for send, handle*() for invoke) |
+| native host | emits only events of the schema, and every one of them |
+| mock backend | answers every invoke channel |
+| mock backend | answers every send channel |
+| mock backend | registers only channels of the schema, with their kind |
+| mock backend | emits only events of the schema |
+
+#### `reportError.test.ts` (6)
+
+The UI's own errors in the app log (`app:log`): how errors are described, repeats dropped, the cap, the window's error events. Source: [ui/src/bridge/reportError.test.ts](../ui/src/bridge/reportError.test.ts).
+
+| Group | Test |
+|---|---|
+| describeError | keeps a stack that already starts with the message (Chromium) |
+| describeError | puts the message in front of a stack without it (WebKit) |
+| describeError | describes things that are not errors |
+| reportError | writes to the app log once per distinct error |
+| reportError | stops after 50 reports |
+| reportError | reports uncaught errors and unhandled rejections from the window |
+
+### UI browser tests (73 tests, each run as `windows` and `macos`; the two marked macOS only skip in the Windows layout)
+
+Source: [ui/e2e](../ui/e2e).
+
+| File | Test |
+|---|---|
+| `welcome.spec.ts` | lists the recent sessions and quick connect |
+| `welcome.spec.ts` | quick connect shows the serial example of the system (`COM3` / `/dev/cu.*`) |
+| `welcome.spec.ts` | title bar: caption buttons and app menu on Windows, none on macOS |
+| `welcome.spec.ts` | the sidebar can be hidden and shown again |
+| `session-editor.spec.ts` | shows the session and its categories |
+| `session-editor.spec.ts` | saved password: says what encrypts it on this system (Windows DPAPI / login Keychain) |
+| `session-editor.spec.ts` | proxy password: says what encrypts it on this system |
+| `session-editor.spec.ts` | renaming and saving updates the sidebar |
+| `session-editor.spec.ts` | cancel asks before discarding changes, then keeps the session as it was |
+| `sidebar-palette.spec.ts` | search filters the saved sessions |
+| `sidebar-palette.spec.ts` | the context menu offers the session actions |
+| `sidebar-palette.spec.ts` | duplicate adds a copy of the session |
+| `sidebar-palette.spec.ts` | the command palette opens (shortcut, or the macOS menu bar) and closes with Escape |
+| `sidebar-palette.spec.ts` | the welcome screen shows the system's shortcuts |
+| `terminal.spec.ts` | double-clicking a session opens a tab with the shell |
+| `terminal.spec.ts` | typed commands reach the shell and its output is shown |
+| `terminal.spec.ts` | closing the tab returns to the welcome screen (after "Close tab?") |
+| `terminal.spec.ts` | quick connect opens a session from user@host |
+| `terminal.spec.ts` | split right from the command palette makes two panes |
+| `reconnect.spec.ts` | after a lost connection and Restart, the new session starts below the old output (which stays whole), after an empty line |
+| `reconnect.spec.ts` | after a lost connection and Restart, the SFTP panel stays in the folder it showed |
+| `local-terminal.spec.ts` | the shortcut (macOS: the File menu) opens the default shell |
+| `local-terminal.spec.ts` | the new tab menu lists the installed shells and opens one |
+| `local-terminal.spec.ts` | the welcome screen has a Local terminal button |
+| `transfer-as.spec.ts` | "Download as…" asks for the name and the transfer uses it |
+| `transfer-as.spec.ts` | "Download as and delete on server (move)…" arrives under the new name and leaves the server |
+| `transfer-as.spec.ts` | "Upload as…" is offered for an item of this computer (and its move entry) |
+| `local-terminal.spec.ts` | "local:" plus a shell name opens that shell |
+| `rename.spec.ts` | a split pane is renamed by double-clicking its header, and names the tab |
+| `rename.spec.ts` | the tab menu renames the tab; an empty name brings the automatic title back |
+| `rename-restart.spec.ts` | with "Keep tab and pane names" on (the default), the tab and the pane keep their names (a reload plays the restart: the mock keeps its data in localStorage) |
+| `rename-restart.spec.ts` | with it off, the tabs come back with automatic titles |
+| `sftp-panel.spec.ts` | navigates: open a folder, up, Home, breadcrumbs, a typed path, Backspace; a missing folder shows the error |
+| `sftp-panel.spec.ts` | hidden files are shown on request; columns sort both ways |
+| `sftp-panel.spec.ts` | new folder, rename with F2, delete with and without the question ("Confirm before deleting" off) |
+| `sftp-panel.spec.ts` | the permissions dialog changes a mode, by checkbox and in octal; Cancel changes nothing |
+| `sftp-panel.spec.ts` | download: the transfer runs, finishes, and "Clear finished" removes it |
+| `sftp-panel.spec.ts` | upload: the toolbar button, and "Upload file as…" with a new name; a cancelled picker does nothing |
+| `sftp-panel.spec.ts` | an upload onto an existing name asks: Skip leaves it, Rename… keeps both |
+| `sftp-panel.spec.ts` | "Download as…" takes the name from the Save dialog; not offered for folders |
+| `sftp-panel.spec.ts` | context menus: Copy path, Copy current path, Refresh |
+| `sftp-panel.spec.ts` | "Open in the file manager" opens the two-pane file manager for the same server |
+| `sftp-panel.spec.ts` | the panel closes with its button |
+| `sftp-panel.spec.ts` | a Telnet session has no SFTP panel button |
+| `file-manager.spec.ts` | navigates the server: open, back, forward, up, Home, a typed path (Ctrl+L / ⌘L) |
+| `file-manager.spec.ts` | copies with F5 both ways and moves with F6 (the "move" tag, "All done") |
+| `file-manager.spec.ts` | a conflict asks (Overwrite); the toolbar choice "skip" answers without asking |
+| `file-manager.spec.ts` | a running transfer can be cancelled and retried; "Clear finished" empties the list |
+| `file-manager.spec.ts` | bookmarks: add a folder, go back to it, remove it |
+| `file-manager.spec.ts` | new folder (F7), rename in place (F2), delete with the question |
+| `file-manager.spec.ts` | find files on the server (wildcards, the count, no matches), and go to a result |
+| `file-manager.spec.ts` | synchronize: compare shows the differences, then runs them as transfers (the "sync" tag) |
+| `file-manager.spec.ts` | hidden files on request; a terminal to the same server from the toolbar |
+| `file-manager.spec.ts` | the local side lists the computer ("This PC" with the drives / the home folder), and filters |
+| `file-manager.spec.ts` | macOS only: the Finder keys in a file list (⌘↓ open, ⌘↑ up, ⌘[ / ⌘] back and forward, ⇧⌘N new folder, ⌘⌫ delete, ⇧⌘G a typed path) |
+| `file-manager.spec.ts` | macOS only: above the home folder are "/" and Computer with the volumes; a volume goes up to Computer; `~` in a typed path |
+| `file-manager.spec.ts` | local files use the words of the system: Trash / Recycle Bin, Show in Finder / Show in Explorer |
+| `import.spec.ts` | offers the sources of this system and counts the PuTTY sessions |
+| `import.spec.ts` | PuTTY: notes, filter, select, import into the PuTTY folder (sessions and host keys) |
+| `import.spec.ts` | existing sessions at the top level: marked, and replaced when chosen |
+| `import.spec.ts` | OpenSSH config into a folder of its own, with the notes of a host; "Import more" |
+| `import.spec.ts` | a .reg file and a JSON backup show their previews |
+| `import.spec.ts` | a session exports to a PuTTY .reg file and to JSON |
+| `keygen.spec.ts` | generates an Ed25519 key: public key, fingerprint, and a warning without a passphrase |
+| `keygen.spec.ts` | RSA offers key sizes, ECDSA curves |
+| `keygen.spec.ts` | the passphrase must be confirmed and match |
+| `keygen.spec.ts` | saves the private key (OpenSSH, .ppk) owner-only and the public key; a cancelled Save saves nothing; copies the public key |
+| `keygen.spec.ts` | loads an existing key: a missing file, the passphrase of an encrypted one, then converts it to .ppk |
+| `settings.spec.ts` | every section opens |
+| `settings.spec.ts` | a theme is applied to the window at once and kept after a restart |
+| `settings.spec.ts` | switches are saved (copy on select, restore tabs enabling "Keep tab and pane names", confirm before deleting) |
+| `settings.spec.ts` | rows only one system has (Option as Meta on macOS; the Mica / Acrylic backdrop is hidden on both while it is off) |
+| `settings.spec.ts` | a new key binding works at once; "Reset to default" brings the old one back |
+
 ## 6. How to run the tests
 
 ### Native tests
@@ -703,8 +889,10 @@ Catch2 options, for any `st_test_*.exe`:
 one, choose *Set as Startup Project*, and press F5 to debug it. To debug a single test case, put its name or tag into
 *Properties* → *Debugging* → *Command Arguments*.
 
-**Release build:** `.\scripts\windows\build.ps1 -Tests` runs the UI tests, then builds everything in Release and runs
-`ctest` (every native suite and the platform boundary check) before packaging; it stops when anything fails.
+**Release build:** `.\scripts\windows\build.ps1 -Tests` runs the UI unit tests, then builds everything in Release and
+runs `ctest` (every native suite and the platform boundary check) before packaging; `-E2E` also runs the UI typecheck
+(with `ui/e2e`) and the browser tests (`npm run test:e2e`, about 5 minutes). It stops when anything fails. macOS:
+`scripts/macos/build.sh --tests --e2e`.
 
 ### UI unit tests
 
@@ -714,8 +902,26 @@ npm test                          # all tests, once (vitest run)
 npx vitest                        # watch mode: reruns affected tests on every save
 npx vitest run keymap             # only files whose path contains "keymap"
 npx vitest run -t "Backspace"     # only tests whose name contains "Backspace"
-npm run typecheck                 # TypeScript check of the whole UI (no tests, catches type errors)
+npm run typecheck                 # TypeScript check of the whole UI and of e2e/ (no tests, catches type errors)
 ```
+
+### UI browser tests
+
+```powershell
+cd ui
+npm run test:e2e                              # all browser tests, both layouts (playwright test)
+npx playwright test --project=macos           # one layout
+npx playwright test session-editor            # files whose name contains "session-editor"
+npx playwright test -g "saved password"       # tests whose title contains "saved password"
+npx playwright test --headed                  # with the browser window visible
+npx playwright test --ui                      # Playwright's interactive runner: step through, see the page
+npx playwright show-report                    # the HTML report of the last run
+```
+
+They need the installed Microsoft Edge (Windows) or Google Chrome; nothing is downloaded. Node and npm: see
+[BUILDING.md](BUILDING.md); `scripts\windows\build.ps1` finds the Node.js that comes with Visual Studio when `npm` is
+not on `PATH`, and a terminal can do the same by putting
+`C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VisualStudio\NodeJs` first on `PATH`.
 
 ### Test SSH server for manual testing
 
@@ -797,6 +1003,17 @@ errors from the page are printed at the end. Playwright refuses to click a locat
 Playwright's and so Windows-only; on macOS find the element with CSS (`page.click(...)`, or `page.evaluate` to pick it
 by its text).
 
+### `checks/local-terminal.mjs`: local terminals in the real app (Windows and macOS)
+
+```
+node scripts/app.mjs --steps scripts/checks/local-terminal.mjs
+```
+
+The same steps on both systems (Debug build): the shell list (at least one, exactly one default), the shortcut opens
+the default shell, `TERM_PROGRAM` / `COLORTERM`, non-ASCII text both ways, the window size and (macOS) `LANG` for
+bash-like shells, `exit` closes the tab, a second shell from the + menu, and on Windows a WSL distribution if there is one. Prints a `PASS` / `FAIL` line per check and
+exits non-zero on the first failure.
+
 ### `shot.mjs`: the UI in a browser, with the mock backend
 
 Builds the UI (with the mock backend) into `ui\.preview\<name>`, serves it on a random local port, opens it in
@@ -823,12 +1040,18 @@ complete at that point. A Node `DEP0190` deprecation warning at the start is har
 
 ## 8. What is not covered
 
-- **UI behaviour:** React components, dialogs, the terminal view and the bridge client have no automated tests; of the stores
-  and actions, only the logic listed in section 5 is covered. They are checked by hand with the scripts in section 7.
+- **UI behaviour:** the browser tests (section 5) cover the welcome screen, the session editor, the sidebar, the
+  command palette, terminals and split panes, against the mock backend. Since 2026-11-14 also the SFTP panel, the file manager, import and export, the key
+  generator and the settings dialog. Not covered yet: the host key and password / 2FA prompts, the color scheme editor,
+  drag and drop, and the host-specific code (the real WebView2 / WKWebView bridge client). They are checked by hand with the scripts in section 7.
 - **Native parts without tests:** the main window and WebView2 host (`platform/win/ui/HostWindowWin`; its policy, `app/HostController`, is tested), the core bridge handlers
   (`app/CoreHandlers`: sessions, settings, known hosts, window, ...), native file dialogs (`platform/ui/Dialogs`), the import
   bridge handlers (`importers/ImportHandlers`) and the serial port transport (needs hardware). The logic underneath
   most of them (storage, importers) is tested.
+- **Serial ports with real hardware: never confirmed.** On Windows no serial session has been tested with a real
+  COM port (USB adapter: FTDI, CP210x, CH340) at all; on macOS only through pseudo-terminals in the `platform` tests,
+  never with an adapter. Whoever has an adapter: connect a serial session (line settings, typing both ways, Break)
+  and record the result here (release checklist, sections 2 and 3, has the steps).
 - **No continuous integration:** nothing runs the tests automatically.
 
 ## 9. Adding tests

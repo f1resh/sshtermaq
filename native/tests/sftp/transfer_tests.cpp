@@ -336,3 +336,52 @@ TEST_CASE("transfer: folder uploads can leave out macOS Finder's files", "[sftp]
     CHECK(f.waitDone(f.upload(l / "site", "/all"))["filesTotal"] == 6);
     CHECK(fs::exists(r / "all" / "site" / "img" / "._logo.png"));
 }
+
+TEST_CASE("transfer: upload as / download as give the one item a new name", "[sftp][transfer]") {
+    SftpFixture f;
+    const fs::path r = f.remoteRoot.path(), l = f.local.path();
+    spit(r / "report.txt", "remote report");
+    spit(l / "notes.txt", "local notes");
+    fs::create_directories(l / "site");
+    spit(l / "site" / "index.html", "<html>");
+
+    SECTION("a file downloads under the new name; the original name is not created") {
+        CHECK(f.waitDone(f.download("/report.txt", l, Json{{"targetName", "report-2026.txt"}}))["state"] == "done");
+        CHECK(slurp(l / "report-2026.txt") == "remote report");
+        CHECK_FALSE(fs::exists(l / "report.txt"));
+    }
+
+    SECTION("a file and a folder upload under new names") {
+        CHECK(f.waitDone(f.upload(l / "notes.txt", "/", Json{{"targetName", "notes-copy.txt"}}))["state"] == "done");
+        CHECK(slurp(r / "notes-copy.txt") == "local notes");
+        CHECK(f.waitDone(f.upload(l / "site", "/", Json{{"targetName", "site-v2"}}))["state"] == "done");
+        CHECK(slurp(r / "site-v2" / "index.html") == "<html>");
+        CHECK_FALSE(fs::exists(r / "site"));
+    }
+
+    SECTION("moved under a new name: the source goes, the new name arrives") {
+        CHECK(f.waitDone(f.download("/report.txt", l, Json{{"targetName", "report-2026.txt"}, {"move", true}}))["state"] == "done");
+        CHECK(slurp(l / "report-2026.txt") == "remote report");
+        CHECK_FALSE(fs::exists(r / "report.txt"));
+        CHECK_FALSE(fs::exists(l / "report.txt"));
+        CHECK(f.waitDone(f.upload(l / "site", "/", Json{{"targetName", "site-v2"}, {"move", true}}))["state"] == "done");
+        CHECK(slurp(r / "site-v2" / "index.html") == "<html>");
+        CHECK_FALSE(fs::exists(l / "site"));
+    }
+
+    SECTION("moved under a name that exists, skipped at the conflict: the source stays") {
+        spit(l / "taken.txt", "already here");
+        const Json p = f.waitDone(f.download("/report.txt", l, Json{{"targetName", "taken.txt"}, {"move", true}, {"conflict", "skip"}}));
+        CHECK(p["skipped"] == 1);
+        CHECK(slurp(l / "taken.txt") == "already here");
+        CHECK(slurp(r / "report.txt") == "remote report");
+    }
+
+    SECTION("only one item, and only a plain name") {
+        CHECK_THROWS(f.h.invoke("sftp:download",
+                                Json::array({f.id, Json::array({"/report.txt", "/report.txt"}), u8(l), Json{{"targetName", "x.txt"}}})));
+        CHECK_THROWS(f.h.invoke("sftp:upload",
+                                Json::array({f.id, "/", Json::array({u8(l / "notes.txt")}), Json{{"targetName", "sub/x.txt"}}})));
+        CHECK_THROWS(f.h.invoke("sftp:download", Json::array({f.id, Json::array({"/report.txt"}), u8(l), Json{{"targetName", ".."}}})));
+    }
+}

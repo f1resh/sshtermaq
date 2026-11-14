@@ -12,7 +12,7 @@ SSHTermaq (C++20; Windows: Win32 + WebView2; macOS: AppKit + WKWebView)
 ├─ bridge/     JSON message router  <── web view messages ──>  UI (React + xterm.js, ui/)
 ├─ store/      sessions.json, settings.json, state.json, known_hosts.json, credentials.json (DPAPI)
 ├─ session/    SessionManager: connections, charset, local echo/edit (ldisc), session logging, prompts
-├─ transport/  Telnet, Rlogin, Raw, Serial  (+ TransportFactory)
+├─ transport/  Telnet, Rlogin, Raw, Serial, Local (a shell in a pseudo-terminal)  (+ TransportFactory)
 ├─ net/        Winsock helpers, proxies (SOCKS4/4a/5, HTTP, Telnet, local command, SSH jump)
 ├─ ssh/        libssh transport: auth (agent/Pageant, keys, kbd-int, password), host keys, PTY,
 │              port forwarding L/R/D, X11, agent forwarding, SFTP task posting
@@ -22,8 +22,8 @@ SSHTermaq (C++20; Windows: Win32 + WebView2; macOS: AppKit + WKWebView)
 ├─ sftp/       file manager backend on SSH connections: RemoteFs over SFTP or SCP, transfer engine (queue,
 │              conflicts, resume, move), find, synchronize, edit with auto-upload
 ├─ localfs/    local:* bridge handlers for the file manager (the OS side: platform/ui/LocalFs)
-└─ platform/   OS-specific code only (platform/README.md): sys/ (files, sockets, ...), ui/ (dialogs, shell,
-               drag & drop of local files with internal drops)
+└─ platform/   OS-specific code only (platform/README.md): sys/ (files, sockets, pseudo-terminals: ConPTY /
+               openpty, ...), ui/ (dialogs, shell, drag & drop of local files with internal drops)
 ```
 
 Linking: everything is static, including the C/C++ runtime (`/MT`), except libssh, which ships as `ssh.dll`
@@ -96,6 +96,7 @@ Rules:
     `platform/ui` (tier 1) may also use `core/Types.h`, `core/Strings.h`, `core/Threading.h` and `core/Log.h`.
     Platform code never includes module headers (bridge, store, ssh, ...): modules call the platform, and the
     platform reports back through callbacks (e.g. `ui::HostWindow`'s hooks, connected by `app/HostController`).
+11. **Never change a stable identifier** (below) to tidy up or refactor: existing installs depend on it.
 
 ### Bridge
 Channel = `namespace:method` from `API_SCHEMA`. Invoke args are positional JSON arrays (optional trailing args
@@ -141,12 +142,40 @@ Transport::onData(bytes) ─▶ SessionLog ─▶ Decoder(charset) ─▶ batch 
 ```
 connId = `<paneId>#<generation>` (the UI restarts a pane by bumping the generation).
 
+### Logs
+| Log | Where | What goes in |
+|---|---|---|
+| App log | `<data>/logs/sshtermaq.log` (`core/Log.h`); past 2 MB, the next start keeps it as `sshtermaq.1.log` | start (version, OS, web view), storage problems, crashes and failed jobs; each connection's start, warnings, errors and end (how long, why), named by connId, protocol and `host:port`, never the user name; failed bridge calls (channel and message, once a minute per kind); the UI's own errors (`app:log`, `ui/src/bridge/reportError.ts`, the error boundary) |
+| Event log | per connection, in memory (2,000 entries), Event log window | everything a connection reports (`Transport` `onLog`); gone when the connection is closed |
+| Session log | the file the session's Logging settings name | what the session's logging mode records (printable output, all data, or SSH debug messages) |
+
+Never secrets in any of them (rule 6).
+
+### Stable identifiers
+Names and values that users' installs and data already depend on. They look like strings to tidy up; changing one
+breaks existing installs. Change one only with a migration that reads the old value.
+
+| Identifier | Where | What breaks if it changes |
+|---|---|---|
+| DPAPI entropy `SSHTermaq/credentials/v1:6f1d…` (Windows) | `native/src/platform/win/sys/SecretWin.cpp` | every saved password and encrypted proxy password becomes unreadable |
+| Keychain item: service `SSHTermaq`, account `credentials-key` (macOS) | `native/src/platform/mac/sys/SecretMac.cpp` | the same: the key is not found, saved passwords are lost |
+| `enc:` prefix of encrypted proxy passwords | `native/src/store/Store.cpp` | stored proxy passwords are read as plain text |
+| Data folder `SSHTermaq` (`%APPDATA%\SSHTermaq`, `~/Library/Application Support/SSHTermaq`), portable `portable.flag` / `data` next to the exe, `SSHTERMAQ_DATA_DIR` | `native/src/app/Paths.cpp` | sessions, settings and known hosts are not found; portable copies and scripts stop working |
+| Data file names `sessions.json`, `settings.json`, `state.json`, `known_hosts.json`, `credentials.json` and their `version` fields | `native/src/store/Store.cpp` | the same; a format change needs a version bump and a reader for the old version |
+| JSON field names and enum values of `SessionConfig` / `AppSettings` | `ui/src/shared/types.ts`, `native/src/core/Types.h` | saved sessions and settings lose those values (they are stored as these names) |
+| Backup format tag `sshtermaq-sessions` | `native/src/importers/Importers.cpp` | exported backups no longer import |
+| Partial download suffix `.st-partial` | `native/src/sftp/TransferEngine.cpp` | interrupted downloads no longer resume |
+| Microsoft Store identity `PavelAKulov.SSHTermaq` and publisher | `scripts/windows/AppxManifest.xml.in` (set by Partner Center) | the Store no longer accepts the package as an update |
+| Installer `AppId` `{6C8B2E0B-…}` | `scripts/windows/installer.iss` | an upgrade installs a second copy instead of replacing the first |
+| macOS bundle identifier `io.github.f1resh.sshtermaq` | `native/res/macos/Info.plist.in` | macOS treats it as another app: the local network permission is asked again, macOS's own files for the app (caches, saved window state) start over, and the Homebrew cask's `zap` paths no longer match |
+| Package names: Store / winget ID `9PPK5DXCRQRC`, Homebrew `f1resh/tap/sshtermaq` | the Store listing, the `f1resh/homebrew-tap` repository | install commands in the README, on the website and in lists stop working |
+
 ## Module ownership
 
 | Module (agent) | Owns |
 |---|---|
 | `ssh` | `native/src/ssh/**`, `native/tests/ssh/**` |
-| `net` | `native/src/net/**`, `native/src/transport/{Telnet,Rlogin,Raw,Serial}*`, `native/src/session/LineDiscipline.*`, `native/tests/net/**` |
+| `net` | `native/src/net/**`, `native/src/transport/{Telnet,Rlogin,Raw,Serial,Local}*`, `native/src/session/LineDiscipline.*`, `native/tests/net/**` |
 | `keys-import` | `native/src/keys/**`, `native/src/putty/**`, `native/src/importers/**`, `native/tests/{keys,putty}/**`, `native/tests/fixtures/**` |
 | `host` | `native/src/app/**`, `native/src/store/**`, `native/src/core/Types.*` (additions), `native/res/**`, `native/tests/{store,app}/**`, `CMakeLists.txt` (additions only) |
 | `session` | `native/src/session/{SessionManager,Charset,SessionLog}.*`, `native/src/transport/TransportFactory.*`, `native/tests/session/**` |
@@ -248,4 +277,4 @@ Known gaps: GSSAPI, SSH-1, SUPDUP, bare ssh-connection, SSH certificates, connec
 - [x] PSFTP/PSCP → SFTP side panel + file manager tab (WinSCP-style): local + server panes, SFTP with SCP fallback, copy/move (F5/F6, drag & drop between the panes and in from Explorer, local files out), conflicts (ask/overwrite/newer/skip/resume/rename), resume, edit with auto-upload, synchronize, find, bookmarks, chmod; PuTTYgen → keygen/convert/inspect; Pageant → agent support
 - [x] Import: PuTTY registry sessions + Default Settings + SSH host keys, .reg files, export to .reg; ~/.ssh/config; OpenSSH known_hosts; JSON backup
 - [x] CLI: `-ssh -telnet -rlogin -raw -serial [user@]host -P -l -pw -i -load -L -R -D -A -a -X -x -C -4 -6 -N -m -sercfg`, `sftp://` / `scp://` URLs
-- [x] Modern: tabs (reorder, colours, rename, title from terminal / session name / host), split panes, broadcast input, command palette, quick connect, sidebar (folders, search, drag & drop), app themes + terminal schemes, Mica, settings UI, custom keybindings, reconnect, workspace restore, find, zoom, portable mode
+- [x] Modern: tabs (reorder, colours, rename, title from terminal / session name / host), split panes, broadcast input, command palette, quick connect, sidebar (folders, search, drag & drop), app themes + terminal schemes, Mica (off since 1.1.0, see v1.2.0 plan), settings UI, custom keybindings, reconnect, workspace restore, find, zoom, portable mode

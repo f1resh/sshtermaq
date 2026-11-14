@@ -2,16 +2,19 @@
  * Shown when no tab is open: quick connect, recent sessions, PuTTY import call-to-action, shortcuts.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Download, Plus, Server, Settings } from 'lucide-react';
+import { ArrowRight, Download, Plus, Server, Settings, SquareTerminal } from 'lucide-react';
 import { api } from '@/bridge/api';
 import { runCommand } from '@/commands/commands';
 import { shortcutLabel } from '@/commands/keybindings';
 import { applyQuickConnect, parseQuickConnect } from '@/components/quickconnect/parse';
-import { connectSavedSession, connectSession, createAdHocSession, newSessionDraft, reportError } from '@/commands/actions';
+import { connectSavedSession, connectSession, createAdHocSession, newSessionDraft, openLocalTerminal, reportError } from '@/commands/actions';
 import { Button, Kbd } from '@/components/ui';
-import { useSessions } from '@/store/data';
+import { useSessions, useSettings } from '@/store/data';
+import { localPart, resolveLocalTarget, shellToOpen } from '@/components/quickconnect/local';
+import { pickDefaultShell, useShells } from '@/store/shells';
 import { useUi } from '@/store/ui';
 import { sessionLabel } from '@shared/defaults';
+import { isMac, osTerms } from '@shared/platform';
 import type { CommandId } from '@shared/types';
 import { Logo } from './Logo';
 import './welcome.css';
@@ -42,6 +45,7 @@ export function Welcome() {
     };
   }, []);
 
+  const hasShells = useShells((st) => (st.shells?.length ?? 0) > 0);
   const recent = useMemo(
     () =>
       [...sessions]
@@ -50,7 +54,16 @@ export function Welcome() {
     [sessions]
   );
 
-  const connect = () => {
+  const connect = async () => {
+    const part = localPart(value);
+    if (part !== null) {
+      // "local:pwsh", "local:git bash", "local:" (the default shell) or "local:<command line>".
+      const shells = await useShells.getState().load();
+      const target = resolveLocalTarget(part, shells, pickDefaultShell(shells, useSettings.getState().settings.terminal.defaultShell));
+      void openLocalTerminal(shellToOpen(target) ?? undefined);
+      setValue('');
+      return;
+    }
     const parsed = parseQuickConnect(value);
     if (!parsed.ok) {
       setError(parsed.error);
@@ -81,12 +94,13 @@ export function Welcome() {
           className="welcome__connect"
           onSubmit={(e) => {
             e.preventDefault();
-            connect();
+            void connect();
           }}
         >
+          {/* macOS: the device path alone; with a baud rate it no longer fits the field in a 1280-wide window */}
           <input
             className="input welcome__input"
-            placeholder="user@host[:port]  ·  telnet://host  ·  serial://COM3?baud=115200"
+            placeholder={`user@host[:port]  ·  telnet://host  ·  ${isMac ? osTerms.serialLine : osTerms.serialExample}`}
             value={value}
             spellCheck={false}
             autoFocus
@@ -105,6 +119,11 @@ export function Welcome() {
           <Button icon={<Plus size={15} />} onClick={() => newSessionDraft()}>
             New session
           </Button>
+          {hasShells && (
+            <Button icon={<SquareTerminal size={15} />} onClick={() => runCommand('tab.newLocal')} title={`New local terminal (${shortcutLabel('tab.newLocal')})`}>
+              Local terminal
+            </Button>
+          )}
           {puttyCount > 0 && (
             <Button icon={<Download size={15} />} onClick={() => useUi.getState().openDialog({ type: 'import', source: 'putty-registry' })}>
               Import {puttyCount} PuTTY session{puttyCount === 1 ? '' : 's'}

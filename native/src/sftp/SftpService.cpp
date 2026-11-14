@@ -333,11 +333,22 @@ struct SftpCore : std::enable_shared_from_this<SftpCore> {
 
     /* -------------------------------------------------------------- transfers */
 
+    /** opts.targetName, checked: one item only, a plain name (no folder part). */
+    static std::string targetNameOf(const TransferOptions& opts, size_t count) {
+        const std::string name = trim(opts.targetName);
+        if (name.empty()) return {};
+        if (count != 1) throw std::invalid_argument("A new name can only be given to one item at a time");
+        if (name == "." || name == ".." || name.find_first_of("/\\") != std::string::npos)
+            throw std::invalid_argument("\"" + name + "\" is not a valid name");
+        return name;
+    }
+
     Json download(const std::string& id, const std::vector<std::string>& remotePaths, std::string localDir,
                   const TransferOptions& opts) {
         checkRunning();
         auto s = session(id);
         if (remotePaths.empty()) return Json::array();
+        const std::string targetName = targetNameOf(opts, remotePaths.size());
         if (localDir.empty()) {
             FileDialogOptions d;
             d.title = remotePaths.size() == 1 ? "Download " + sftputil::remoteBaseName(remotePaths[0]) + " to"
@@ -351,7 +362,7 @@ struct SftpCore : std::enable_shared_from_this<SftpCore> {
         group->multiple = remotePaths.size() > 1;
         Json ids = Json::array();
         for (const auto& remote : remotePaths) {
-            std::string name = sftputil::remoteBaseName(remote);
+            std::string name = targetName.empty() ? sftputil::remoteBaseName(remote) : targetName;
             if (name.empty() || name == "/" || name == "." || name == "..") name = "root";
             auto t = engine->create(s->id, TransferKind::Download, remote, base / sftputil::sanitizeLocalName(name), name,
                                     opts, group);
@@ -370,12 +381,13 @@ struct SftpCore : std::enable_shared_from_this<SftpCore> {
             d.title = "Upload to " + remoteDir;
             localPaths = ui::dialogs::openFiles(d);
         }
+        const std::string targetName = targetNameOf(opts, localPaths.size());
         auto group = TransferEngine::newGroup(opts);
         group->multiple = localPaths.size() > 1;
         Json ids = Json::array();
         for (const auto& local : localPaths) {
             const fs::path p = sys::toPath(local);
-            const std::string name = localBaseName(p);
+            const std::string name = targetName.empty() ? localBaseName(p) : targetName;
             auto t = engine->create(s->id, TransferKind::Upload, sftputil::joinRemote(remoteDir, name), p, name, opts, group);
             engine->enqueue(t);
             ids.push_back(t->id);

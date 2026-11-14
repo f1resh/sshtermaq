@@ -77,3 +77,19 @@ describe('menu bar', () => {
     expect(find(buildMenuBar(state()), 'app.newSession')?.enabled).toBe(true);
   });
 });
+
+describe('renaming tabs', () => {
+  it('has a shortcut on both systems', () => {
+    expect(PC_KEYBINDINGS['tab.rename']).toBe('Ctrl+Shift+R');
+    expect(MAC_KEYBINDINGS['tab.rename']).toBe('Shift+Meta+R');
+  });
+
+  it('is in the File menu with its shortcut, for an open tab', () => {
+    const menus = buildMenuBar({ shortcut: (id: CommandId) => MAC_KEYBINDINGS[id], sidebarShown: true, hasPane: true });
+    const file = menus.find((m) => m.title === 'File')!;
+    const item = file.items.find((i) => 'command' in i && i.command === 'tab.rename') as { label: string; shortcut?: string; enabled?: boolean };
+    expect(item.label).toBe('Rename Tab…');
+    expect(item.shortcut).toBe('Shift+Meta+R');
+    expect(item.enabled).not.toBe(false);
+  });
+});

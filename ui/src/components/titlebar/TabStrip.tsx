@@ -19,14 +19,16 @@ import {
   X,
   Zap,
   SquarePlus,
+  SquareTerminal,
   History,
   Server
 } from 'lucide-react';
 import { cx, showContextMenu, type MenuItem } from '@/components/ui';
 import { runCommand } from '@/commands/commands';
 import { shortcutLabel } from '@/commands/keybindings';
-import { closeOtherTabs, closeTab, closeTabsToRight, connectSavedSession, focusTabPane, newSessionDraft } from '@/commands/actions';
+import { closeOtherTabs, closeTab, closeTabsToRight, connectSavedSession, focusTabPane, newSessionDraft, openLocalTerminal } from '@/commands/actions';
 import { useSessions, useSettings } from '@/store/data';
+import { pickDefaultShell, useShells } from '@/store/shells';
 import { useUi } from '@/store/ui';
 import { paneIdsOf, tabTitle, useWorkspace } from '@/store/workspace';
 import { connOfFilesPane } from '@/components/files/filesConn';
@@ -103,6 +105,26 @@ function sessionItem(s: SessionConfig, prefixFolder: boolean): MenuItem {
   };
 }
 
+/** "Local terminal": one item per installed shell, the default one first with the shortcut. */
+export function localTerminalItems(): MenuItem[] {
+  const shells = useShells.getState().shells ?? [];
+  if (!shells.length) return [];
+  const def = pickDefaultShell(shells, useSettings.getState().settings.terminal.defaultShell);
+  const ordered = def ? [def, ...shells.filter((s) => s !== def)] : shells;
+  return [
+    { type: 'separator' },
+    { type: 'header', label: 'Local terminal' },
+    ...ordered.map(
+      (s): MenuItem => ({
+        label: s.name,
+        icon: <SquareTerminal size={14} />,
+        shortcut: s === def ? shortcutLabel('tab.newLocal') : undefined,
+        onClick: () => void openLocalTerminal(s)
+      })
+    )
+  ];
+}
+
 export function newTabMenu(): MenuItem[] {
   const sessions = useSessions.getState().sessions;
   const recent = [...sessions].filter((s) => s.lastUsedAt > 0).sort((a, b) => b.lastUsedAt - a.lastUsedAt).slice(0, 5);
@@ -112,6 +134,7 @@ export function newTabMenu(): MenuItem[] {
     { label: 'Quick connect…', icon: <Zap size={14} />, shortcut: shortcutLabel('app.quickConnect'), onClick: () => runCommand('app.quickConnect') },
     { label: 'New session…', icon: <SquarePlus size={14} />, shortcut: shortcutLabel('app.newSession'), onClick: () => newSessionDraft() }
   ];
+  items.push(...localTerminalItems());
   if (recent.length) {
     items.push({ type: 'separator' }, { type: 'header', label: 'Recent' }, ...recent.map((s) => sessionItem(s, true)));
   }

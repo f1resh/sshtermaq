@@ -41,6 +41,7 @@ import {
   mixHex,
   pastePreview,
   reconnectDelayMs,
+  reportedFolder,
   toHex6
 } from './termUtil';
 
@@ -231,6 +232,16 @@ export class TermSession {
       const p = useWorkspace.getState().panes[this.paneId];
       if (p && p.remoteTitle !== title) useWorkspace.getState().updatePane(this.paneId, { remoteTitle: title });
     });
+    // A local shell's current folder (OSC 7 / OSC 9;9), so new local terminals from this pane start there.
+    for (const ident of [7, 9] as const) {
+      this.term.parser.registerOscHandler(ident, (data) => {
+        const p = useWorkspace.getState().panes[this.paneId];
+        if (p?.session.protocol !== 'local') return false;
+        const folder = reportedFolder(ident, data, !isMac);
+        if (folder && p.cwd !== folder) useWorkspace.getState().updatePane(this.paneId, { cwd: folder });
+        return false;
+      });
+    }
     this.term.onSelectionChange(() => this.onSelectionChange());
 
     this.installDomHandlers();
@@ -495,8 +506,18 @@ export class TermSession {
       if (openedConns.has(old) && !isEnded(lastStatusOf(old)?.status)) api.conn.close(old);
       openedConns.delete(old);
       forgetConn(old);
-      // Restarting in place: leave the old screen contents, reset modes the previous session may have set.
-      if (this.opened) this.term.write('\x1b[0m\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?7h\r\n');
+      // Restarting in place: keep the old output, reset the modes the previous session may have set, and start the
+      // new session below the old output, after an empty line.
+      if (this.opened) {
+        // Leave the alternate screen (vim, htop…) only when it is on: in the normal screen, xterm.js would still
+        // restore the saved cursor (top left if none was saved) and the new session would overwrite the old output.
+        const altScreen = this.term.buffer.active.type === 'alternate' ? '\x1b[?1049l' : '';
+        // Scroll region and origin mode (apt's progress bar, for one) reset inside save / restore cursor: both move
+        // the cursor home.
+        const scrollRegion = '\x1b7\x1b[?6l\x1b[r\x1b8';
+        const modes = '\x1b[0m\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?7h';
+        this.term.write(`${altScreen}${scrollRegion}${modes}\r\n\r\n`);
+      }
     }
     this.connId = pane.connId;
     this.lastSentSize = '';
@@ -516,7 +537,7 @@ export class TermSession {
     }
     this.bindConnection(pane);
     this.status = pane.status;
-    if (pane.status === 'idle' && this.opened && this.element.isConnected && !openedConns.has(pane.connId)) {
+    if (pane.status === 'idle' && !pane.deferStart && this.opened && this.element.isConnected && !openedConns.has(pane.connId)) {
       this.openConnection(pane);
     }
   }
@@ -567,7 +588,8 @@ export class TermSession {
       setTimeout(() => useWorkspace.getState().closePane(this.paneId), 0);
       return;
     }
-    if (!clean && this.reconnectArmed && useSettings.getState().settings.behavior.reconnect === 'auto') {
+    // A local shell that ended is not "reconnected": that would start a new one nobody asked for.
+    if (!clean && this.reconnectArmed && this.session.protocol !== 'local' && useSettings.getState().settings.behavior.reconnect === 'auto') {
       this.scheduleReconnect();
     }
   }
@@ -743,6 +765,11 @@ export class TermSession {
     if (isEnded(this.status)) {
       // Banner shortcut: Enter / R restarts a finished session.
       if (data === '\r' || data === 'r' || data === 'R') this.restart();
+      return;
+    }
+    if (useWorkspace.getState().panes[this.paneId]?.deferStart) {
+      // A local terminal waiting to be started: Enter starts it.
+      if (data === '\r') useWorkspace.getState().startPane(this.paneId);
       return;
     }
     const ws = useWorkspace.getState();

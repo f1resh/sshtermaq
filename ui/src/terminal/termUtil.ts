@@ -145,3 +145,31 @@ export function toHex6(c: string): string | null {
   const h = m[1].length === 3 ? m[1].split('').map((x) => x + x).join('') : m[1].slice(0, 6);
   return `#${h.toLowerCase()}`;
 }
+
+/**
+ * The folder a shell reports it is in, from OSC 7 (`file://host/path`, Linux and macOS shells, Git Bash with a prompt
+ * hook) or OSC 9;9 (`9;"C:\path"`, the Windows Terminal convention for PowerShell and cmd). `ident` is the OSC number,
+ * `data` what follows it. Returns a path of this system's form ('' when the data is not a folder we can use):
+ * Windows: `C:\...` or UNC, also from `/c/...` (MSYS / Git Bash) and `/cygdrive/c/...` (Cygwin); macOS: `/...`.
+ */
+export function reportedFolder(ident: 7 | 9, data: string, windows: boolean): string {
+  let path: string;
+  if (ident === 9) {
+    if (!data.startsWith('9;')) return '';
+    path = data.slice(2).trim().replace(/^"(.*)"$/, '$1');
+  } else {
+    const m = /^file:\/\/[^/]*(\/.*)$/i.exec(data.trim());
+    if (!m) return '';
+    try {
+      path = decodeURIComponent(m[1]);
+    } catch {
+      return '';
+    }
+  }
+  if (!windows) return path.startsWith('/') ? path : '';
+  const drive = /^\/(?:cygdrive\/)?([a-zA-Z])(?=\/|$)(.*)$/.exec(path);
+  if (drive) path = `${drive[1].toUpperCase()}:${drive[2] || '/'}`;
+  else if (/^\/[a-zA-Z]:/.test(path)) path = path.slice(1);
+  path = path.replace(/\//g, '\\');
+  return /^[a-zA-Z]:\\/.test(path) || path.startsWith('\\\\') ? path : '';
+}

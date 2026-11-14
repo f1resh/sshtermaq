@@ -110,6 +110,19 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.pane-head__rename {
+  flex: 1;
+  min-width: 0;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
 .pane-head__close {
   flex: none;
   display: grid;

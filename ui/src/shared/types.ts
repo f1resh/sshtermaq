@@ -4,7 +4,7 @@
  * dependencies (types + tiny constants only).
  */
 
-export type Protocol = 'ssh' | 'telnet' | 'rlogin' | 'raw' | 'serial';
+export type Protocol = 'ssh' | 'telnet' | 'rlogin' | 'raw' | 'serial' | 'local';
 export type TriState = 'auto' | 'on' | 'off';
 export type AddressFamily = 'auto' | 'ipv4' | 'ipv6';
 
@@ -144,6 +144,15 @@ export interface SerialOptions {
   flowControl: FlowControl;
 }
 
+/** A local terminal: a shell (or any program) on this computer. Its environment variables are
+ *  `connection.environment`, its TERM `connection.terminalType`. */
+export interface LocalOptions {
+  /** The command line: `"C:\...\pwsh.exe" -NoLogo`, `/bin/zsh -l`. '' => the default shell. */
+  command: string;
+  /** The folder it starts in; '' => the home folder (a leading '~' is the home folder too). */
+  startDir: string;
+}
+
 /* ------------------------------------------------------------------------ */
 /* Terminal behaviour                                                        */
 /* ------------------------------------------------------------------------ */
@@ -266,6 +275,7 @@ export interface SessionConfig {
   telnet: TelnetOptions;
   rlogin: RloginOptions;
   serial: SerialOptions;
+  local: LocalOptions;
   terminal: TerminalOptions;
   keyboard: KeyboardOptions;
   appearance: AppearanceOverrides;
@@ -365,6 +375,7 @@ export type CommandId =
   | 'app.fullscreen'
   | 'app.keygen'
   | 'tab.new'
+  | 'tab.newLocal'
   | 'tab.close'
   | 'tab.next'
   | 'tab.prev'
@@ -385,6 +396,7 @@ export type CommandId =
   | 'pane.focusNext'
   | 'pane.focusPrev'
   | 'pane.restart'
+  | 'pane.rename'
   | 'pane.toggleBroadcast'
   | 'pane.sftp'
   | 'pane.fileManager'
@@ -443,6 +455,9 @@ export interface AppSettings {
     padding: number;
     /** macOS: Option sends ESC + the key (Meta) instead of typing the Option character (e.g. @ or | on some layouts). */
     optionAsMeta: boolean;
+    /** The shell "New local terminal" opens (a shells:list id); '' => the system's default (PowerShell 7 if
+     *  installed, else Windows PowerShell; macOS: the login shell). */
+    defaultShell: string;
   };
   behavior: {
     copyOnSelect: boolean;
@@ -452,6 +467,8 @@ export interface AppSettings {
     warnOnMultilinePaste: boolean;
     confirmCloseConnected: boolean;
     restoreTabs: boolean;
+    /** With restoreTabs: tab and pane names come back too (otherwise restored tabs get automatic titles). */
+    restoreNames: boolean;
     reconnect: 'off' | 'prompt' | 'auto';
     scrollOnOutput: boolean;
     scrollOnKeystroke: boolean;
@@ -723,6 +740,8 @@ export interface TransferOptions {
   deleteToRecycleBin?: boolean;
   /** Folder uploads leave out .DS_Store and "._*" files. Default false. */
   skipMacFiles?: boolean;
+  /** "Upload as" / "Download as": the name the one transferred item gets at the destination. */
+  targetName?: string;
 }
 
 export interface FileStat {
@@ -920,6 +939,15 @@ export interface OpenRequest {
   view?: SessionView;
   /** Remote folder from an sftp:// / scp:// URL. */
   remotePath?: string;
+}
+
+/** A shell installed on this computer (shells:list). */
+export interface LocalShellInfo {
+  id: string;
+  name: string;
+  command: string;
+  environment: EnvVar[];
+  isDefault: boolean;
 }
 
 export interface SerialPortInfo {

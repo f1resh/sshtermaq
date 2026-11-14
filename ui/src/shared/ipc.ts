@@ -50,6 +50,7 @@ import type {
   PromptRequest,
   PromptResponse,
   SerialPortInfo,
+  LocalShellInfo,
   SessionConfig,
   SftpEntry,
   SftpOpenOptions,
@@ -204,6 +205,10 @@ export interface Api {
   serial: {
     listPorts(): Promise<SerialPortInfo[]>;
   };
+  shells: {
+    /** The shells installed here, for local terminals; empty where the OS cannot host them. */
+    list(): Promise<LocalShellInfo[]>;
+  };
   dialog: {
     openFile(opts?: FileDialogOptions): Promise<string | null>;
     openFiles(opts?: FileDialogOptions): Promise<string[]>;
@@ -240,6 +245,8 @@ export interface Api {
     /** data: URL of a local (audio) file, null if unreadable. */
     readFileDataUrl(path: string): Promise<string | null>;
     logDirectory(): Promise<string>;
+    /** Writes one of the UI's own errors or warnings into the app log (logs/sshtermaq.log). */
+    log(level: 'warn' | 'error', message: string): void;
     /** Main asks the renderer whether it may close (connected sessions). Renderer answers via confirmClose. */
     onCloseRequested(cb: () => void): Unsubscribe;
     confirmClose(allow: boolean): void;
@@ -407,6 +414,9 @@ export const API_SCHEMA = {
   serial: {
     listPorts: 'invoke'
   },
+  shells: {
+    list: 'invoke'
+  },
   dialog: {
     openFile: 'invoke',
     openFiles: 'invoke',
@@ -436,6 +446,7 @@ export const API_SCHEMA = {
     listFonts: 'invoke',
     readFileDataUrl: 'invoke',
     logDirectory: 'invoke',
+    log: 'send',
     onCloseRequested: 'event',
     confirmClose: 'send',
     quit: 'send'

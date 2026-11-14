@@ -29,6 +29,14 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts', 'tests/**/*.test.ts']
+    include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
+    // `npm run coverage` (scripts/coverage.mjs): the UI's own code, without the tests and the mock backend.
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['src/**/*.test.ts', 'src/bridge/mock/**', 'src/**/*.d.ts'],
+      reporter: ['json'],
+      reportsDirectory: 'coverage/unit'
+    }
   }
 });

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 # The version of SSHTermaq (x.y.z): the only place to change it. The 4th part of the file version, the build number,
 # and the commit come from git on every build (cmake/BuildInfo.cmake). See docs/BUILDING.md, "Versions".
-project(SSHTermaq VERSION 1.0.0 LANGUAGES C CXX)
+project(SSHTermaq VERSION 1.1.0 LANGUAGES C CXX)
 if(NOT PROJECT_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
   message(FATAL_ERROR "Give the version as x.y.z in project(SSHTermaq VERSION ...), not '${PROJECT_VERSION}'")
 endif()
@@ -185,7 +185,7 @@ st_library(st_net SOURCES ${net_src} DEPS st_core)
 
 st_glob(transport_src
   ${ST_SRC}/transport/TelnetTransport*.cpp ${ST_SRC}/transport/RloginTransport*.cpp
-  ${ST_SRC}/transport/RawTransport*.cpp ${ST_SRC}/transport/SerialTransport*.cpp
+  ${ST_SRC}/transport/RawTransport*.cpp ${ST_SRC}/transport/SerialTransport*.cpp ${ST_SRC}/transport/LocalTransport*.cpp
   ${ST_SRC}/transport/Telnet*.cpp ${ST_SRC}/transport/Serial*.cpp
   ${ST_SRC}/session/LineDiscipline*.cpp)
 list(REMOVE_DUPLICATES transport_src)

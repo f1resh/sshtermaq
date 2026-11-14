@@ -5,7 +5,7 @@
  */
 import { useEffect, useState } from 'react';
 import { api } from '@/bridge/api';
-import { connectSession, isPaneLive } from '@/commands/actions';
+import { connectSession, isPaneLive, openLocalTerminal } from '@/commands/actions';
 import { loadRecentCommands, runCommand } from '@/commands/commands';
 import { installKeybindings } from '@/commands/keybindings';
 import { installMenuBar } from '@/commands/menubar';
@@ -21,6 +21,8 @@ import { ContextMenuHost, ToastHost } from '@/components/ui';
 import { initDataStores, useSessions, useSettings } from '@/store/data';
 import { confirmDialog, useUi } from '@/store/ui';
 import { tabTitle, useWorkspace } from '@/store/workspace';
+import { pickDefaultShell, useShells } from '@/store/shells';
+import { resolveLocalTarget, shellToOpen } from '@/components/quickconnect/local';
 import { restoreWorkspace, startWorkspaceAutosave } from '@/store/workspacePersist';
 import { initConnEvents } from '@/terminal/connEvents';
 import { ThemeController } from '@/theme/ThemeController';
@@ -29,6 +31,17 @@ import './app.css';
 
 function openRequest(req: OpenRequest) {
   const saved = req.savedSessionId ? useSessions.getState().byId(req.savedSessionId) : undefined;
+  if (!saved && req.session.protocol === 'local') {
+    // -local [shell name | command line]: resolved like quick connect's "local:".
+    void useShells
+      .getState()
+      .load()
+      .then((shells) => {
+        const def = pickDefaultShell(shells, useSettings.getState().settings.terminal.defaultShell);
+        return openLocalTerminal(shellToOpen(resolveLocalTarget(req.session.local.command, shells, def)) ?? undefined);
+      });
+    return;
+  }
   connectSession(saved ? { ...saved, ...req.session, id: saved.id } : req.session, 'tab', req.password, {
     view: req.view,
     remotePath: req.remotePath
@@ -53,6 +66,7 @@ async function handleCloseRequest() {
 function useHostWiring(ready: boolean) {
   useEffect(() => {
     const ui = useUi.getState();
+    void useShells.getState().load();  // the "New local terminal" menus are built synchronously
     void api.window.isMaximized().then((m) => ui.set({ maximized: !!m })).catch(() => undefined);
     const offs = [
       api.window.onMaximizedChanged((maximized) => useUi.getState().set({ maximized })),
@@ -80,7 +94,7 @@ function useHostWiring(ready: boolean) {
     if (!ready) return;
     const settings = useSettings.getState().settings;
     if (settings.behavior.restoreTabs && useWorkspace.getState().tabs.length === 0) {
-      void restoreWorkspace((id) => useSessions.getState().byId(id), settings.defaultSession).catch(() => 0);
+      void restoreWorkspace((id) => useSessions.getState().byId(id), settings.defaultSession, settings.behavior.restoreNames).catch(() => 0);
     }
     return startWorkspaceAutosave(
       () => useSettings.getState().settings.behavior.restoreTabs,

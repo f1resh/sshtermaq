@@ -128,7 +128,8 @@ The tests use only localhost: an in-process libssh server (`native/tests/support
 
 ```powershell
 .\scripts\windows\build.ps1             # UI + native Release → dist\SSHTermaq-<version>-win-x64 and a .zip
-.\scripts\windows\build.ps1 -Tests      # run all test suites first
+.\scripts\windows\build.ps1 -Tests      # run the core tests first: native suites and UI unit tests
+.\scripts\windows\build.ps1 -E2E        # also the end-to-end tests: UI typecheck and the browser tests (~5 min)
 .\scripts\windows\build.ps1 -Installer  # also dist\SSHTermaq-<version>-setup.exe (needs Inno Setup 6)
 .\scripts\windows\build.ps1 -Sign       # sign the exe, ssh.dll and the installer (section 10)
 .\scripts\windows\build.ps1 -NoPrompt   # skip the version check below (also skipped when input is redirected, e.g. CI)

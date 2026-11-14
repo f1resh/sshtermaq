@@ -3,8 +3,8 @@
  * protocol icons, connection status dots/labels and the "user@host:port" subtitle.
  */
 import type { ReactNode } from 'react';
-import { Cable, Network, Plug, Terminal, Usb, type LucideIcon } from 'lucide-react';
-import { DEFAULT_PORTS } from '@shared/defaults';
+import { Cable, Network, Plug, SquareTerminal, Terminal, Usb, type LucideIcon } from 'lucide-react';
+import { DEFAULT_PORTS, localProgramName } from '@shared/defaults';
 import type { Protocol, SessionConfig } from '@shared/types';
 import type { PaneStatus } from '@/store/workspace';
 import { cx } from '@/components/ui';
@@ -15,7 +15,8 @@ export const PROTOCOL_ICONS: Record<Protocol, LucideIcon> = {
   telnet: Network,
   rlogin: Cable,
   raw: Plug,
-  serial: Usb
+  serial: Usb,
+  local: SquareTerminal
 };
 
 export const PROTOCOL_LABELS: Record<Protocol, string> = {
@@ -23,7 +24,8 @@ export const PROTOCOL_LABELS: Record<Protocol, string> = {
   telnet: 'Telnet',
   rlogin: 'Rlogin',
   raw: 'Raw',
-  serial: 'Serial'
+  serial: 'Serial',
+  local: 'Local'
 };
 
 export function ProtocolIcon({ protocol, size = 14, className }: { protocol: Protocol; size?: number; className?: string }) {
@@ -31,9 +33,15 @@ export function ProtocolIcon({ protocol, size = 14, className }: { protocol: Pro
   return <Icon size={size} className={className} strokeWidth={1.75} aria-hidden />;
 }
 
-/** "user@host:port" (port only when non-default) or the serial line + speed. */
-export function sessionSubtitle(s: Pick<SessionConfig, 'protocol' | 'host' | 'port' | 'username' | 'serial'>): string {
+/** "user@host:port" (port only when non-default), the serial line + speed, or a local terminal's program + folder. */
+export function sessionSubtitle(
+  s: Pick<SessionConfig, 'protocol' | 'host' | 'port' | 'username' | 'serial'> & { local?: SessionConfig['local'] }
+): string {
   if (s.protocol === 'serial') return `${s.serial.line || 'COM?'} · ${s.serial.baudRate} baud`;
+  if (s.protocol === 'local') {
+    const dir = s.local?.startDir.trim();
+    return `${localProgramName(s.local?.command ?? '')} · ${dir || '~'}`;
+  }
   const user = s.username ? `${s.username}@` : '';
   const port = s.port && s.port !== DEFAULT_PORTS[s.protocol] ? `:${s.port}` : '';
   const host = s.host.includes(':') && !s.host.startsWith('[') ? `[${s.host}]` : s.host;

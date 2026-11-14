@@ -21,5 +21,8 @@ std::filesystem::path homeDirectory();
 std::optional<std::string> getEnv(const std::string& name);
 /** Login name of the user running the process; empty if unknown. */
 std::string userName();
+/** The user's language and region as a POSIX locale name for programs in a local terminal ("en_GB.UTF-8"), for when
+ *  LANG is not set (macOS apps started from the Finder get none); empty where programs do not use one (Windows). */
+std::string terminalLocale();
 
 }  // namespace st::sys
