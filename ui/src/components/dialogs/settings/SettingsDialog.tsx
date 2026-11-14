@@ -136,18 +136,21 @@ function AppearancePage() {
         <ColorSwatches value={a.accentColor} onChange={(accentColor) => update({ appearance: { accentColor } })} noneLabel="Theme default" />
       </Section>
       <Section title="Window">
-        <SettingRow label="Background material" description="Mica and Acrylic use the Windows 11 translucent window backdrop.">
-          <SegmentedControl
-            value={a.backgroundMaterial}
-            onChange={(backgroundMaterial) => update({ appearance: { backgroundMaterial } })}
-            options={[
-              { value: 'none', label: 'Solid' },
-              { value: 'mica', label: 'Mica' },
-              { value: 'acrylic', label: 'Acrylic' }
-            ]}
-            size="sm"
-          />
-        </SettingRow>
+        {/* Windows only: the macOS window has no such backdrop (HostWindowMac ignores the setting). */}
+        {!isMac && (
+          <SettingRow label="Background material" description="Mica and Acrylic use the Windows 11 translucent window backdrop.">
+            <SegmentedControl
+              value={a.backgroundMaterial}
+              onChange={(backgroundMaterial) => update({ appearance: { backgroundMaterial } })}
+              options={[
+                { value: 'none', label: 'Solid' },
+                { value: 'mica', label: 'Mica' },
+                { value: 'acrylic', label: 'Acrylic' }
+              ]}
+              size="sm"
+            />
+          </SettingRow>
+        )}
         <SettingRow label="Interface scale">
           <Slider value={a.uiScale} min={0.8} max={1.5} step={0.05} onChange={(uiScale) => update({ appearance: { uiScale } })} format={(v) => `${Math.round(v * 100)}%`} />
         </SettingRow>
