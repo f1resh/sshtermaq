@@ -12,7 +12,7 @@ them depends on another.
 |---|---|---|---|---|---|---|
 | **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 232 test cases | about 1 minute |
 | **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 16 files, 142 tests | under 2 seconds |
-| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart, the SFTP panel, the two-pane file manager, import and export, the key generator, settings | Playwright Test | `ui/e2e/*.spec.ts` | yes | 14 files, 70 tests, each run twice (140) | about 5 minutes |
+| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart, the SFTP panel, the two-pane file manager, import and export, the key generator, settings | Playwright Test | `ui/e2e/*.spec.ts` | yes | 14 files, 73 tests, each run twice (146, of which 2 macOS-only skip in the Windows layout) | about 5 minutes |
 | **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs`, `ui/scripts/checks/` | no, run by hand | `checks/local-terminal.mjs` | seconds |
 
 The browser tests cover the main screens and dialogs, not yet the host key and password prompts or the color scheme
@@ -779,7 +779,7 @@ The UI's own errors in the app log (`app:log`): how errors are described, repeat
 | reportError | stops after 50 reports |
 | reportError | reports uncaught errors and unhandled rejections from the window |
 
-### UI browser tests (70 tests, each run as `windows` and `macos`)
+### UI browser tests (73 tests, each run as `windows` and `macos`; the two marked macOS only skip in the Windows layout)
 
 Source: [ui/e2e](../ui/e2e).
 
@@ -839,6 +839,9 @@ Source: [ui/e2e](../ui/e2e).
 | `file-manager.spec.ts` | synchronize: compare shows the differences, then runs them as transfers (the "sync" tag) |
 | `file-manager.spec.ts` | hidden files on request; a terminal to the same server from the toolbar |
 | `file-manager.spec.ts` | the local side lists the computer ("This PC" with the drives / the home folder), and filters |
+| `file-manager.spec.ts` | macOS only: the Finder keys in a file list (⌘↓ open, ⌘↑ up, ⌘[ / ⌘] back and forward, ⇧⌘N new folder, ⌘⌫ delete, ⇧⌘G a typed path) |
+| `file-manager.spec.ts` | macOS only: above the home folder are "/" and Computer with the volumes; a volume goes up to Computer; `~` in a typed path |
+| `file-manager.spec.ts` | local files use the words of the system: Trash / Recycle Bin, Show in Finder / Show in Explorer |
 | `import.spec.ts` | offers the sources of this system and counts the PuTTY sessions |
 | `import.spec.ts` | PuTTY: notes, filter, select, import into the PuTTY folder (sessions and host keys) |
 | `import.spec.ts` | existing sessions at the top level: marked, and replaced when chosen |

@@ -243,4 +243,83 @@ test.describe('file manager', () => {
     await local.getByRole('button', { name: 'Clear filter' }).click();
     await expect(local).not.toContainText('Nothing matches the filter.');
   });
+  test('macOS: the Finder keys work in a file list', async ({ app, os }) => {
+    test.skip(os !== 'darwin', 'Command and Finder keys are the macOS layout; Windows uses Ctrl (listKeys.test.ts)');
+    const grid = server.getByRole('grid');
+    // ⌘↓ opens the folder under the cursor, ⌘↑ goes up.
+    await item(server, `${HOME}/projects`).click();
+    await app.keyboard.press('Meta+ArrowDown');
+    await expect(server).toHaveAttribute('data-pane-path', `${HOME}/projects`);
+    await app.keyboard.press('Meta+ArrowUp');
+    await expect(server).toHaveAttribute('data-pane-path', HOME);
+    // ⌘[ back, ⌘] forward.
+    await app.keyboard.press('Meta+BracketLeft');
+    await expect(server).toHaveAttribute('data-pane-path', `${HOME}/projects`);
+    await app.keyboard.press('Meta+BracketRight');
+    await expect(server).toHaveAttribute('data-pane-path', HOME);
+
+    // ⇧⌘N makes a folder, ⌘⌫ deletes it (with the question).
+    await grid.click({ position: { x: 5, y: 5 } });
+    await app.keyboard.press('Shift+Meta+KeyN');
+    const create = app.getByRole('dialog', { name: 'New folder' });
+    await create.getByRole('textbox').fill('from-keys');
+    await create.getByRole('button', { name: 'Create' }).click();
+    await expect(item(server, `${HOME}/from-keys`)).toBeVisible();
+    await item(server, `${HOME}/from-keys`).click();
+    await app.keyboard.press('Meta+Backspace');
+    const confirm = app.getByRole('dialog', { name: 'Delete "from-keys" on the server?' });
+    await confirm.getByRole('button', { name: 'Delete' }).click();
+    await expect(item(server, `${HOME}/from-keys`)).toHaveCount(0);
+
+    // ⇧⌘G types a path, as Finder's "Go to Folder".
+    await grid.click({ position: { x: 5, y: 5 } });
+    await app.keyboard.press('Shift+Meta+KeyG');
+    const box = server.getByRole('textbox', { name: 'Folder' });
+    await box.fill('/var/log');
+    await box.press('Enter');
+    await expect(item(server, '/var/log/syslog')).toBeVisible();
+  });
+
+  test('macOS: above the home folder are "/" and Computer with the volumes; ~ in a typed path', async ({ app, os }) => {
+    test.skip(os !== 'darwin', 'the Windows layout climbs to This PC in "the local side lists the computer"');
+    const up = local.getByRole('button', { name: /^Up/ });
+    await expect(local).toHaveAttribute('data-pane-path', '/Users/demo');
+    await up.click();
+    await expect(local).toHaveAttribute('data-pane-path', '/Users');
+    await up.click();
+    await expect(local).toHaveAttribute('data-pane-path', '/');
+    await up.click();
+    await expect(local).toHaveAttribute('data-pane-path', '');   // Computer: the places and the volumes
+    await expect(local.getByText('Macintosh HD')).toBeVisible();
+    await expect(local.getByText('Data', { exact: true })).toBeVisible();
+    await expect(up).toBeDisabled();
+
+    // A volume's root goes up to Computer, not to /Volumes.
+    await local.getByText('Data', { exact: true }).dblclick();
+    await expect(local).toHaveAttribute('data-pane-path', '/Volumes/Data');
+    await expect(item(local, '/Volumes/Data/Backups')).toBeVisible();
+    await up.click();
+    await expect(local).toHaveAttribute('data-pane-path', '');
+
+    // "~" in a typed path is the home folder.
+    await local.getByRole('grid').click({ position: { x: 5, y: 5 } });
+    await app.keyboard.press('Meta+KeyL');
+    const box = local.getByRole('textbox', { name: 'Folder' });
+    await box.fill('~/Documents');
+    await box.press('Enter');
+    await expect(local).toHaveAttribute('data-pane-path', '/Users/demo/Documents');
+  });
+
+  test('local files use the words of the system: Trash or Recycle Bin, Finder or Explorer', async ({ app, os }) => {
+    const docs = await localDocuments(local, os);
+    const sep = os === 'darwin' ? '/' : '\\';
+    const notes = item(local, `${docs}${sep}notes.txt`);
+    await notes.click({ button: 'right' });
+    await expect(app.getByRole('menuitem', { name: os === 'darwin' ? 'Show in Finder' : 'Show in Explorer' })).toBeVisible();
+    await app.getByRole('menuitem', { name: /^Delete/ }).click();
+    const confirm = app.getByRole('dialog', { name: 'Delete "notes.txt"?' });
+    await expect(confirm).toContainText(os === 'darwin' ? 'They go to the Trash.' : 'They go to the Recycle Bin.');
+    await confirm.getByRole('button', { name: 'Cancel' }).click();
+    await expect(notes).toBeVisible();
+  });
 });
