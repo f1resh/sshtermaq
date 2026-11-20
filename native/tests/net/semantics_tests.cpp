@@ -15,6 +15,8 @@
 #include "transport/TelnetTransport.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/reporters/catch_reporter_event_listener.hpp>
+#include <catch2/reporters/catch_reporter_registrars.hpp>
 
 #include <cstdio>
 #include <cstdlib>
@@ -26,6 +28,21 @@
 using namespace st;
 using namespace st::test;
 using namespace std::chrono_literals;
+
+namespace {
+
+/** Sockets are set up (Windows: WSAStartup) before any case of this program runs: a case that opens no listener
+ *  itself, such as the proxy command's (its socket pair is a loopback connection), may run first, alone with a
+ *  filter, or alone in the copy of this program that the exit case starts. */
+class NetSetup : public Catch::EventListenerBase {
+public:
+    using Catch::EventListenerBase::EventListenerBase;
+    void testRunStarting(const Catch::TestRunInfo&) override { net::ensureNetInit(); }
+};
+
+}  // namespace
+
+CATCH_REGISTER_LISTENER(NetSetup)
 
 namespace {
 

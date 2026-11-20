@@ -88,6 +88,18 @@ cmake --build build/vs --config Debug --parallel    # or --config Release
 build\vs\Debug\SSHTermaq.exe
 ```
 
+**With the script:** `scripts\windows\build-debug.ps1` builds the UI and then the Debug app in `build\vs`
+(configuring it first when needed); it writes nothing to `dist\`.
+
+```powershell
+.\scripts\windows\build-debug.ps1          # UI + build\vs\Debug\SSHTermaq.exe
+.\scripts\windows\build-debug.ps1 -SkipUi  # native only, reuse ui\dist
+.\scripts\windows\build-debug.ps1 -Fast    # UI without the TypeScript check
+.\scripts\windows\build-debug.ps1 -All     # every target: the app, the test suites and the tools
+.\scripts\windows\build-debug.ps1 -Tests   # every target, then CTest and the UI unit tests
+.\scripts\windows\build-debug.ps1 -Run -- --data-dir D:\tmp\st-data --devtools   # start the app afterwards
+```
+
 **In Visual Studio:** after `cmake --preset vs`, open `build\vs\SSHTermaq.sln`. In Solution Explorer right-click
 **SSHTermaq** → *Set as Startup Project*, pick *Debug* / *x64* and press F5. The working directory is already set to
 the executable's folder. Projects are grouped into `modules`, `tests` and `tools`; source files added to
