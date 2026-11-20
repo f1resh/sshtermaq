@@ -2,16 +2,23 @@
 // the peer, urgent data (Telnet Synch, rlogin control bytes), many concurrent writers, many open sockets, the local
 // proxy command. These pin down what every OS's socket layer has to reproduce (platform/sys/Net.h); they were written
 // against the original Winsock implementation.
+#include "TestExecProcess.h"
 #include "TestNet.h"
 #include "TestTransport.h"
 
 #include "platform/Platform.h"
+#include "platform/sys/Env.h"
+#include "platform/sys/Fs.h"
+#include "platform/sys/Process.h"
 #include "transport/RawTransport.h"
 #include "transport/RloginTransport.h"
 #include "transport/TelnetTransport.h"
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
 #include <map>
 #include <thread>
 #include <vector>
@@ -340,4 +347,69 @@ TEST_CASE("edge: closing the session ends a running proxy command promptly", "[n
     REQUIRE(l.waitClosed(5s));
     t.reset();  // joins the transport thread
     REQUIRE(std::chrono::steady_clock::now() - begin < 5s);
+}
+
+// Leaving the program while proxy commands run: the relay threads (reaper, readers, the SIGKILL timer) must not outlive
+// exit(), or they use the relay table and the runtime after those are gone (the crash seen on Windows). The hidden
+// cases below are the program that exits; the last case runs them in a copy of this test program and looks at how it
+// ended. The command would write a marker file after two seconds: exit() must end it before that.
+namespace {
+
+/** Per test program (the parent and the copy it starts are the same file), so two builds can run side by side. */
+std::filesystem::path exitMarker(const std::string& mode) {
+    const size_t self = std::hash<std::string>{}(sys::fromPath(sys::executablePath()));
+    return std::filesystem::temp_directory_path() / ("st-proxy-exit-" + std::to_string(self) + "-" + mode + ".marker");
+}
+
+[[noreturn]] void startProxyCommandAndExit(const std::string& mode, bool closeFirst) {
+    const std::string marker = sys::fromPath(exitMarker(mode));
+    const std::string command = isWindows() ? "echo started& ping -n 3 127.0.0.1 >nul & echo late> \"" + marker + "\""
+                                            : "echo started; sleep 2; echo late > '" + marker + "'";
+    std::string error;
+    sys::SocketHandle s = sys::startProxyCommand(command, [](const std::string&) {}, error);
+    if (s == sys::kInvalidSocket) {
+        std::printf("child: cannot start the command: %s\n", error.c_str());
+        std::exit(3);
+    }
+    std::string seen;
+    char buf[256];
+    while (seen.find("started") == std::string::npos) {  // the command runs
+        const long got = sys::recvSome(s, buf, sizeof buf);
+        if (got <= 0) {
+            std::printf("child: no output from the command\n");
+            std::exit(4);
+        }
+        seen.append(buf, static_cast<size_t>(got));
+    }
+    // "closed": its relay threads are waking up right now, while exit() tears everything down.
+    if (closeFirst) sys::closeProxyCommandSocket(s);
+    std::printf("child: exiting\n");
+    std::fflush(stdout);
+    std::exit(0);
+}
+
+}  // namespace
+
+TEST_CASE("proxy exit child: running", "[.][proxy-exit-child]") { startProxyCommandAndExit("running", false); }
+TEST_CASE("proxy exit child: closed", "[.][proxy-exit-child]") { startProxyCommandAndExit("closed", true); }
+
+TEST_CASE("edge: exiting with a proxy command running ends the command and does not crash", "[net][edge][proxy]") {
+    const std::string self = sys::fromPath(sys::executablePath());
+    REQUIRE_FALSE(self.empty());
+    for (const std::string mode : {"running", "closed"}) {
+        INFO("mode: " << mode);
+        std::error_code ec;
+        std::filesystem::remove(exitMarker(mode), ec);
+
+        const auto begin = std::chrono::steady_clock::now();
+        const CommandResult r = runCommand("\"" + self + "\" \"proxy exit child: " + mode + "\"");
+        const auto took = std::chrono::steady_clock::now() - begin;
+        INFO("output: " << r.out);
+        REQUIRE(r.out.find("child: exiting") != std::string::npos);
+        REQUIRE(r.code == 0);       // -1 (POSIX) or an NTSTATUS such as 0xC0000005 (Windows) after a crash
+        REQUIRE(took < 10s);        // exit waits at most 3 s for the relay threads
+
+        std::this_thread::sleep_for(3s);  // past the moment the command would have written the marker
+        REQUIRE_FALSE(std::filesystem::exists(exitMarker(mode), ec));
+    }
 }

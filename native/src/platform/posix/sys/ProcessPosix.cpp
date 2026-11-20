@@ -83,14 +83,20 @@ public:
         }
         Entry& e = state_->threads.emplace_back();
         // `done` is set under state_->mu, which is held until `e.thread` is assigned.
-        e.thread = std::thread([state = state_, entry = &e, body = std::move(body)]() mutable {
-            body();
-            {
-                std::lock_guard l(state->mu);
-                entry->done = true;
-            }
-            state->cv.notify_all();
-        });
+        try {
+            e.thread = std::thread([state = state_, entry = &e, body = std::move(body)]() mutable {
+                body();
+                {
+                    std::lock_guard l(state->mu);
+                    entry->done = true;
+                }
+                state->cv.notify_all();
+            });
+        } catch (...) {
+            // No thread (out of resources): an entry without one would never be done, and detaching it at exit throws.
+            state_->threads.pop_back();
+            throw;
+        }
     }
     ~RelayThreads();
 
