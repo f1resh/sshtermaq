@@ -304,7 +304,11 @@ void registerCoreHandlers(const CoreHandlerContext& c) {
     b.handleSync("app:readClipboard", [&win](const Json&) { return Json(ui::clipboard::readText(win.nativeHandle())); });
     b.on("app:writeClipboard", [&win](const Json& a) { ui::clipboard::writeText(win.nativeHandle(), argStr(a, 0)); });
     b.on("app:beep", [](const Json&) { ui::shell::beep(); });
-    b.handleAsync("app:listFonts", [](const Json&) { return Json(ui::fonts::installedFamilies()); });
+    b.handleAsync("app:listFonts", [](const Json&) {
+        Json list = Json::array();
+        for (const auto& f : ui::fonts::installedFamilies()) list.push_back({{"family", f.name}, {"monospace", f.monospace}});
+        return list;
+    });
     b.handleAsync("app:readFileDataUrl", [](const Json& a) -> Json {
         fs::path p = sys::toPath(argStr(a, 0));
         std::error_code ec;
@@ -351,6 +355,7 @@ void registerCoreHandlers(const CoreHandlerContext& c) {
     store.onSessionsChanged = [&b] { b.emit("sessions:onChanged", Json::array()); };
     store.onSettingsChanged = [&b](const Json& s) { b.emit("settings:onChanged", Json::array({s})); };
     store.knownHosts().onChanged = [&b] { b.emit("knownHosts:onChanged", Json::array()); };
+    store.vault().onChanged = [&b] { b.emit("vault:onChanged", Json::array()); };
 }
 
 }  // namespace st

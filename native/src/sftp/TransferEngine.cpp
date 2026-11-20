@@ -10,6 +10,7 @@
 #include "sftp/SftpUtil.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <condition_variable>
 #include <deque>
 #include <thread>
@@ -173,6 +174,24 @@ struct TransferEngine::Impl : std::enable_shared_from_this<TransferEngine::Impl>
         });
     }
 
+    /**
+     * One app-log line per transfer that ran: "sftp: download report.pdf done: 1 file, 845112 bytes in 0.4 s
+     * (2.0 MiB/s)". For comparing speeds between versions and for bug reports; the name only, as in the other lines.
+     */
+    static void logFinished(const TransferProgress& p) {
+        if (!p.startedAt || p.finishedAt < p.startedAt) return;  // cancelled while queued: never ran
+        const double seconds = static_cast<double>(p.finishedAt - p.startedAt) / 1000.0;
+        const auto bytes = static_cast<uint64_t>(p.transferred);
+        const int files = p.filesTotal > 0 ? p.filesDone : (p.state == "done" ? 1 : 0);
+        char secs[32];
+        std::snprintf(secs, sizeof(secs), "%.1f", seconds);
+        std::string line = "sftp: " + p.direction + " " + p.name + " " + p.state + ": " + std::to_string(files) +
+                           (files == 1 ? " file, " : " files, ") + std::to_string(bytes) + " bytes in " + secs + " s";
+        if (p.skipped) line += ", " + std::to_string(p.skipped) + " skipped";
+        if (seconds > 0 && bytes) line += " (" + sftputil::humanSize(static_cast<uint64_t>(bytes / seconds)) + "/s)";
+        applog::info(line);
+    }
+
     /** Final state (exactly once). */
     void finish(const TransferPtr& t, const std::string& state, const std::string& error) {
         TransferProgress copy;
@@ -183,11 +202,13 @@ struct TransferEngine::Impl : std::enable_shared_from_this<TransferEngine::Impl>
             t->finished = true;
             t->progress.state = state;
             t->progress.error = error;
+            t->progress.finishedAt = nowMs();
             if (state == "done") t->progress.currentFile.clear();
             copy = t->progress;
             onFinished = std::move(t->onFinished);
             t->onFinished = nullptr;
         }
+        logFinished(copy);
         emit(copy);
         {
             std::lock_guard lk(m);
@@ -403,7 +424,10 @@ struct TransferEngine::Impl : std::enable_shared_from_this<TransferEngine::Impl>
         std::string error;
         try {
             checkCancel(t);
-            setState(t, "running");
+            update(t, true, [](TransferProgress& p) {
+                p.state = "running";
+                if (!p.startedAt) p.startedAt = nowMs();
+            });
             switch (t->kind) {
                 case TransferKind::Download: runDownload(q, t); break;
                 case TransferKind::Upload: runUpload(q, t); break;

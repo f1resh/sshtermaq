@@ -802,6 +802,7 @@ void SessionManager::open(const ConnOpenRequest& reqIn) {
     ctx.prompter = conn.get();
     ctx.knownHosts = &impl_->store.knownHosts();
     ctx.credentials = &impl_->store.credentials();
+    ctx.vault = &impl_->store.vault();
     Store* store = &impl_->store;
     ctx.resolveSession = [store](const std::string& id) { return store->getSession(id); };
 

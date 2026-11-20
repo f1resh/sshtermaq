@@ -76,6 +76,11 @@ export type AgentKind = 'auto' | 'pageant' | 'openssh';
 export interface SshAuthOptions {
   /** Private key file path: OpenSSH (any format ssh2 understands) or PuTTY .ppk (v2 / v3). */
   privateKeyPath: string;
+  /** A key from Credentials (VaultKey.id); '' = none. When set it wins over privateKeyPath. */
+  keyId: string;
+  /** A login from Credentials (VaultLogin.id); '' = none. When set it replaces the session's user name and sign-in
+   *  methods (agent, key, password). */
+  loginId: string;
   /** Try authenticating with an SSH agent (Pageant / Windows OpenSSH agent). */
   tryAgent: boolean;
   agent: AgentKind;
@@ -374,6 +379,7 @@ export type CommandId =
   | 'app.importPutty'
   | 'app.fullscreen'
   | 'app.keygen'
+  | 'app.lockCredentials'
   | 'tab.new'
   | 'tab.newLocal'
   | 'tab.close'
@@ -581,7 +587,10 @@ export type PromptInput =
       prompts: { prompt: string; echo: boolean }[];
       allowSave: boolean;
     }
-  | { kind: 'passphrase'; title: string; keyPath: string; message?: string }
+  /** The master password of Credentials ("Unlock Credentials"). */
+  | { kind: 'unlock'; title: string; message?: string }
+  /** `allowSave`: offer "Remember for this key" (a key from Credentials). `keyPath`: the file, or the key's name. */
+  | { kind: 'passphrase'; title: string; keyPath: string; message?: string; allowSave?: boolean }
   | {
       kind: 'hostkey';
       host: string;
@@ -601,7 +610,7 @@ export interface PromptResponse {
   cancelled: boolean;
   /** Answers in prompt order (username, password, kbdint answers, passphrase). */
   values?: string[];
-  /** User ticked "remember" (password save). */
+  /** User ticked "remember" (save the password; remember a key's passphrase). */
   remember?: boolean;
   /** hostkey: 'accept-save' | 'accept-once' | 'reject'. confirm: the chosen button label. */
   choice?: string;
@@ -724,6 +733,10 @@ export interface TransferProgress {
   /** Folder transfers: the folder tree is still being listed (filesTotal / total: found so far, currentFile: the folder
    *  being listed); copying starts after it. */
   listing?: boolean;
+  /** Unix ms when the transfer first left the queue (absent / 0: never ran), and when it ended (done, error or
+   *  cancelled). Set by the transfer engine. */
+  startedAt?: number;
+  finishedAt?: number;
 }
 
 /** What happens when the target of a transfer already exists. */
@@ -910,6 +923,79 @@ export interface KeyInfo {
 /* ------------------------------------------------------------------------ */
 /* App                                                                       */
 /* ------------------------------------------------------------------------ */
+
+/**
+ * A key in Credentials (vault:list): the public part only. 'file': a link to a key file (only the path is stored);
+ * 'stored': the key's text lives encrypted on the host and never comes back to the UI.
+ */
+/** The master password of Credentials: none set, set and locked (after each start), or unlocked. */
+export type VaultStatus = 'none' | 'locked' | 'unlocked';
+
+/** What vault:exportFile wrote. `skipped`: stored keys left out (their text cannot be read on this computer). */
+export interface VaultExportResult {
+  path: string;
+  keys: number;
+  logins: number;
+  secrets: number;
+  skipped: string[];
+}
+
+/** What vault:importFile added. `renamed`: "key work → work (2)" for names that were taken. */
+export interface VaultImportResult {
+  path: string;
+  keysAdded: number;
+  keysSkipped: number;
+  loginsAdded: number;
+  loginsSkipped: number;
+  secrets: number;
+  renamed: string[];
+}
+
+export interface VaultKey {
+  id: string;
+  name: string;
+  kind: 'file' | 'stored';
+  /** kind 'file'. */
+  path: string;
+  format: 'openssh' | 'pem' | 'ppk2' | 'ppk3' | 'unknown';
+  keyType: string;
+  fingerprint: string;
+  publicKeyOpenSsh: string;
+  comment: string;
+  /** Passphrase protected. */
+  encrypted: boolean;
+  createdAt: number;
+  updatedAt: number;
+  /** kind 'file': the file is not there now. */
+  missing?: boolean;
+  /** Its passphrase is remembered (chosen at the passphrase prompt; encrypted on the host, never sent to the UI). */
+  passphraseRemembered?: boolean;
+}
+
+/** How a login signs in with a password: stored (encrypted), asked at every connection, or not at all. */
+export type LoginPassword = 'stored' | 'ask' | 'none';
+
+/** A login in Credentials (vault:listLogins): a user name and how to sign in. A stored password never comes to the UI. */
+export interface VaultLogin {
+  id: string;
+  name: string;
+  username: string;
+  password: LoginPassword;
+  /** A key from Credentials (VaultKey.id); '' = none. */
+  keyId: string;
+  /** Try an SSH agent (Pageant / OpenSSH agent): also how hardware keys work. */
+  useAgent: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** A font family installed on this computer (app:listFonts). */
+export interface InstalledFont {
+  /** The family name as CSS font-family takes it. */
+  family: string;
+  /** Fixed-pitch: every character has the same width. */
+  monospace: boolean;
+}
 
 export interface AppInfo {
   name: string;

@@ -6,6 +6,7 @@
 #include "platform/sys/Errors.h"
 #include "platform/win/sys/WinText.h"
 
+#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -65,6 +66,57 @@ std::shared_ptr<CommandRelay> takeRelay(SocketHandle s) {
     g_relays.erase(it);
     return r;
 }
+
+/**
+ * The relay threads. None may outlive exit(): one still running while the CRT is torn down (its heap, locks and
+ * per-thread data) crashes the process. A killed command's readers wake only once its processes are gone, which can
+ * be after the caller has already returned from main. So threads are joined here once they have ended (on the next
+ * add) and, at the latest, by the destructor at exit, which also ends the commands still running. Declared after
+ * g_relayMu / g_relays so that it is destroyed before them.
+ */
+class RelayThreads {
+public:
+    void add(std::thread t) {
+        std::lock_guard lock(mu_);
+        for (auto it = threads_.begin(); it != threads_.end();) {
+            if (WaitForSingleObject(it->native_handle(), 0) == WAIT_OBJECT_0) {
+                it->join();
+                it = threads_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        threads_.push_back(std::move(t));
+    }
+
+    ~RelayThreads() {
+        std::map<SocketHandle, std::shared_ptr<CommandRelay>> live;
+        {
+            std::lock_guard lock(g_relayMu);
+            live.swap(g_relays);
+        }
+        for (auto& [sock, r] : live) {
+            r->detach();
+            r->kill();
+            shutdownBoth(r->relaySock);
+        }
+        live.clear();
+        std::lock_guard lock(mu_);
+        const ULONGLONG deadline = GetTickCount64() + 3000;  // a process that will not die must not hang the exit
+        for (std::thread& t : threads_) {
+            const ULONGLONG now = GetTickCount64();
+            const DWORD left = now < deadline ? static_cast<DWORD>(deadline - now) : 0;
+            if (WaitForSingleObject(t.native_handle(), left) == WAIT_OBJECT_0) t.join();
+            else t.detach();
+        }
+        threads_.clear();
+    }
+
+private:
+    std::mutex mu_;
+    std::list<std::thread> threads_;
+};
+RelayThreads g_relayThreads;
 
 bool createPipe(UniqueHandle& parentEnd, UniqueHandle& childEnd, bool childReads, std::string& error) {
     SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
@@ -154,7 +206,7 @@ SocketHandle startProxyCommand(const std::string& command, std::function<void(co
     }
 
     // socket -> process stdin. EOF/error on the socket means the transport closed its end: kill the command.
-    std::thread([r, mine] {
+    g_relayThreads.add(std::thread([r, mine] {
         char buf[16384];
         for (;;) {
             const long got = recvSome(r->relaySock, buf, sizeof(buf));
@@ -179,10 +231,10 @@ SocketHandle startProxyCommand(const std::string& command, std::function<void(co
         std::lock_guard lock(g_relayMu);
         auto it = g_relays.find(mine);
         if (it != g_relays.end() && it->second == r) g_relays.erase(it);
-    }).detach();
+    }));
 
     // process stdout -> socket. EOF (process exited) half-closes the socket so the transport sees the close.
-    std::thread([r] {
+    g_relayThreads.add(std::thread([r] {
         char buf[16384];
         for (;;) {
             DWORD got = 0;
@@ -190,10 +242,10 @@ SocketHandle startProxyCommand(const std::string& command, std::function<void(co
             if (!sendAll(r->relaySock, std::string_view(buf, got))) break;
         }
         shutdownWrite(r->relaySock);
-    }).detach();
+    }));
 
     // process stderr -> callback, line by line.
-    std::thread([r] {
+    g_relayThreads.add(std::thread([r] {
         std::string pending;
         char buf[4096];
         auto flushLine = [&](std::string line) {
@@ -215,7 +267,7 @@ SocketHandle startProxyCommand(const std::string& command, std::function<void(co
             }
         }
         flushLine(pending);
-    }).detach();
+    }));
 
     return mine;
 }

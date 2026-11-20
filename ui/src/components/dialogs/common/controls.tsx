@@ -455,6 +455,8 @@ export interface ComboOption {
   hint?: string;
   /** Group heading shown before the first option of a group. */
   group?: string;
+  /** Shown (greyed) but not pickable. */
+  disabled?: boolean;
 }
 
 export function ComboInput({
@@ -539,6 +541,7 @@ export function ComboInput({
   }, [active]);
 
   const pick = (o: ComboOption) => {
+    if (o.disabled) return;
     onChange(o.value);
     setOpen(false);
     inputRef.current?.focus();
@@ -632,7 +635,13 @@ export function ComboInput({
                     role="option"
                     data-index={i}
                     aria-selected={o.value === value}
-                    className={cx('dlg-combo__option', i === active && 'dlg-combo__option--active', o.value === value && 'dlg-combo__option--selected')}
+                    aria-disabled={o.disabled || undefined}
+                    className={cx(
+                      'dlg-combo__option',
+                      i === active && 'dlg-combo__option--active',
+                      o.value === value && 'dlg-combo__option--selected',
+                      o.disabled && 'dlg-combo__option--disabled'
+                    )}
                     onMouseDown={(e) => {
                       e.preventDefault();
                       pick(o);

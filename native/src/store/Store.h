@@ -5,6 +5,7 @@
 //   state.json        { key: any } (UI workspace state, window placement, ...)
 //   known_hosts.json  see KnownHosts
 //   credentials.json  see Credentials (encrypted for the OS user)
+//   vault.json        see Vault (Credentials' keys: the public part; stored keys' text is in credentials.json)
 // All methods are thread-safe. Writes are atomic (sys::writeFileAtomic: temp file + rename) and
 // happen synchronously on the calling thread.
 // Sessions are stored as JSON documents (the UI's exact shape, so fields unknown to C++ survive);
@@ -14,6 +15,7 @@
 #include "core/Types.h"
 #include "store/Credentials.h"
 #include "store/KnownHosts.h"
+#include "store/Vault.h"
 
 #include <filesystem>
 #include <functional>
@@ -74,6 +76,7 @@ public:
 
     KnownHosts& knownHosts() { return knownHosts_; }
     Credentials& credentials() { return credentials_; }
+    Vault& vault() { return vault_; }
 
     /** Normalizes a session document: merges it over the built-in defaults (unknown fields preserved), repairs
      *  wrongly typed known fields, normalizes the folder and generates an id when empty (if generateId). */
@@ -97,6 +100,7 @@ private:
     Json state_ = Json::object();
     KnownHosts knownHosts_;
     Credentials credentials_;
+    Vault vault_;
 };
 
 }  // namespace st

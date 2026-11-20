@@ -19,6 +19,8 @@ export interface MockContext {
   handle(channel: string, fn: MockInvoke): void;
   on(channel: string, fn: MockSend): void;
   emit(channel: string, ...args: unknown[]): void;
+  /** Calls another mock handler (e.g. a file dialog's answer from __mockDialog). */
+  invoke<T>(channel: string, ...args: unknown[]): Promise<T>;
 }
 
 export function createMockBackend(): Transport {
@@ -36,6 +38,10 @@ export function createMockBackend(): Transport {
       queueMicrotask(() => {
         for (const cb of [...set]) cb(...args);
       });
+    },
+    async invoke<T>(ch: string, ...args: unknown[]) {
+      const fn = invokes.get(ch);
+      return (fn ? await fn(...args) : null) as T;
     }
   };
 

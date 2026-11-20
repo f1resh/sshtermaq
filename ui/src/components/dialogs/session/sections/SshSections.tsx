@@ -5,19 +5,26 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEven
 import {
   ArrowDown,
   ArrowUp,
+  ClipboardPaste,
   GripVertical,
   KeyRound,
   Pencil,
   Plus,
   RotateCcw,
   Trash2,
+  UserRound,
   X
 } from 'lucide-react';
 import { api } from '@/bridge/api';
-import { Button, IconButton, NumberInput, Switch, TextArea, TextInput, cx } from '@/components/ui';
+import { Button, IconButton, NumberInput, Select, Switch, TextArea, TextInput, cx } from '@/components/ui';
+import { useVault, useVaultKeys, useVaultLogins } from '@/store/vault';
+import { AddKeyDialog } from '../../credentials/AddKeyDialog';
+import { KeyCard } from '../../credentials/KeyCard';
+import { LoginDialog } from '../../credentials/LoginDialog';
+import { keyLabel, loginSummary } from '../../credentials/vaultModel';
 import { createPortForward } from '@shared/defaults';
 import { SSH_CIPHERS, SSH_HOSTKEYS, SSH_KEX, SSH_MACS, WEAK_ALGORITHMS } from '@shared/algorithms';
-import type { AddressFamily, AgentKind, FileProtocol, ForwardType, KeyInfo, PortForward } from '@shared/types';
+import type { AddressFamily, AgentKind, FileProtocol, ForwardType, KeyInfo, PortForward, VaultLogin } from '@shared/types';
 import {
   Badge,
   Callout,
@@ -291,36 +298,200 @@ function SavedPasswordSection() {
   );
 }
 
+type KeySource = 'file' | 'vault';
+const KEY_SOURCES: readonly SegmentOption<KeySource>[] = [
+  { value: 'file', label: 'Key file', title: 'A key file of this session' },
+  { value: 'vault', label: 'From Credentials', title: 'A key kept in Settings › Credentials, shared by any session' }
+];
+
+/**
+ * The session's private key: a key file (a path, as before), or a key from Credentials (ssh.auth.keyId, which wins
+ * over the path). "Paste key…" stores a pasted key in Credentials under a name and selects it; "Add to Credentials…"
+ * links the chosen key file there.
+ */
+function PrivateKeySection() {
+  const { draft, update } = useEditor();
+  const a = draft.ssh.auth;
+  const keys = useVaultKeys();
+  const loaded = useVault((s) => s.loaded);
+  const [source, setSource] = useState<KeySource>(a.keyId ? 'vault' : 'file');
+  const [adding, setAdding] = useState<{ mode: 'paste' } | { mode: 'file'; path: string } | null>(null);
+  const chosen = keys.find((k) => k.id === a.keyId);
+  return (
+    <Section title="Private key" description="A PuTTY .ppk or OpenSSH / PEM private key: a file of this session, or one kept in Credentials.">
+      <div className="vault-source">
+        <SegmentedControl
+          value={source}
+          options={KEY_SOURCES}
+          size="sm"
+          ariaLabel="Key source"
+          onChange={(v) => {
+            setSource(v);
+            if (v === 'file') update((d) => void (d.ssh.auth.keyId = ''));
+          }}
+        />
+        <Button size="sm" variant="ghost" icon={<ClipboardPaste size={14} />} onClick={() => setAdding({ mode: 'paste' })}>
+          Paste key…
+        </Button>
+      </div>
+      {source === 'file' ? (
+        <>
+          <PathInput
+            value={a.privateKeyPath}
+            placeholder="(none)"
+            onChange={(v) => update((d) => void (d.ssh.auth.privateKeyPath = v))}
+            onBrowse={() => api.dialog.openFile({ title: 'Choose a private key', defaultPath: a.privateKeyPath || undefined, filters: KEY_FILTERS })}
+            extra={
+              a.privateKeyPath ? (
+                <IconButton label="Clear key file" onClick={() => update((d) => void (d.ssh.auth.privateKeyPath = ''))}>
+                  <X size={14} />
+                </IconButton>
+              ) : undefined
+            }
+          />
+          <KeyInfoCard path={a.privateKeyPath} />
+          {a.privateKeyPath.trim() && (
+            <Button size="sm" variant="ghost" onClick={() => setAdding({ mode: 'file', path: a.privateKeyPath.trim() })}>
+              Add to Credentials…
+            </Button>
+          )}
+        </>
+      ) : (
+        <>
+          <Select
+            value={a.keyId}
+            aria-label="Key from Credentials"
+            options={[
+              { value: '', label: keys.length ? 'Choose a key…' : 'No keys in Credentials yet: paste one' },
+              ...keys.map((k) => ({ value: k.id, label: keyLabel(k) }))
+            ]}
+            onChange={(id) => update((d) => void (d.ssh.auth.keyId = id))}
+          />
+          {a.keyId && !chosen && loaded && <Callout tone="danger">The chosen key is no longer in Credentials. Choose another one.</Callout>}
+          {chosen && (
+            <KeyCard
+              info={chosen}
+              extra={
+                <>
+                  <Badge>{chosen.kind === 'stored' ? 'Stored in Credentials' : 'Linked file'}</Badge>
+                  {chosen.missing && <Badge tone="danger">File missing</Badge>}
+                </>
+              }
+            />
+          )}
+        </>
+      )}
+      {adding && (
+        <AddKeyDialog
+          mode={adding.mode}
+          path={adding.mode === 'file' ? adding.path : ''}
+          onClose={() => setAdding(null)}
+          onAdded={(k) => {
+            setAdding(null);
+            setSource('vault');
+            update((d) => void (d.ssh.auth.keyId = k.id));
+          }}
+        />
+      )}
+    </Section>
+  );
+}
+
+type SignIn = 'own' | 'login';
+const SIGN_IN_OPTIONS: readonly SegmentOption<SignIn>[] = [
+  { value: 'own', label: "This session's settings", title: 'User name, key, agent and password set here' },
+  { value: 'login', label: 'A saved login', title: 'A login from Settings › Credentials: its user name, password, key and agent' }
+];
+
+/**
+ * "Sign in with": the session's own settings, or a login from Credentials (ssh.auth.loginId), which replaces the
+ * session's user name, key, agent use and password when connecting.
+ */
+function SignInSection({ signIn, setSignIn }: { signIn: SignIn; setSignIn: (v: SignIn) => void }) {
+  const { draft, update } = useEditor();
+  const a = draft.ssh.auth;
+  const keys = useVaultKeys();
+  const logins = useVaultLogins();
+  const loaded = useVault((s) => s.loaded);
+  const [dialog, setDialog] = useState<{ login?: VaultLogin } | null>(null);
+  const chosen = logins.find((l) => l.id === a.loginId);
+  return (
+    <Section title="Sign in with">
+      <SegmentedControl
+        value={signIn}
+        options={SIGN_IN_OPTIONS}
+        size="sm"
+        ariaLabel="Sign in with"
+        onChange={(v) => {
+          setSignIn(v);
+          if (v === 'own') update((d) => void (d.ssh.auth.loginId = ''));
+        }}
+      />
+      {signIn === 'login' && (
+        <div className="vault-login-pick">
+          <div className="vault-source">
+            <Select
+              value={a.loginId}
+              aria-label="Saved login"
+              options={[
+                { value: '', label: logins.length ? 'Choose a login…' : 'No logins in Credentials yet: create one' },
+                ...logins.map((l) => ({ value: l.id, label: `${l.name} (${l.username})` }))
+              ]}
+              onChange={(id) => update((d) => void (d.ssh.auth.loginId = id))}
+            />
+            <span className="vault-source__buttons">
+              {chosen && (
+                <Button size="sm" variant="ghost" onClick={() => setDialog({ login: chosen })}>
+                  Edit login…
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" icon={<UserRound size={14} />} onClick={() => setDialog({})}>
+                New login…
+              </Button>
+            </span>
+          </div>
+          {a.loginId && !chosen && loaded && <Callout tone="danger">The chosen login is no longer in Credentials. Choose another one.</Callout>}
+          {chosen && (
+            <p className="muted vault-login-summary">
+              User <strong>{chosen.username}</strong> · {loginSummary(chosen, keys)}. The session's own user name, key, agent use and password are not used.
+            </p>
+          )}
+        </div>
+      )}
+      {dialog && (
+        <LoginDialog
+          login={dialog.login}
+          onClose={() => setDialog(null)}
+          onSaved={(l) => {
+            setDialog(null);
+            update((d) => void (d.ssh.auth.loginId = l.id));
+          }}
+        />
+      )}
+    </Section>
+  );
+}
+
 export function AuthSection() {
   const { draft, update, isDefault } = useEditor();
   const a = draft.ssh.auth;
+  const [signIn, setSignIn] = useState<SignIn>(a.loginId ? 'login' : 'own');
+  const own = signIn === 'own';
   return (
     <>
-      <Section title="Private key" description="PuTTY .ppk (v2 / v3) or OpenSSH / PEM private key file.">
-        <PathInput
-          value={a.privateKeyPath}
-          placeholder="(none)"
-          onChange={(v) => update((d) => void (d.ssh.auth.privateKeyPath = v))}
-          onBrowse={() => api.dialog.openFile({ title: 'Choose a private key', defaultPath: a.privateKeyPath || undefined, filters: KEY_FILTERS })}
-          extra={
-            a.privateKeyPath ? (
-              <IconButton label="Clear key file" onClick={() => update((d) => void (d.ssh.auth.privateKeyPath = ''))}>
-                <X size={14} />
-              </IconButton>
-            ) : undefined
-          }
-        />
-        <KeyInfoCard path={a.privateKeyPath} />
-      </Section>
+      {!isDefault && <SignInSection signIn={signIn} setSignIn={setSignIn} />}
+      {own && <PrivateKeySection />}
 
       <Section title="Agent">
         <div className="dlg-rows">
-          <ToggleRow
-            label="Try authentication using an SSH agent"
-            description="Keys held by Pageant or the Windows OpenSSH agent are offered first."
-            checked={a.tryAgent}
-            onChange={(v) => update((d) => void (d.ssh.auth.tryAgent = v))}
-          />
+          {own && (
+            <ToggleRow
+              label="Try authentication using an SSH agent"
+              description="Keys held by Pageant or the Windows OpenSSH agent are offered first."
+              checked={a.tryAgent}
+              onChange={(v) => update((d) => void (d.ssh.auth.tryAgent = v))}
+            />
+          )}
           <SettingRow label="Agent" description="Which agent to talk to." disabled={!a.tryAgent && !a.agentForwarding}>
             <SegmentedControl
               size="sm"
@@ -341,29 +512,29 @@ export function AuthSection() {
 
       <Section title="Methods">
         <div className="dlg-rows">
-          <ToggleRow
-            label="Keyboard-interactive"
-            description="Challenge/response prompts, one-time passwords, 2FA."
-            checked={a.keyboardInteractive}
-            onChange={(v) => update((d) => void (d.ssh.auth.keyboardInteractive = v))}
-          />
-          <ToggleRow
-            label="Password"
-            checked={a.password}
-            onChange={(v) => update((d) => void (d.ssh.auth.password = v))}
-          />
+          {own && (
+            <>
+              <ToggleRow
+                label="Keyboard-interactive"
+                description="Challenge/response prompts, one-time passwords, 2FA."
+                checked={a.keyboardInteractive}
+                onChange={(v) => update((d) => void (d.ssh.auth.keyboardInteractive = v))}
+              />
+              <ToggleRow label="Password" checked={a.password} onChange={(v) => update((d) => void (d.ssh.auth.password = v))} />
+            </>
+          )}
           <ToggleRow
             label="Show the server's pre-authentication banner"
             checked={a.showBanner}
             onChange={(v) => update((d) => void (d.ssh.auth.showBanner = v))}
           />
         </div>
-        {!a.tryAgent && !a.privateKeyPath && !a.keyboardInteractive && !a.password && (
+        {own && !a.tryAgent && !a.privateKeyPath && !a.keyId && !a.keyboardInteractive && !a.password && (
           <Callout tone="warning">All authentication methods are disabled; the connection cannot log in.</Callout>
         )}
       </Section>
 
-      {!isDefault && <SavedPasswordSection />}
+      {!isDefault && own && <SavedPasswordSection />}
     </>
   );
 }

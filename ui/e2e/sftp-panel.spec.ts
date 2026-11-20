@@ -139,7 +139,9 @@ test.describe('SFTP panel', () => {
     await panel.getByRole('button', { name: 'Download selected' }).click();
     const transfer = panel.locator('.sftp__transfer', { hasText: 'notes.txt' });
     await expect(transfer).toHaveClass(/sftp__transfer--done/);
-    await expect(transfer).toContainText('2');                 // its size, 2 KB
+    // Its size and how long it took (the start and end times of the transfer).
+    await expect(transfer.locator('.sftp__transfer-meta')).toHaveText(/^Done · 2\.0 KB in \d+\.\d s$/);
+    await expect(transfer.locator('.sftp__transfer-meta')).toHaveAttribute('title', /^Average .+\/s · \d\d:\d\d:\d\d – \d\d:\d\d:\d\d$/);
     await panel.getByRole('button', { name: 'Clear finished' }).click();
     await expect(panel.locator('.sftp__transfers')).toHaveCount(0);
   });

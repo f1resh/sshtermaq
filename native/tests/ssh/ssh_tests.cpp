@@ -14,6 +14,7 @@
 #include "ssh/SshTransport.h"
 #include "store/Credentials.h"
 #include "store/KnownHosts.h"
+#include "store/Vault.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -133,6 +134,7 @@ struct Harness {
     TempDir dir;
     KnownHosts knownHosts{dir.path() / "known_hosts.json"};
     Credentials credentials{dir.path() / "credentials.json"};
+    Vault vault{dir.path() / "vault.json", credentials};
     FakeListener listener;
     FakePrompter prompter;
     std::map<std::string, SessionConfig> saved;
@@ -141,6 +143,7 @@ struct Harness {
     Harness() {
         knownHosts.load();
         credentials.load();
+        vault.load();
         // By default accept unknown host keys once and type "secret" for password / kbd-int prompts.
         prompter.handler = [](const Json& p) {
             const std::string kind = p.value("kind", "");
@@ -172,6 +175,7 @@ struct Harness {
         ctx.prompter = &prompter;
         ctx.knownHosts = &knownHosts;
         ctx.credentials = &credentials;
+        ctx.vault = &vault;
         ctx.resolveSession = [this](const std::string& id) -> std::optional<SessionConfig> {
             auto it = saved.find(id);
             if (it == saved.end()) return std::nullopt;
@@ -322,6 +326,149 @@ TEST_CASE("ssh: public key authentication from an OpenSSH key file", "[ssh]") {
     REQUIRE(server.waitForEvent("auth:publickey:ok", 1000));
 }
 
+TEST_CASE("ssh: a key from Credentials: stored, linked file, gone", "[ssh][vault]") {
+    TempDir keys;
+    ssh_key key = nullptr;
+    REQUIRE(ssh_pki_generate_key(SSH_KEYTYPE_ED25519, nullptr, &key) == SSH_OK);
+    const auto keyPath = keys.path() / "id_vault";
+    REQUIRE(ssh_pki_export_privkey_file(key, nullptr, nullptr, nullptr, sys::fromPath(keyPath).c_str()) == SSH_OK);
+    TestSshServerOptions o;
+    o.allowPassword = false;
+    o.allowKbdInt = false;
+    o.authorizedKeys = {authorizedLine(key)};
+    ssh_key_free(key);
+    TestSshServer server(o);
+    Harness h;
+    SessionConfig c = Harness::session(server);
+    c.ssh.auth.privateKeyPath = sys::fromPath(keys.path() / "does-not-exist");  // keyId wins over this
+
+    SECTION("a stored key (its text, encrypted in credentials.json)") {
+        std::ifstream f(keyPath, std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        VaultKey entry;
+        entry.name = "work laptop";
+        c.ssh.auth.keyId = h.vault.addKeyText(entry, text).id;
+        h.start(c);
+        REQUIRE(h.listener.waitConnected());
+        REQUIRE(server.waitForEvent("auth:publickey:ok", 1000));
+    }
+
+    SECTION("a linked key file") {
+        VaultKey entry;
+        entry.name = "linked";
+        entry.path = sys::fromPath(keyPath);
+        c.ssh.auth.keyId = h.vault.addKeyFile(entry).id;
+        h.start(c);
+        REQUIRE(h.listener.waitConnected());
+        REQUIRE(server.waitForEvent("auth:publickey:ok", 1000));
+    }
+
+    SECTION("a key that was removed from Credentials: refused with a clear message, no fallback to the old path") {
+        VaultKey entry;
+        entry.name = "gone";
+        entry.path = sys::fromPath(keyPath);
+        c.ssh.auth.keyId = h.vault.addKeyFile(entry).id;
+        h.vault.remove(c.ssh.auth.keyId);
+        h.start(c);
+        REQUIRE(h.listener.waitClosed());
+        std::lock_guard lk(h.listener.m);
+        REQUIRE(h.listener.local.find("no longer exists") != std::string::npos);
+    }
+}
+
+TEST_CASE("ssh: a login from Credentials replaces the session's user and sign-in", "[ssh][vault]") {
+    TestSshServerOptions o;
+    o.allowKbdInt = false;
+    TestSshServer server(o);  // user "test", password "secret"
+    Harness h;
+    SessionConfig c = Harness::session(server);
+    c.username = "somebody-else";  // the login's user name wins
+    h.credentials.set(Credentials::passwordKey(c.id), "wrong-session-password");
+
+    SECTION("a stored password: no prompt, and the session's own saved password is not used") {
+        VaultLogin l;
+        l.name = "test login";
+        l.username = "test";
+        l.password = "stored";
+        c.ssh.auth.loginId = h.vault.addLogin(l, std::string("secret")).id;
+        h.start(c);
+        REQUIRE(h.listener.waitConnected());
+        auto kinds = h.prompter.kinds();
+        CHECK(std::count(kinds.begin(), kinds.end(), "password") == 0);
+    }
+
+    SECTION("\"ask every time\": the prompt has no \"remember\", and nothing is saved") {
+        VaultLogin l;
+        l.name = "asking";
+        l.username = "test";
+        l.password = "ask";
+        c.ssh.auth.loginId = h.vault.addLogin(l, std::nullopt).id;
+        bool allowSave = true;
+        h.prompter.handler = [&](const Json& p) {
+            const std::string kind = p.value("kind", "");
+            if (kind == "hostkey") return accept("accept-once");
+            if (kind == "password") {
+                allowSave = p.value("allowSave", true);
+                PromptResponse r = answer({"secret"});
+                r.remember = true;  // even if the UI sent it, nothing may be saved
+                return r;
+            }
+            return PromptResponse{};
+        };
+        h.start(c);
+        REQUIRE(h.listener.waitConnected());
+        CHECK_FALSE(allowSave);
+        CHECK(h.credentials.get(Credentials::passwordKey(c.id)) == std::string("wrong-session-password"));
+        CHECK_FALSE(h.vault.loginPassword(c.ssh.auth.loginId).has_value());
+    }
+
+    SECTION("a deleted login: the session's own settings, with a message") {
+        VaultLogin l;
+        l.name = "gone";
+        l.username = "test";
+        l.password = "none";
+        c.ssh.auth.loginId = h.vault.addLogin(l, std::nullopt).id;
+        h.vault.removeLogin(c.ssh.auth.loginId);
+        c.username = "test";
+        h.credentials.set(Credentials::passwordKey(c.id), "secret");
+        h.start(c);
+        REQUIRE(h.listener.waitConnected());
+        std::lock_guard lk(h.listener.m);
+        CHECK(h.listener.local.find("no longer exists") != std::string::npos);
+    }
+}
+
+TEST_CASE("ssh: a login with a key from Credentials and no password", "[ssh][vault]") {
+    TempDir keys;
+    ssh_key key = nullptr;
+    REQUIRE(ssh_pki_generate_key(SSH_KEYTYPE_ED25519, nullptr, &key) == SSH_OK);
+    const auto keyPath = keys.path() / "id_login";
+    REQUIRE(ssh_pki_export_privkey_file(key, nullptr, nullptr, nullptr, sys::fromPath(keyPath).c_str()) == SSH_OK);
+    TestSshServerOptions o;
+    o.allowPassword = false;
+    o.allowKbdInt = false;
+    o.authorizedKeys = {authorizedLine(key)};
+    ssh_key_free(key);
+    TestSshServer server(o);
+    Harness h;
+    VaultKey k;
+    k.name = "login key";
+    k.path = sys::fromPath(keyPath);
+    VaultLogin l;
+    l.name = "key login";
+    l.username = "test";
+    l.password = "none";
+    l.keyId = h.vault.addKeyFile(k).id;
+    SessionConfig c = Harness::session(server);
+    c.username = "";  // would ask "login as": the login's user name is used instead
+    c.ssh.auth.loginId = h.vault.addLogin(l, std::nullopt).id;
+    h.start(c);
+    REQUIRE(h.listener.waitConnected());
+    REQUIRE(server.waitForEvent("auth:publickey:ok", 1000));
+    auto kinds = h.prompter.kinds();
+    CHECK(std::count(kinds.begin(), kinds.end(), "username") == 0);
+}
+
 TEST_CASE("ssh: encrypted key asks for the passphrase", "[ssh]") {
     TempDir keys;
     ssh_key key = nullptr;
@@ -336,10 +483,14 @@ TEST_CASE("ssh: encrypted key asks for the passphrase", "[ssh]") {
     TestSshServer server(o);
     Harness h;
     int asked = 0;
+    bool allowSave = true;
     h.prompter.handler = [&](const Json& p) {
         const std::string kind = p.value("kind", "");
         if (kind == "hostkey") return accept("accept-once");
-        if (kind == "passphrase") return answer({++asked == 1 ? "wrong" : "pass phrase"});
+        if (kind == "passphrase") {
+            allowSave = p.value("allowSave", true);
+            return answer({++asked == 1 ? "wrong" : "pass phrase"});
+        }
         return PromptResponse{};
     };
     SessionConfig c = Harness::session(server);
@@ -347,6 +498,144 @@ TEST_CASE("ssh: encrypted key asks for the passphrase", "[ssh]") {
     h.start(c);
     REQUIRE(h.listener.waitConnected());
     REQUIRE(asked == 2);
+    CHECK_FALSE(allowSave);  // "Remember for this key" is for keys in Credentials only
+}
+
+TEST_CASE("ssh: a remembered passphrase of a key from Credentials", "[ssh][vault]") {
+    TempDir keys;
+    ssh_key key = nullptr;
+    REQUIRE(ssh_pki_generate_key(SSH_KEYTYPE_ED25519, nullptr, &key) == SSH_OK);
+    const auto keyPath = keys.path() / "id_remember";
+    REQUIRE(ssh_pki_export_privkey_file(key, "pass phrase", nullptr, nullptr, sys::fromPath(keyPath).c_str()) == SSH_OK);
+    TestSshServerOptions o;
+    o.allowPassword = false;
+    o.allowKbdInt = false;
+    o.authorizedKeys = {authorizedLine(key)};
+    ssh_key_free(key);
+    TestSshServer server(o);
+    Harness h;
+    VaultKey k;
+    k.name = "remembered";
+    k.path = sys::fromPath(keyPath);
+    k.encrypted = true;
+    const std::string keyId = h.vault.addKeyFile(k).id;
+    SessionConfig c = Harness::session(server);
+    c.ssh.auth.keyId = keyId;
+    std::vector<Json> asked;
+    auto handle = [&](bool remember) {
+        h.prompter.handler = [&, remember](const Json& p) {
+            const std::string kind = p.value("kind", "");
+            if (kind == "hostkey") return accept("accept-once");
+            if (kind == "passphrase") {
+                asked.push_back(p);
+                PromptResponse r = answer({"pass phrase"});
+                r.remember = remember;
+                return r;
+            }
+            return PromptResponse{};
+        };
+    };
+
+    SECTION("\"Remember for this key\" at the prompt: saved once the key opens") {
+        handle(true);
+        h.start(c);
+        REQUIRE(h.listener.waitConnected());
+        REQUIRE(asked.size() == 1);
+        CHECK(asked[0].value("allowSave", false));
+        CHECK(h.vault.passphrase(keyId) == std::string("pass phrase"));
+        CHECK(h.vault.get(keyId)->passphraseRemembered);
+    }
+
+    SECTION("not ticked: nothing is saved") {
+        handle(false);
+        h.start(c);
+        REQUIRE(h.listener.waitConnected());
+        CHECK_FALSE(h.vault.passphrase(keyId).has_value());
+    }
+
+    SECTION("a remembered passphrase: no prompt") {
+        h.vault.rememberPassphrase(keyId, "pass phrase");
+        handle(false);
+        h.start(c);
+        REQUIRE(h.listener.waitConnected());
+        REQUIRE(server.waitForEvent("auth:publickey:ok", 1000));
+        CHECK(asked.empty());
+    }
+
+    SECTION("a remembered passphrase that no longer opens the key: forgotten, then asked with a message") {
+        h.vault.rememberPassphrase(keyId, "an old one");
+        handle(false);
+        h.start(c);
+        REQUIRE(h.listener.waitConnected());
+        REQUIRE(asked.size() == 1);
+        CHECK(asked[0].value("message", "").find("no longer opens") != std::string::npos);
+        CHECK_FALSE(h.vault.passphrase(keyId).has_value());
+    }
+}
+
+TEST_CASE("ssh: locked Credentials ask for the master password", "[ssh][vault][master]") {
+    Vault::setKdfCost(1024, 1);
+    TestSshServerOptions o;
+    o.allowKbdInt = false;
+    TestSshServer server(o);  // user "test", password "secret"
+    Harness h;
+    VaultLogin l;
+    l.name = "sealed";
+    l.username = "test";
+    l.password = "stored";
+    SessionConfig c = Harness::session(server);
+    c.ssh.auth.loginId = h.vault.addLogin(l, std::string("secret")).id;
+    h.vault.setMaster("master password");
+    h.vault.lock();
+    std::vector<Json> unlocks;
+    int passwordPrompts = 0;
+    auto handle = [&](std::vector<std::string> answers) {
+        h.prompter.handler = [&, answers](const Json& p) {
+            const std::string kind = p.value("kind", "");
+            if (kind == "hostkey") return accept("accept-once");
+            if (kind == "password") ++passwordPrompts;
+            if (kind != "unlock") return PromptResponse{};
+            unlocks.push_back(p);
+            if (unlocks.size() > answers.size()) return PromptResponse{};  // cancelled
+            return answer({answers[unlocks.size() - 1]});
+        };
+    };
+
+    SECTION("a wrong master password asks again; the right one unlocks and signs in") {
+        handle({"wrong one", "master password"});
+        h.start(c);
+        REQUIRE(h.listener.waitConnected());
+        REQUIRE(unlocks.size() == 2);
+        CHECK(unlocks[0].value("title", "") == "Unlock Credentials");
+        CHECK(unlocks[1].value("message", "").find("Wrong master password") != std::string::npos);
+        CHECK(passwordPrompts == 0);
+        CHECK(h.vault.status() == "unlocked");
+    }
+
+    SECTION("already unlocked: no prompt") {
+        REQUIRE(h.vault.unlock("master password"));
+        handle({});
+        h.start(c);
+        REQUIRE(h.listener.waitConnected());
+        CHECK(unlocks.empty());
+    }
+
+    SECTION("cancelled: the connection stops, Credentials stay locked") {
+        PromptResponse cancel;
+        cancel.cancelled = true;
+        h.prompter.handler = [&](const Json& p) {
+            const std::string kind = p.value("kind", "");
+            if (kind == "hostkey") return accept("accept-once");
+            if (kind == "unlock") unlocks.push_back(p);
+            if (kind == "password") ++passwordPrompts;
+            return cancel;
+        };
+        h.start(c);
+        REQUIRE(h.listener.waitClosed());
+        CHECK(unlocks.size() == 1);
+        CHECK(passwordPrompts == 0);
+        CHECK(h.vault.status() == "locked");
+    }
 }
 
 TEST_CASE("ssh: saved password is used without prompting, wrong password retries", "[ssh]") {

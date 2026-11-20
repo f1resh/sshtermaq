@@ -151,6 +151,11 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ProxyConfig, type, host, port, u
 
 struct SshAuthOptions {
     std::string privateKeyPath;
+    /** A key from Credentials (VaultKey::id); "" = none. When set it wins over privateKeyPath. */
+    std::string keyId;
+    /** A login from Credentials (VaultLogin::id); "" = none. When set it replaces the session's user name and sign-in
+     *  methods (agent, key, password). */
+    std::string loginId;
     bool tryAgent = true;
     AgentKind agent = AgentKind::Auto;
     bool agentForwarding = false;
@@ -158,7 +163,7 @@ struct SshAuthOptions {
     bool password = true;
     bool showBanner = true;
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(SshAuthOptions, privateKeyPath, tryAgent, agent, agentForwarding,
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(SshAuthOptions, privateKeyPath, keyId, loginId, tryAgent, agent, agentForwarding,
                                                 keyboardInteractive, password, showBanner)
 
 struct X11Options {
@@ -414,7 +419,11 @@ struct KbdPrompt {
 };
 PromptInput kbdint(const std::string& title, const std::string& name, const std::string& instructions,
                    const std::vector<KbdPrompt>& items, bool allowSave);
-PromptInput passphrase(const std::string& title, const std::string& keyPath, const std::string& message = {});
+/** The master password of Credentials (kind "unlock"). */
+PromptInput unlock(const std::string& title, const std::string& message = {});
+/** `allowSave`: offer "Remember for this key" (a key from Credentials). */
+PromptInput passphrase(const std::string& title, const std::string& keyPath, const std::string& message = {},
+                       bool allowSave = false);
 PromptInput hostkey(const std::string& host, int port, const std::string& keyType, const std::string& fingerprint,
                     const std::string& fingerprintMd5, bool mismatch, const std::vector<std::string>& previous);
 PromptInput confirm(const std::string& title, const std::string& message, const std::vector<std::string>& buttons,
@@ -515,10 +524,14 @@ struct TransferProgress {
     /** Folder transfers: the folder tree is still being listed (filesTotal / total: found so far, currentFile: the
      *  folder being listed); copying starts after it. */
     bool listing = false;
+    /** Unix ms: when the transfer first left the queue (0 = never ran), and when it ended (done, error or
+     *  cancelled; 0 = not yet). Set by the transfer engine. */
+    int64_t startedAt = 0;
+    int64_t finishedAt = 0;
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TransferProgress, transferId, sftpId, direction, name, localPath, remotePath,
                                                 transferred, total, state, error, move, filesDone, filesTotal, currentFile,
-                                                skipped, origin, listing)
+                                                skipped, origin, listing, startedAt, finishedAt)
 
 struct TransferOptions {
     std::string conflict = "ask";  // 'ask' | 'overwrite' | 'newer' | 'skip' | 'resume' | 'rename'
@@ -689,6 +702,50 @@ struct KeyInfo {
     std::string publicKeyOpenSsh;
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(KeyInfo, path, format, keyType, comment, encrypted, fingerprint, publicKeyOpenSsh)
+
+/**
+ * A key in Credentials (store/Vault.h): the public part only. A "file" key is a link to a key file (only the path is
+ * stored); a "stored" key's text lives encrypted in credentials.json under "vault:key:<id>" (never in this struct).
+ */
+struct VaultKey {
+    std::string id;
+    std::string name;
+    std::string kind = "stored";  // 'file' | 'stored'
+    std::string path;             // kind 'file'
+    std::string format = "unknown";
+    std::string keyType;
+    std::string fingerprint;
+    std::string publicKeyOpenSsh;
+    std::string comment;
+    bool encrypted = false;
+    int64_t createdAt = 0;
+    int64_t updatedAt = 0;
+    /** Its passphrase is remembered (encrypted in credentials.json as "vault:key:<id>:passphrase"). Filled by
+     *  Vault::list / get from credentials.json, never saved in vault.json. */
+    bool passphraseRemembered = false;
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(VaultKey, id, name, kind, path, format, keyType, fingerprint,
+                                                publicKeyOpenSsh, comment, encrypted, createdAt, updatedAt,
+                                                passphraseRemembered)
+
+/**
+ * A login in Credentials (store/Vault.h): a user name and how to sign in. A stored password lives encrypted in
+ * credentials.json under "vault:login:<id>:password" (never in this struct).
+ */
+struct VaultLogin {
+    std::string id;
+    std::string name;
+    std::string username;
+    /** 'stored' (saved, encrypted) | 'ask' (asked at every connection) | 'none' (no password sign-in). */
+    std::string password = "ask";
+    /** A key from Credentials (VaultKey::id); "" = none. */
+    std::string keyId;
+    /** Try an SSH agent (Pageant / OpenSSH agent): also how hardware keys work. */
+    bool useAgent = false;
+    int64_t createdAt = 0;
+    int64_t updatedAt = 0;
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(VaultLogin, id, name, username, password, keyId, useAgent, createdAt, updatedAt)
 
 /* ------------------------------------------------------------------------ */
 /* App                                                                       */

@@ -293,6 +293,7 @@ export function registerSftpMocks(ctx: MockContext): void {
   const finish = (t: MockTransfer, state: TransferProgress['state'], error?: string) => {
     if (t.timer) clearInterval(t.timer);
     t.p.state = state;
+    t.p.finishedAt = Date.now();
     if (error) t.p.error = error;
     if (state === 'done') t.p.filesDone = t.p.filesTotal;
     emit(t);
@@ -327,6 +328,7 @@ export function registerSftpMocks(ctx: MockContext): void {
 
   const start = (t: MockTransfer) => {
     t.p.state = 'running';
+    t.p.startedAt ||= Date.now(); // as the native transfer engine: first time it leaves the queue
     emit(t);
     const tick = 100;
     t.timer = setInterval(() => {

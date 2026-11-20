@@ -1,12 +1,118 @@
 #include "core/Crypto.h"
 
+#include <openssl/core_names.h>
+#include <openssl/crypto.h>
 #include <openssl/evp.h>
+#include <openssl/kdf.h>
+#include <openssl/params.h>
 #include <openssl/rand.h>
 
 #include <cctype>
+#include <memory>
 #include <stdexcept>
 
 namespace st::crypto {
+
+void cleanse(std::string& s) {
+    if (!s.empty()) OPENSSL_cleanse(s.data(), s.size());
+    s.clear();
+}
+
+namespace {
+struct KdfDeleter {
+    void operator()(EVP_KDF* k) const { EVP_KDF_free(k); }
+};
+struct KdfCtxDeleter {
+    void operator()(EVP_KDF_CTX* c) const { EVP_KDF_CTX_free(c); }
+};
+struct CipherCtxDeleter {
+    void operator()(EVP_CIPHER_CTX* c) const { EVP_CIPHER_CTX_free(c); }
+};
+constexpr size_t kGcmNonce = 12, kGcmTag = 16;
+}  // namespace
+
+bool argon2(const char* variant, std::string_view pass, std::string_view salt, uint32_t memoryKiB, uint32_t passes,
+            uint32_t lanes, size_t outLen, std::string& out, std::string& error) {
+    if (passes == 0 || lanes == 0 || memoryKiB < 8 * lanes || memoryKiB > (1u << 22) || passes > 10000 || lanes > 255) {
+        error = "Invalid Argon2 parameters";
+        return false;
+    }
+    std::unique_ptr<EVP_KDF, KdfDeleter> k(EVP_KDF_fetch(nullptr, variant, nullptr));
+    if (!k) {
+        error = "Argon2 is not available in this OpenSSL build";
+        return false;
+    }
+    std::unique_ptr<EVP_KDF_CTX, KdfCtxDeleter> ctx(EVP_KDF_CTX_new(k.get()));
+    if (!ctx) {
+        error = "Out of memory";
+        return false;
+    }
+    uint32_t threads = 1, version = 0x13;
+    // OpenSSL rejects a NULL password pointer even with length 0; point at a dummy byte instead.
+    static const char kEmpty = 0;
+    OSSL_PARAM params[] = {
+        OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_PASSWORD, const_cast<char*>(pass.empty() ? &kEmpty : pass.data()),
+                                          pass.size()),
+        OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_SALT, const_cast<char*>(salt.data()), salt.size()),
+        OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ITER, &passes),
+        OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ARGON2_LANES, &lanes),
+        OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_THREADS, &threads),
+        OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ARGON2_MEMCOST, &memoryKiB),
+        OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ARGON2_VERSION, &version),
+        OSSL_PARAM_construct_end()};
+    out.assign(outLen, '\0');
+    if (EVP_KDF_derive(ctx.get(), reinterpret_cast<unsigned char*>(out.data()), outLen, params) != 1) {
+        cleanse(out);
+        error = "Argon2 key derivation failed";
+        return false;
+    }
+    return true;
+}
+
+std::string aesGcmSeal(std::string_view key32, std::string_view plain, std::string_view aad) {
+    if (key32.size() != 32) throw std::invalid_argument("AES-256-GCM needs a 32-byte key");
+    std::string out = randomBytes(kGcmNonce);
+    out.resize(kGcmNonce + plain.size() + kGcmTag);
+    auto* u = reinterpret_cast<unsigned char*>(out.data());
+    std::unique_ptr<EVP_CIPHER_CTX, CipherCtxDeleter> c(EVP_CIPHER_CTX_new());
+    int len = 0, fin = 0;
+    const bool ok =
+        c && EVP_EncryptInit_ex(c.get(), EVP_aes_256_gcm(), nullptr, nullptr, nullptr) == 1 &&
+        EVP_CIPHER_CTX_ctrl(c.get(), EVP_CTRL_GCM_SET_IVLEN, static_cast<int>(kGcmNonce), nullptr) == 1 &&
+        EVP_EncryptInit_ex(c.get(), nullptr, nullptr, reinterpret_cast<const unsigned char*>(key32.data()), u) == 1 &&
+        EVP_EncryptUpdate(c.get(), nullptr, &len, reinterpret_cast<const unsigned char*>(aad.data()), static_cast<int>(aad.size())) == 1 &&
+        EVP_EncryptUpdate(c.get(), u + kGcmNonce, &len, reinterpret_cast<const unsigned char*>(plain.data()), static_cast<int>(plain.size())) == 1 &&
+        EVP_EncryptFinal_ex(c.get(), u + kGcmNonce + len, &fin) == 1 &&
+        EVP_CIPHER_CTX_ctrl(c.get(), EVP_CTRL_GCM_GET_TAG, static_cast<int>(kGcmTag), u + kGcmNonce + plain.size()) == 1;
+    if (!ok) {
+        cleanse(out);
+        throw std::runtime_error("AES-256-GCM encryption failed");
+    }
+    return out;
+}
+
+std::optional<std::string> aesGcmOpen(std::string_view key32, std::string_view sealed, std::string_view aad) {
+    if (key32.size() != 32 || sealed.size() < kGcmNonce + kGcmTag) return std::nullopt;
+    const size_t n = sealed.size() - kGcmNonce - kGcmTag;
+    const auto* s = reinterpret_cast<const unsigned char*>(sealed.data());
+    std::string out(n, '\0');
+    auto* u = reinterpret_cast<unsigned char*>(out.data());
+    std::unique_ptr<EVP_CIPHER_CTX, CipherCtxDeleter> c(EVP_CIPHER_CTX_new());
+    int len = 0, fin = 0;
+    const bool ok =
+        c && EVP_DecryptInit_ex(c.get(), EVP_aes_256_gcm(), nullptr, nullptr, nullptr) == 1 &&
+        EVP_CIPHER_CTX_ctrl(c.get(), EVP_CTRL_GCM_SET_IVLEN, static_cast<int>(kGcmNonce), nullptr) == 1 &&
+        EVP_DecryptInit_ex(c.get(), nullptr, nullptr, reinterpret_cast<const unsigned char*>(key32.data()), s) == 1 &&
+        EVP_DecryptUpdate(c.get(), nullptr, &len, reinterpret_cast<const unsigned char*>(aad.data()), static_cast<int>(aad.size())) == 1 &&
+        EVP_DecryptUpdate(c.get(), u, &len, s + kGcmNonce, static_cast<int>(n)) == 1 &&
+        EVP_CIPHER_CTX_ctrl(c.get(), EVP_CTRL_GCM_SET_TAG, static_cast<int>(kGcmTag), const_cast<unsigned char*>(s + kGcmNonce + n)) == 1 &&
+        EVP_DecryptFinal_ex(c.get(), u + len, &fin) == 1;
+    if (!ok) {
+        cleanse(out);
+        return std::nullopt;
+    }
+    return out;
+}
 
 static std::string digest(const EVP_MD* md, std::string_view data) {
     unsigned char out[EVP_MAX_MD_SIZE];

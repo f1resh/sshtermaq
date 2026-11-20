@@ -385,3 +385,30 @@ TEST_CASE("transfer: upload as / download as give the one item a new name", "[sf
         CHECK_THROWS(f.h.invoke("sftp:download", Json::array({f.id, Json::array({"/report.txt"}), u8(l), Json{{"targetName", ".."}}})));
     }
 }
+
+TEST_CASE("transfer: start and end times of a transfer", "[sftp][transfer]") {
+    SftpFixture f;
+    const fs::path r = f.remoteRoot.path(), l = f.local.path();
+    spit(r / "a.txt", "remote-a");
+    const int64_t before = nowMs();
+
+    SECTION("a finished transfer has both, in order") {
+        const Json p = f.waitDone(f.download("/a.txt", l));
+        REQUIRE(p["state"] == "done");
+        const int64_t started = p["startedAt"], finished = p["finishedAt"];
+        CHECK(started >= before);
+        CHECK(finished >= started);
+        CHECK(finished <= nowMs());
+    }
+
+    SECTION("a transfer cancelled while it ran (here: at a conflict question) has both") {
+        spit(l / "a.txt", "local-a");
+        const std::string tid = f.download("/a.txt", l);
+        f.waitConflict();
+        f.h.send("sftp:cancelTransfer", Json::array({tid}));
+        const Json p = f.waitDone(tid, 10s);
+        REQUIRE(p["state"] == "cancelled");
+        CHECK(p["startedAt"].get<int64_t>() >= before);
+        CHECK(p["finishedAt"].get<int64_t>() >= p["startedAt"].get<int64_t>());
+    }
+}

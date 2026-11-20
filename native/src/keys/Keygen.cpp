@@ -1,6 +1,7 @@
 #include "keys/Keygen.h"
 
 #include "core/Crypto.h"
+#include "core/Strings.h"
 #include "keys/KeyFile.h"
 #include "keys/Ppk.h"
 #include "keys/SshWire.h"
@@ -89,14 +90,31 @@ KeygenResult generateKey(const KeygenRequest& req) {
 }
 
 KeyInfo inspectKey(const std::string& path, const std::string& passphrase) {
-    KeyInfo info;
-    info.path = path;
     auto content = readKeyFile(path);
     if (!content) throw std::runtime_error("Cannot read key file");
     ScopedWipe wc(*content);
+    return inspectKeyText(*content, path, passphrase);
+}
+
+namespace {
+/** "ssh-ed25519 AAAA…", "-----BEGIN SSH2 PUBLIC KEY-----", "---- BEGIN SSH2 PUBLIC KEY ----", "-----BEGIN PUBLIC KEY-----". */
+bool looksLikePublicKey(const std::string& text) {
+    const std::string t = trim(text);
+    return t.rfind("ssh-", 0) == 0 || t.rfind("ecdsa-", 0) == 0 || t.rfind("sk-", 0) == 0 ||
+           t.find("PUBLIC KEY") != std::string::npos;
+}
+}  // namespace
+
+KeyInfo inspectKeyText(const std::string& text, const std::string& path, const std::string& passphrase) {
+    KeyInfo info;
+    info.path = path;
+    const std::string* content = &text;
     const KeyFormat fmt = detectFormat(*content);
     info.format = formatName(fmt);
-    if (fmt == KeyFormat::Unknown) throw std::runtime_error("Not a recognised private key file");
+    if (fmt == KeyFormat::Unknown) {
+        if (looksLikePublicKey(*content)) throw std::runtime_error("This is a public key: paste the private key");
+        throw std::runtime_error("Not a recognised private key file");
+    }
     info.encrypted = isEncrypted(*content, fmt);
 
     std::string blob, comment, err;

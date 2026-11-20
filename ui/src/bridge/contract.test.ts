@@ -64,7 +64,12 @@ describe('native host', () => {
 describe('mock backend', () => {
   const invokes = new Set<string>();
   const sends = new Set<string>();
-  const ctx: MockContext = { handle: (ch) => void invokes.add(ch), on: (ch) => void sends.add(ch), emit: () => undefined };
+  const ctx: MockContext = {
+    handle: (ch) => void invokes.add(ch),
+    on: (ch) => void sends.add(ch),
+    emit: () => undefined,
+    invoke: async <T,>() => null as T
+  };
   for (const register of [registerCoreMocks, registerConnMocks, registerSftpMocks, registerLocalMocks, registerImporterMocks, registerKeysMocks])
     register(ctx);
   const dir = fileURLToPath(new URL('./mock', import.meta.url));

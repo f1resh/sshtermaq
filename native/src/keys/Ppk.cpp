@@ -25,12 +25,6 @@ constexpr std::string_view kMacKeyPrefix = "putty-private-key-file-mac-key";
 struct CipherCtxDeleter {
     void operator()(EVP_CIPHER_CTX* c) const { EVP_CIPHER_CTX_free(c); }
 };
-struct KdfDeleter {
-    void operator()(EVP_KDF* k) const { EVP_KDF_free(k); }
-};
-struct KdfCtxDeleter {
-    void operator()(EVP_KDF_CTX* c) const { EVP_KDF_CTX_free(c); }
-};
 
 bool parseU32(std::string_view s, uint32_t& v) {
     auto [p, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
@@ -106,7 +100,7 @@ const char* opensslArgonName(std::string_view kdf) {
     return nullptr;
 }
 
-/** Argon2 (RFC 9106, version 0x13) via OpenSSL 3.2+ EVP_KDF. */
+/** Argon2 for PPK v3 (the variant named in the file). */
 bool argon2(std::string_view kdf, std::string_view pass, std::string_view salt, uint32_t memoryKiB, uint32_t passes,
             uint32_t lanes, size_t outLen, std::string& out, std::string& error) {
     const char* name = opensslArgonName(kdf);
@@ -114,40 +108,7 @@ bool argon2(std::string_view kdf, std::string_view pass, std::string_view salt, 
         error = "Unsupported key derivation '" + std::string(kdf) + "'";
         return false;
     }
-    if (passes == 0 || lanes == 0 || memoryKiB < 8 * lanes || memoryKiB > (1u << 22) || passes > 10000 || lanes > 255) {
-        error = "Invalid Argon2 parameters";
-        return false;
-    }
-    std::unique_ptr<EVP_KDF, KdfDeleter> k(EVP_KDF_fetch(nullptr, name, nullptr));
-    if (!k) {
-        error = "Argon2 is not available in this OpenSSL build";
-        return false;
-    }
-    std::unique_ptr<EVP_KDF_CTX, KdfCtxDeleter> ctx(EVP_KDF_CTX_new(k.get()));
-    if (!ctx) {
-        error = "Out of memory";
-        return false;
-    }
-    uint32_t threads = 1, version = 0x13;
-    // OpenSSL rejects a NULL password pointer even with length 0; point at a dummy byte instead.
-    static const char kEmpty = 0;
-    OSSL_PARAM params[] = {
-        OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_PASSWORD, const_cast<char*>(pass.empty() ? &kEmpty : pass.data()),
-                                          pass.size()),
-        OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_SALT, const_cast<char*>(salt.data()), salt.size()),
-        OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ITER, &passes),
-        OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ARGON2_LANES, &lanes),
-        OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_THREADS, &threads),
-        OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ARGON2_MEMCOST, &memoryKiB),
-        OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ARGON2_VERSION, &version),
-        OSSL_PARAM_construct_end()};
-    out.assign(outLen, '\0');
-    if (EVP_KDF_derive(ctx.get(), reinterpret_cast<unsigned char*>(out.data()), outLen, params) != 1) {
-        wipe(out);
-        error = "Argon2 key derivation failed";
-        return false;
-    }
-    return true;
+    return crypto::argon2(name, pass, salt, memoryKiB, passes, lanes, outLen, out, error);
 }
 
 void appendBase64Lines(std::string& out, std::string_view header, std::string_view data) {

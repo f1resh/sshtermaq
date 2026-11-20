@@ -216,3 +216,48 @@ TEST_CASE("detectKeyFormat", "[keys]") {
     REQUIRE(detectKeyFormat("-----BEGIN RSA PRIVATE KEY-----\n") == "pem");
     REQUIRE(detectKeyFormat("hello") == "unknown");
 }
+
+TEST_CASE("key text (pasted or stored in Credentials): inspect and load without a file", "[keys][vault]") {
+    KeygenRequest req;
+    req.type = "ed25519";
+    req.comment = "me@laptop";
+    const KeygenResult plain = keys::generateKey(req);
+    req.passphrase = "pass phrase";
+    const KeygenResult locked = keys::generateKey(req);
+
+    SECTION("inspect: the same details as from a file, for OpenSSH and PPK text") {
+        const KeyInfo openssh = keys::inspectKeyText(plain.privateKeyOpenSsh, "", "");
+        CHECK(openssh.format == "openssh");
+        CHECK(openssh.fingerprint == plain.fingerprint);
+        CHECK(openssh.comment == "me@laptop");
+        CHECK_FALSE(openssh.encrypted);
+        const KeyInfo ppk = keys::inspectKeyText(locked.privateKeyPpk, "", "");
+        CHECK(ppk.format == "ppk3");
+        CHECK(ppk.encrypted);
+        CHECK(ppk.fingerprint == locked.fingerprint);
+    }
+
+    SECTION("inspect: a public key or junk is refused with a clear message") {
+        try {
+            keys::inspectKeyText(plain.publicKeyOpenSsh, "", "");
+            FAIL("a public key was accepted");
+        } catch (const std::runtime_error& e) {
+            CHECK(std::string(e.what()).find("public key") != std::string::npos);
+        }
+        CHECK_THROWS(keys::inspectKeyText("hello world", "", ""));
+        CHECK_THROWS(keys::inspectKeyText("", "", ""));
+    }
+
+    SECTION("load: plain text, and encrypted text with its passphrase") {
+        std::string err;
+        ssh_key k = loadPrivateKeyText(plain.privateKeyOpenSsh, {}, err);
+        REQUIRE(k);
+        ssh_key_free(k);
+        int asked = 0;
+        k = loadPrivateKeyText(locked.privateKeyPpk, [&](int) -> std::optional<std::string> { ++asked; return std::string("pass phrase"); }, err);
+        REQUIRE(k);
+        CHECK(asked == 1);
+        ssh_key_free(k);
+        CHECK_FALSE(loadPrivateKeyText("not a key", {}, err));
+    }
+}

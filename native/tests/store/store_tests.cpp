@@ -6,10 +6,12 @@
 #include "store/JsonFile.h"
 #include "store/KnownHosts.h"
 #include "store/Store.h"
+#include "store/Vault.h"
 
 #include "TestServers.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -738,4 +740,374 @@ TEST_CASE("store: concurrent writers smoke test", "[store][concurrency]") {
         REQUIRE(again.getState("k" + std::to_string(t)) == kPerThread - 1);
         REQUIRE(again.credentials().get("c" + std::to_string(t)) == "v" + std::to_string(kPerThread - 1));
     }
+}
+
+TEST_CASE("vault: keys of Credentials (linked files and stored text)", "[store][vault]") {
+    test::TempDir tmp;
+    Credentials creds(tmp.path() / "credentials.json");
+    creds.load();
+    const fs::path file = tmp.path() / "vault.json";
+    int changes = 0;
+    std::string storedId, fileId;
+    const std::string secret = "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-material\n-----END OPENSSH PRIVATE KEY-----\n";
+    {
+        Vault v(file, creds);
+        v.load();
+        v.onChanged = [&] { ++changes; };
+        VaultKey stored;
+        stored.name = "  work laptop ";
+        stored.keyType = "ssh-ed25519";
+        stored.fingerprint = "SHA256:abc";
+        storedId = v.addKeyText(stored, secret).id;
+        VaultKey linked;
+        linked.name = "Router";
+        linked.path = "C:/keys/router.ppk";
+        fileId = v.addKeyFile(linked).id;
+        CHECK(changes == 2);
+
+        auto list = v.list();
+        REQUIRE(list.size() == 2);
+        CHECK(list[0].name == "Router");  // sorted by name, case-insensitively
+        CHECK(list[1].name == "work laptop");
+        CHECK(list[1].kind == "stored");
+        CHECK(list[0].kind == "file");
+        CHECK(v.storedKeyText(storedId) == secret);
+        CHECK_FALSE(v.storedKeyText(fileId).has_value());  // a linked file's content is never stored
+
+        // Names are unique, whatever the case; empty names are refused.
+        VaultKey dup;
+        dup.name = "WORK LAPTOP";
+        CHECK_THROWS(v.addKeyText(dup, secret));
+        CHECK_THROWS(v.rename(fileId, "work laptop"));
+        CHECK_THROWS(v.rename(fileId, "  "));
+        CHECK(v.rename(fileId, "home router").name == "home router");
+    }
+    // The secret is in credentials.json, encrypted; vault.json holds no key material.
+    CHECK(slurp(file).find("secret-material") == std::string::npos);
+    CHECK(slurp(tmp.path() / "credentials.json").find("secret-material") == std::string::npos);
+
+    Vault again(file, creds);
+    again.load();
+    REQUIRE(again.list().size() == 2);
+    CHECK(again.get(fileId)->name == "home router");
+    CHECK(again.get(fileId)->path == "C:/keys/router.ppk");
+    CHECK(again.storedKeyText(storedId) == secret);
+
+    // Removing a stored key removes its secret too.
+    again.remove(storedId);
+    CHECK_FALSE(again.get(storedId).has_value());
+    CHECK_FALSE(creds.has(Vault::secretKey(storedId)));
+    again.remove("no-such-id");  // ignored
+
+    // A corrupt file is backed up and the vault starts empty.
+    spit(file, "{ not json");
+    Vault broken(file, creds);
+    broken.load();
+    CHECK(broken.list().empty());
+}
+
+TEST_CASE("vault: logins (user name, password stored / asked / none, key, agent)", "[store][vault]") {
+    test::TempDir tmp;
+    Credentials creds(tmp.path() / "credentials.json");
+    creds.load();
+    const fs::path file = tmp.path() / "vault.json";
+    std::string prodId;
+    {
+        Vault v(file, creds);
+        v.load();
+        VaultLogin prod;
+        prod.name = " deploy@prod ";
+        prod.username = " deploy ";
+        prod.password = "stored";
+        CHECK_THROWS(v.addLogin(prod, std::nullopt));  // "stored" needs the password
+        prodId = v.addLogin(prod, std::string("hunter2")).id;
+        CHECK(v.getLogin(prodId)->name == "deploy@prod");
+        CHECK(v.getLogin(prodId)->username == "deploy");
+        CHECK(v.loginPassword(prodId) == std::string("hunter2"));
+
+        VaultLogin lab;
+        lab.name = "admin@lab";
+        lab.username = "admin";
+        lab.password = "ask";
+        lab.keyId = "some-key";
+        lab.useAgent = true;
+        const std::string labId = v.addLogin(lab, std::string("ignored")).id;
+        CHECK_FALSE(v.loginPassword(labId).has_value());  // only a "stored" login has a password
+        CHECK_FALSE(creds.has(Vault::loginSecretKey(labId)));
+
+        VaultLogin dup = lab;
+        dup.name = "ADMIN@LAB";
+        CHECK_THROWS(v.addLogin(dup, std::nullopt));
+        VaultLogin noUser = lab;
+        noUser.name = "x";
+        noUser.username = " ";
+        CHECK_THROWS(v.addLogin(noUser, std::nullopt));
+        // A key and a login may share a name (separate lists).
+        VaultKey k;
+        k.name = "admin@lab";
+        k.path = "C:/k";
+        CHECK_NOTHROW(v.addKeyFile(k));
+
+        // Update: keep the stored password (none given), then a new one, then switch to "ask" (deletes it).
+        VaultLogin p = *v.getLogin(prodId);
+        p.username = "deployer";
+        v.updateLogin(p, std::nullopt);
+        CHECK(v.loginPassword(prodId) == std::string("hunter2"));
+        v.updateLogin(p, std::string("s3cret"));
+        CHECK(v.loginPassword(prodId) == std::string("s3cret"));
+        p.password = "ask";
+        v.updateLogin(p, std::nullopt);
+        CHECK_FALSE(creds.has(Vault::loginSecretKey(prodId)));
+        p.password = "stored";
+        CHECK_THROWS(v.updateLogin(p, std::nullopt));  // back to "stored" needs a password again
+        v.updateLogin(p, std::string("again"));
+
+        auto list = v.listLogins();
+        REQUIRE(list.size() == 2);
+        CHECK(list[0].name == "admin@lab");
+        CHECK(list[1].username == "deployer");
+    }
+    CHECK(slurp(file).find("again") == std::string::npos);
+    CHECK(slurp(tmp.path() / "credentials.json").find("again") == std::string::npos);
+
+    Vault again(file, creds);
+    again.load();
+    REQUIRE(again.listLogins().size() == 2);
+    CHECK(again.loginPassword(prodId) == std::string("again"));
+    again.removeLogin(prodId);
+    CHECK_FALSE(again.getLogin(prodId).has_value());
+    CHECK_FALSE(creds.has(Vault::loginSecretKey(prodId)));
+}
+
+TEST_CASE("vault: remembered key passphrases (per key, forgotten with the key)", "[store][vault]") {
+    test::TempDir tmp;
+    Credentials creds(tmp.path() / "credentials.json");
+    creds.load();
+    const fs::path file = tmp.path() / "vault.json";
+    std::string linkedId, storedId;
+    {
+        Vault v(file, creds);
+        v.load();
+        VaultKey linked;
+        linked.name = "linked";
+        linked.path = "C:/keys/id_enc";
+        linked.encrypted = true;
+        linkedId = v.addKeyFile(linked).id;
+        VaultKey stored;
+        stored.name = "stored";
+        stored.encrypted = true;
+        storedId = v.addKeyText(stored, "-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----\n").id;
+        int changes = 0;
+        v.onChanged = [&] { ++changes; };
+
+        CHECK_FALSE(v.passphrase(linkedId).has_value());
+        CHECK_FALSE(v.get(linkedId)->passphraseRemembered);
+        v.rememberPassphrase(linkedId, "correct horse");
+        v.rememberPassphrase(storedId, "battery staple");
+        CHECK(changes == 2);
+        CHECK(v.passphrase(linkedId) == std::string("correct horse"));
+        CHECK(v.get(linkedId)->passphraseRemembered);
+        CHECK(v.list()[0].passphraseRemembered);
+        CHECK(v.rename(linkedId, "linked, renamed").passphraseRemembered);  // by id: a rename keeps it
+        CHECK_THROWS(v.rememberPassphrase("no-such-key", "x"));
+        CHECK_FALSE(v.passphrase("no-such-key").has_value());
+
+        v.forgetPassphrase(linkedId);
+        CHECK_FALSE(v.passphrase(linkedId).has_value());
+        CHECK_FALSE(v.get(linkedId)->passphraseRemembered);
+        const int before = changes;
+        v.forgetPassphrase(linkedId);  // nothing to forget: no change event
+        CHECK(changes == before);
+    }
+    // Only encrypted in credentials.json; vault.json does not even say that one is remembered.
+    CHECK(slurp(file).find("battery") == std::string::npos);
+    CHECK(slurp(file).find("passphraseRemembered") == std::string::npos);
+    CHECK(slurp(tmp.path() / "credentials.json").find("battery") == std::string::npos);
+
+    Vault again(file, creds);
+    again.load();
+    CHECK(again.passphrase(storedId) == std::string("battery staple"));
+    again.remove(storedId);  // deleting the key forgets its passphrase too
+    CHECK_FALSE(creds.has(Vault::passphraseSecretKey(storedId)));
+}
+
+TEST_CASE("vault: master password (set, lock, unlock, wrong, change, remove, reset)", "[store][vault][master]") {
+    Vault::setKdfCost(1024, 1);  // fast for tests; the app uses 64 MiB, 3 passes
+    test::TempDir tmp;
+    Credentials creds(tmp.path() / "credentials.json");
+    creds.load();
+    const fs::path file = tmp.path() / "vault.json";
+    const std::string keyText = "-----BEGIN OPENSSH PRIVATE KEY-----\nMASTERTEST\n-----END OPENSSH PRIVATE KEY-----\n";
+    creds.set(Credentials::passwordKey("s1"), "session-own");  // a session's own password: never touched
+    Vault v(file, creds);
+    v.load();
+    VaultKey stored;
+    stored.name = "stored";
+    const std::string storedId = v.addKeyText(stored, keyText).id;
+    VaultKey linked;
+    linked.name = "linked";
+    linked.path = "C:/keys/id";
+    const std::string linkedId = v.addKeyFile(linked).id;
+    v.rememberPassphrase(linkedId, "pp-secret");
+    VaultLogin l;
+    l.name = "prod";
+    l.username = "deploy";
+    l.password = "stored";
+    const std::string loginId = v.addLogin(l, std::string("hunter2")).id;
+
+    CHECK(v.status() == "none");
+    CHECK_FALSE(v.locked());
+    CHECK_THROWS(v.setMaster("short"));
+    v.setMaster("correct horse battery");
+    CHECK(v.status() == "unlocked");
+    CHECK(v.storedKeyText(storedId) == keyText);
+    // Sealed under the OS protection: the raw value is "mp1:..." and does not hold the key text.
+    const auto raw = creds.get(Vault::secretKey(storedId));
+    REQUIRE(raw.has_value());
+    CHECK(raw->rfind("mp1:", 0) == 0);
+    CHECK(raw->find("MASTERTEST") == std::string::npos);
+    CHECK(creds.get(Vault::loginSecretKey(loginId))->rfind("mp1:", 0) == 0);
+    CHECK(creds.get(Credentials::passwordKey("s1")) == std::string("session-own"));
+    CHECK_THROWS(v.setMaster("another one"));  // already set
+
+    // Locked: the secrets cannot be read or written; the public parts and links still work.
+    v.lock();
+    CHECK(v.status() == "locked");
+    CHECK(v.needsUnlock(Vault::secretKey(storedId)));
+    CHECK_FALSE(v.needsUnlock(Vault::secretKey(linkedId)));  // a linked key has no secret
+    CHECK_THROWS_AS(v.storedKeyText(storedId), VaultLocked);
+    CHECK_THROWS_AS(v.loginPassword(loginId), VaultLocked);
+    CHECK_THROWS_AS(v.passphrase(linkedId), VaultLocked);
+    CHECK_THROWS_AS(v.addKeyText(VaultKey{.name = "new"}, keyText), VaultLocked);
+    CHECK(v.list().size() == 2);
+    VaultKey linked2;
+    linked2.name = "linked 2";
+    linked2.path = "C:/keys/id2";
+    CHECK_NOTHROW(v.addKeyFile(linked2));
+
+    CHECK_FALSE(v.unlock("wrong password"));
+    CHECK(v.status() == "locked");
+    CHECK(v.unlock("correct horse battery"));
+    CHECK(v.loginPassword(loginId) == std::string("hunter2"));
+    CHECK(v.passphrase(linkedId) == std::string("pp-secret"));
+
+    // After a restart: locked again.
+    {
+        Vault restarted(file, creds);
+        restarted.load();
+        CHECK(restarted.status() == "locked");
+        CHECK(restarted.unlock("correct horse battery"));
+        CHECK(restarted.storedKeyText(storedId) == keyText);
+    }
+
+    // Change: the old password no longer works.
+    CHECK_THROWS(v.changeMaster("wrong password", "new master pw"));
+    v.changeMaster("correct horse battery", "new master pw");
+    CHECK(v.status() == "unlocked");
+    CHECK(v.storedKeyText(storedId) == keyText);
+    v.lock();
+    CHECK_FALSE(v.unlock("correct horse battery"));
+    CHECK(v.unlock("new master pw"));
+
+    // Remove: back to OS protection only.
+    CHECK_THROWS(v.removeMaster("wrong password"));
+    v.removeMaster("new master pw");
+    CHECK(v.status() == "none");
+    CHECK(creds.get(Vault::secretKey(storedId)) == keyText);
+    CHECK_FALSE(creds.has(Vault::kMasterRecord));
+
+    // Forgotten: reset deletes every secret; linked keys and logins stay (a stored password becomes "ask").
+    v.setMaster("forgotten later");
+    v.lock();
+    v.reset();
+    CHECK(v.status() == "none");
+    CHECK_FALSE(v.get(storedId).has_value());
+    CHECK(v.get(linkedId).has_value());
+    CHECK_FALSE(v.get(linkedId)->passphraseRemembered);
+    CHECK(v.getLogin(loginId)->password == "ask");
+    CHECK(creds.keysWithPrefix("vault:").empty());
+    CHECK(creds.get(Credentials::passwordKey("s1")) == std::string("session-own"));
+}
+
+TEST_CASE("vault: export and import (one sealed file, ids kept, merged)", "[store][vault][export]") {
+    Vault::setKdfCost(1024, 1);
+    test::TempDir tmp;
+    const std::string keyText = "-----BEGIN OPENSSH PRIVATE KEY-----\nEXPORTTEST\n-----END OPENSSH PRIVATE KEY-----\n";
+    Credentials creds(tmp.path() / "a-credentials.json");
+    creds.load();
+    Vault a(tmp.path() / "a-vault.json", creds);
+    a.load();
+    VaultKey stored;
+    stored.name = "work";
+    stored.fingerprint = "SHA256:work";
+    const std::string storedId = a.addKeyText(stored, keyText).id;
+    VaultKey linked;
+    linked.name = "router";
+    linked.path = "C:/keys/router.ppk";
+    linked.fingerprint = "SHA256:router";
+    const std::string linkedId = a.addKeyFile(linked).id;
+    a.rememberPassphrase(linkedId, "pp-secret");
+    VaultLogin l;
+    l.name = "prod";
+    l.username = "deploy";
+    l.password = "stored";
+    l.keyId = storedId;
+    const std::string loginId = a.addLogin(l, std::string("hunter2")).id;
+
+    CHECK_THROWS(a.exportData("short", true));
+    const auto withSecrets = a.exportData("file password", true);
+    CHECK(withSecrets.keys == 2);
+    CHECK(withSecrets.logins == 1);
+    CHECK(withSecrets.secrets == 3);  // the key text, the passphrase, the login password
+    CHECK(withSecrets.text.find("EXPORTTEST") == std::string::npos);
+    CHECK(withSecrets.text.find("hunter2") == std::string::npos);
+    CHECK(withSecrets.text.find("router") == std::string::npos);  // even names and paths are inside the sealed part
+    const auto noSecrets = a.exportData("file password", false);
+    CHECK(noSecrets.secrets == 1);  // a stored key's text is the key itself: always in
+
+    // Another computer: a fresh store with a master password, unlocked.
+    Credentials creds2(tmp.path() / "b-credentials.json");
+    creds2.load();
+    Vault b(tmp.path() / "b-vault.json", creds2);
+    b.load();
+    VaultKey clash;
+    clash.name = "work";  // a different key with the same name: the imported one is renamed
+    clash.path = "C:/other";
+    b.addKeyFile(clash);
+    b.setMaster("master password");
+    CHECK_THROWS_WITH(b.importData(withSecrets.text, "wrong password"), Catch::Matchers::ContainsSubstring("Wrong password"));
+    CHECK_THROWS_WITH(b.importData("{\"hello\":1}", "file password"), Catch::Matchers::ContainsSubstring("Not a Credentials file"));
+    b.lock();
+    CHECK_THROWS_AS(b.importData(withSecrets.text, "file password"), VaultLocked);
+    CHECK(b.listLogins().empty());  // nothing half done
+    REQUIRE(b.unlock("master password"));
+
+    const auto r = b.importData(withSecrets.text, "file password");
+    CHECK(r.keysAdded == 2);
+    CHECK(r.loginsAdded == 1);
+    CHECK(r.secrets == 3);
+    REQUIRE(r.renamed.size() == 1);
+    CHECK(r.renamed[0] == "key work → work (2)");
+    CHECK(b.get(storedId)->name == "work (2)");  // the id is kept: sessions that use it find it
+    CHECK(b.storedKeyText(storedId) == keyText);
+    CHECK(creds2.get(Vault::secretKey(storedId))->rfind("mp1:", 0) == 0);  // sealed with this store's master password
+    CHECK(b.passphrase(linkedId) == std::string("pp-secret"));
+    CHECK(b.getLogin(loginId)->keyId == storedId);
+    CHECK(b.loginPassword(loginId) == std::string("hunter2"));
+
+    // Again: everything is already here.
+    const auto again = b.importData(withSecrets.text, "file password");
+    CHECK(again.keysAdded == 0);
+    CHECK(again.keysSkipped == 2);
+    CHECK(again.loginsSkipped == 1);
+
+    // Without its secrets, a login that stored its password asks for it.
+    Credentials creds3(tmp.path() / "c-credentials.json");
+    creds3.load();
+    Vault c(tmp.path() / "c-vault.json", creds3);
+    c.load();
+    c.importData(noSecrets.text, "file password");
+    CHECK(c.getLogin(loginId)->password == "ask");
+    CHECK_FALSE(c.passphrase(linkedId).has_value());
+    CHECK(c.storedKeyText(storedId) == keyText);
 }

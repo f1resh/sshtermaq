@@ -21,7 +21,7 @@ export interface ConnListener {
 }
 
 /** Kinds rendered inside the pane (hostkey / confirm prompts are rendered globally by the dialogs module). */
-export const PANE_PROMPT_KINDS: ReadonlySet<PromptRequest['kind']> = new Set(['username', 'password', 'kbdint', 'passphrase']);
+export const PANE_PROMPT_KINDS: ReadonlySet<PromptRequest['kind']> = new Set(['username', 'password', 'kbdint', 'passphrase', 'unlock']);
 
 const MAX_PENDING_CHARS = 1 << 20;
 

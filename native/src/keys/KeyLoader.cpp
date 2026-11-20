@@ -6,14 +6,32 @@
 
 namespace st {
 
+namespace {
+ssh_key loadFromText(const std::string& text, const std::string& path, const PassphraseCallback& askPassphrase,
+                     std::string& error);
+}  // namespace
+
 ssh_key loadPrivateKey(const std::string& path, const PassphraseCallback& askPassphrase, std::string& error) {
-    using namespace keys;
-    auto content = readKeyFile(path);
+    auto content = keys::readKeyFile(path);
     if (!content) {
         error = "Cannot read key file";
         return nullptr;
     }
-    ScopedWipe wc(*content);
+    keys::ScopedWipe wc(*content);
+    return loadFromText(*content, path, askPassphrase, error);
+}
+
+ssh_key loadPrivateKeyText(const std::string& content, const PassphraseCallback& askPassphrase, std::string& error) {
+    return loadFromText(content, "", askPassphrase, error);
+}
+
+namespace {
+
+/** `path`: the key file (for a "<path>.pub" sidecar of PPK files), or "" for key text. */
+ssh_key loadFromText(const std::string& text, const std::string& path, const PassphraseCallback& askPassphrase,
+                     std::string& error) {
+    using namespace keys;
+    const std::string* content = &text;
     const KeyFormat fmt = detectFormat(*content);
 
     if (fmt == KeyFormat::OpenSsh || fmt == KeyFormat::Pem) {
@@ -60,6 +78,8 @@ ssh_key loadPrivateKey(const std::string& path, const PassphraseCallback& askPas
     error = "Unsupported key format";
     return nullptr;
 }
+
+}  // namespace
 
 std::string detectKeyFormat(const std::string& fileContent) { return keys::formatName(keys::detectFormat(fileContent)); }
 

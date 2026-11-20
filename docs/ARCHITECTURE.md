@@ -10,7 +10,8 @@ SSHTermaq (C++20; Windows: Win32 + WebView2; macOS: AppKit + WKWebView)
 │              core bridge handlers, CLI, embedded UI table, build info (the window, WebView2 host, WinMain,
 │              single instance and dialogs: platform/ui)
 ├─ bridge/     JSON message router  <── web view messages ──>  UI (React + xterm.js, ui/)
-├─ store/      sessions.json, settings.json, state.json, known_hosts.json, credentials.json (DPAPI)
+├─ store/      sessions.json, settings.json, state.json, known_hosts.json, credentials.json (DPAPI), vault.json
+│              (Credentials: keys as links or stored, encrypted, text)
 ├─ session/    SessionManager: connections, charset, local echo/edit (ldisc), session logging, prompts
 ├─ transport/  Telnet, Rlogin, Raw, Serial, Local (a shell in a pseudo-terminal)  (+ TransportFactory)
 ├─ net/        Winsock helpers, proxies (SOCKS4/4a/5, HTTP, Telnet, local command, SSH jump)
@@ -159,9 +160,10 @@ breaks existing installs. Change one only with a migration that reads the old va
 |---|---|---|
 | DPAPI entropy `SSHTermaq/credentials/v1:6f1d…` (Windows) | `native/src/platform/win/sys/SecretWin.cpp` | every saved password and encrypted proxy password becomes unreadable |
 | Keychain item: service `SSHTermaq`, account `credentials-key` (macOS) | `native/src/platform/mac/sys/SecretMac.cpp` | the same: the key is not found, saved passwords are lost |
+| Secret names in `credentials.json`: `session:<id>:password`, `vault:key:<id>` (a stored key of Credentials), `vault:key:<id>:passphrase` (a key's remembered passphrase), `vault:login:<id>:password` (a login's stored password), `vault:master` (the master password record: Argon2id parameters, salt, check value); with a master password each Credentials secret is `mp1:` + base64(AES-256-GCM nonce, ciphertext, tag; the secret's name as associated data). The exported Credentials file (`*.sshtcred`): `{"format": "SSHTermaq credentials", "version": 1, "kdf": {argon2id m t p salt}, "cipher": "aes-256-gcm", "data"}`, its payload sealed with "SSHTermaq credentials v1" as associated data | `native/src/store/Credentials.h`, `native/src/store/Vault.h` | saved passwords, stored keys, remembered passphrases and logins' passwords are no longer found or no longer open; old exported files no longer import |
 | `enc:` prefix of encrypted proxy passwords | `native/src/store/Store.cpp` | stored proxy passwords are read as plain text |
 | Data folder `SSHTermaq` (`%APPDATA%\SSHTermaq`, `~/Library/Application Support/SSHTermaq`), portable `portable.flag` / `data` next to the exe, `SSHTERMAQ_DATA_DIR` | `native/src/app/Paths.cpp` | sessions, settings and known hosts are not found; portable copies and scripts stop working |
-| Data file names `sessions.json`, `settings.json`, `state.json`, `known_hosts.json`, `credentials.json` and their `version` fields | `native/src/store/Store.cpp` | the same; a format change needs a version bump and a reader for the old version |
+| Data file names `sessions.json`, `settings.json`, `state.json`, `known_hosts.json`, `credentials.json`, `vault.json` and their `version` fields | `native/src/store/Store.cpp` | the same; a format change needs a version bump and a reader for the old version |
 | JSON field names and enum values of `SessionConfig` / `AppSettings` | `ui/src/shared/types.ts`, `native/src/core/Types.h` | saved sessions and settings lose those values (they are stored as these names) |
 | Backup format tag `sshtermaq-sessions` | `native/src/importers/Importers.cpp` | exported backups no longer import |
 | Partial download suffix `.st-partial` | `native/src/sftp/TransferEngine.cpp` | interrupted downloads no longer resume |

@@ -88,7 +88,8 @@ test.describe('file manager', () => {
     await expect(item(local, `${docs}${sep}deploy.sh`)).toBeVisible();
     await expect(item(server, `${HOME}/deploy.sh`)).toHaveCount(0);
     await expect(queue(app).locator('.fm-transfer', { hasText: 'deploy.sh' }).locator('.fm-tag')).toHaveText('move');
-    await expect(queue(app)).toContainText('All done');
+    await expect(queue(app)).toContainText(/All done · .+ in \d/);
+    await expect(queue(app).locator('.fm-transfer', { hasText: 'report.pdf' }).locator('.fm-transfer__meta')).toHaveText(/^Done · .+ in \d/);
   });
 
   test('a conflict asks; the toolbar choice "skip" answers without asking', async ({ app, os }) => {

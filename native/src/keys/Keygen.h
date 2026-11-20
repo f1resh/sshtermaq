@@ -25,6 +25,13 @@ KeygenResult generateKey(const KeygenRequest& req);
 KeyInfo inspectKey(const std::string& path, const std::string& passphrase);
 
 /**
+ * The same for key text (pasted, or stored in Credentials). `path` is only used to look for a "<path>.pub" sidecar
+ * ("" = none) and is copied into KeyInfo::path. Throws "Not a recognised private key file" for junk; for a public key
+ * "This is a public key: paste the private key".
+ */
+KeyInfo inspectKeyText(const std::string& content, const std::string& path, const std::string& passphrase);
+
+/**
  * Converts a private key file to `to` = "openssh" | "ppk" (PPK v3) and returns the new file content.
  * `passphrase` decrypts the input; an encrypted input stays encrypted with the same passphrase.
  */

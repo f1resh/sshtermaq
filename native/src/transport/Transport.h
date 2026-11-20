@@ -24,6 +24,7 @@ namespace st {
 
 class KnownHosts;
 class Credentials;
+class Vault;
 class Prompter;
 class SshTransport;
 
@@ -79,6 +80,8 @@ struct TransportContext {
     Prompter* prompter = nullptr;
     KnownHosts* knownHosts = nullptr;
     Credentials* credentials = nullptr;
+    /** Keys of Credentials (ssh.auth.keyId). */
+    Vault* vault = nullptr;
     /** Look up a saved session by id (jump hosts). Thread-safe. */
     std::function<std::optional<SessionConfig>(const std::string& id)> resolveSession;
 };

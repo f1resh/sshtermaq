@@ -31,6 +31,7 @@ import { isFinal, useFiles } from '@/components/files/filesStore';
 import { listAction, listShortcut, ownKeys, type ListAction } from '@/components/files/listKeys';
 import { fmtDate, fmtSize, nameError, remote, sortItems, type FileItem, type SortKey } from '@/components/files/paths';
 import { fromRemote } from '@/components/files/sources';
+import { finishedText, finishedTitle } from '@/components/files/transferTimes';
 import { useSettings } from '@/store/data';
 import { confirmDialog, inputDialog } from '@/store/ui';
 import { useWorkspace } from '@/store/workspace';
@@ -507,16 +508,8 @@ export function SftpPanel({ paneId, visible, onClose }: SftpPanelProps) {
                       <span className="sftp__transfer-name" title={t.direction === 'upload' ? t.localPath : t.remotePath}>
                         {t.name}
                       </span>
-                      <span className="sftp__transfer-meta">
-                        {t.state === 'running'
-                          ? `${Math.round(pct)}%${rate}`
-                          : t.state === 'error'
-                            ? 'Failed'
-                            : t.state === 'cancelled'
-                              ? 'Cancelled'
-                              : t.state === 'queued'
-                                ? 'Queued'
-                                : fmtSize(t.total)}
+                      <span className="sftp__transfer-meta" title={t.error || finishedTitle(t) || undefined}>
+                        {t.state === 'running' ? `${Math.round(pct)}%${rate}` : t.state === 'queued' ? 'Queued' : finishedText(t)}
                       </span>
                       {!isFinal(t) && (
                         <IconButton size="sm" label="Cancel" onClick={() => api.sftp.cancelTransfer(t.transferId)}>

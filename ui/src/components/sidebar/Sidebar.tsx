@@ -26,6 +26,7 @@ import {
   SlidersHorizontal,
   SquarePlus,
   Trash2,
+  UserRound,
   X
 } from 'lucide-react';
 import { api } from '@/bridge/api';
@@ -42,10 +43,12 @@ import {
   moveSessions,
   newSessionDraft,
   renameFolder,
-  renameSession
+  renameSession,
+  setSessionsLogin
 } from '@/commands/actions';
 import { runCommand } from '@/commands/commands';
 import { useSessions, useSettings } from '@/store/data';
+import { initVault, useVault } from '@/store/vault';
 import { useUi } from '@/store/ui';
 import { useWorkspace } from '@/store/workspace';
 import { sessionLabel } from '@shared/defaults';
@@ -106,11 +109,35 @@ function sessionMenu(s: SessionConfig): MenuItem[] {
       icon: <FolderInput size={14} />,
       submenu: moveToFolderItems((f) => void moveSessions([s], f), (f) => f === s.folder)
     },
+    ...loginMenu([s]),
     { type: 'separator' },
     { label: 'Export to PuTTY .reg…', icon: <Download size={14} />, onClick: () => void exportSessions([s.id], 'reg') },
     { label: 'Export JSON…', icon: <FileJson size={14} />, onClick: () => void exportSessions([s.id], 'json') },
     { type: 'separator' },
     { label: 'Delete', icon: <Trash2 size={14} />, shortcut: 'Del', danger: true, onClick: () => void deleteSessions([s]) }
+  ];
+}
+
+/**
+ * "Use login ›": the Credentials logins for these SSH sessions, plus "This session's settings"; a check mark when all of
+ * them use the same one. Empty (no item) when none of the sessions is SSH.
+ */
+function loginMenu(sessions: SessionConfig[]): MenuItem[] {
+  const ssh = sessions.filter((s) => s.protocol === 'ssh');
+  if (!ssh.length) return [];
+  const logins = useVault.getState().logins;
+  const same = (id: string) => ssh.every((s) => (s.ssh.auth.loginId ?? '') === id);
+  return [
+    {
+      label: ssh.length > 1 ? `Use login for ${ssh.length} SSH sessions` : 'Use login',
+      icon: <UserRound size={14} />,
+      submenu: [
+        { label: "This session's settings", checked: same(''), onClick: () => void setSessionsLogin(ssh, '') },
+        ...(logins.length ? [{ type: 'separator' as const }] : []),
+        ...logins.map((l) => ({ label: `${l.name} (${l.username})`, checked: same(l.id), onClick: () => void setSessionsLogin(ssh, l.id) })),
+        ...(logins.length ? [] : [{ type: 'header' as const, label: 'No logins yet: Settings › Credentials' }])
+      ]
+    }
   ];
 }
 
@@ -126,6 +153,7 @@ function folderMenu(path: string): MenuItem[] {
       icon: <FolderInput size={14} />,
       submenu: moveToFolderItems((f) => void moveFolder(path, f), (f) => isWithin(f, path) || f === parentFolder(path))
     },
+    ...loginMenu(inside),
     { type: 'separator' },
     {
       label: `Export ${inside.length} session${inside.length === 1 ? '' : 's'} to PuTTY .reg…`,
@@ -210,6 +238,7 @@ function useOpenSessionStatus(): Map<string, string> {
 /* -------------------------------------------------------------------------- */
 
 export function Sidebar() {
+  useEffect(initVault, []);  // the logins for the "Use login" menus
   const sessions = useSessions((s) => s.sessions);
   const folders = useSessions((s) => s.folders);
   const loaded = useSessions((s) => s.loaded);

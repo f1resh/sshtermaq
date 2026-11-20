@@ -103,9 +103,16 @@ PromptInput kbdint(const std::string& title, const std::string& name, const std:
     return p;
 }
 
-PromptInput passphrase(const std::string& title, const std::string& keyPath, const std::string& message) {
+PromptInput unlock(const std::string& title, const std::string& message) {
     PromptInput p;
-    p.json = {{"kind", "passphrase"}, {"title", title}, {"keyPath", keyPath}};
+    p.json = {{"kind", "unlock"}, {"title", title}};
+    if (!message.empty()) p.json["message"] = message;
+    return p;
+}
+
+PromptInput passphrase(const std::string& title, const std::string& keyPath, const std::string& message, bool allowSave) {
+    PromptInput p;
+    p.json = {{"kind", "passphrase"}, {"title", title}, {"keyPath", keyPath}, {"allowSave", allowSave}};
     if (!message.empty()) p.json["message"] = message;
     return p;
 }

@@ -1,6 +1,6 @@
 import { createDefaultSession, createDefaultSettings, deepMerge, normalizeFolder, normalizeSession } from '@shared/defaults';
 import { isMac } from '@shared/platform';
-import type { AppSettings, KnownHost, SessionConfig } from '@shared/types';
+import type { AppSettings, KnownHost, SessionConfig, VaultKey, VaultLogin } from '@shared/types';
 import type { MockContext } from './index';
 
 const LS_KEY = 'sshtermaq.mock.v1';
@@ -12,6 +12,19 @@ interface MockDb {
   knownHosts: KnownHost[];
   state: Record<string, unknown>;
   passwords: Record<string, string>;
+  /** Credentials' keys; a stored key's text and a remembered passphrase beside it (the real host keeps both
+   *  encrypted). Absent in older mock data. */
+  vault?: MockVaultEntry[];
+  /** Credentials' logins; a stored password beside it. */
+  vaultLogins?: { login: VaultLogin; password?: string }[];
+  /** The master password of Credentials (the real host keeps only a derived check value). */
+  vaultMaster?: string;
+}
+
+export interface MockVaultEntry {
+  key: VaultKey;
+  text?: string;
+  passphrase?: string;
 }
 
 function seed(): MockDb {
@@ -30,8 +43,87 @@ function seed(): MockDb {
     settings: createDefaultSettings(),
     knownHosts: [],
     state: {},
-    passwords: {}
+    passwords: {},
+    vault: seedVault(),
+    vaultLogins: seedVaultLogins()
   };
+}
+
+/** One login so the page has one: deploy, stored password, the seeded "work-laptop" key. */
+export function seedVaultLogins(): NonNullable<MockDb['vaultLogins']> {
+  const now = Date.now() - 86_400_000;
+  return [
+    {
+      login: { id: 'login-deploy', name: 'deploy@prod', username: 'deploy', password: 'stored', keyId: 'vault-work-laptop', useAgent: false, createdAt: now, updatedAt: now },
+      password: 'secret'
+    }
+  ];
+}
+
+/** Two keys so the Credentials page has something: one stored (pasted earlier), one linked file. */
+export function seedVault(): NonNullable<MockDb['vault']> {
+  const now = Date.now() - 86_400_000;
+  const base = { format: 'openssh' as const, encrypted: false, createdAt: now, updatedAt: now };
+  return [
+    {
+      key: {
+        ...base,
+        id: 'vault-work-laptop',
+        name: 'work-laptop',
+        kind: 'stored',
+        path: '',
+        keyType: 'ssh-ed25519',
+        fingerprint: 'SHA256:Kx7mQ2vZp1d9YtLrN4sWc8bE3uHf6gJaO0iTqXyVnRk',
+        publicKeyOpenSsh: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMockWorkLaptopKeyForTheDemoOnly0000 me@work-laptop',
+        comment: 'me@work-laptop'
+      },
+      text: '-----BEGIN OPENSSH PRIVATE KEY-----\nmock\n-----END OPENSSH PRIVATE KEY-----\n'
+    },
+    {
+      key: {
+        ...base,
+        id: 'vault-router',
+        name: 'router',
+        kind: 'file',
+        path: isMac ? '/Users/demo/.ssh/router.ppk' : 'C:\\Users\\demo\\.ssh\\router.ppk',
+        format: 'ppk3',
+        keyType: 'ssh-rsa',
+        fingerprint: 'SHA256:Zt2pQ8wLmN5vB1cX7kJ3hG9fD4sA6eR0yUiOtPqWnMk',
+        publicKeyOpenSsh: 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQMockRouterKeyForTheDemoOnly admin@router',
+        comment: 'admin@router',
+        encrypted: true
+      },
+      passphrase: 'demo'
+    }
+  ];
+}
+
+/** Credentials are locked after each start (page load) when a master password is set, as in the app. */
+export const mockVaultState = { unlocked: false };
+export const mockVaultLocked = (): boolean => !!mockDb.vaultMaster && !mockVaultState.unlocked;
+export const LOCKED_MESSAGE = 'Credentials are locked: unlock them with the master password first';
+
+/** Whether a mock SSH connection needs a sealed secret: its stored key, the key's remembered passphrase, or its login's stored password. */
+export function mockNeedsUnlock(s: SessionConfig): boolean {
+  if (s.protocol !== 'ssh' || !mockVaultLocked()) return false;
+  const loginId = s.ssh.auth.loginId;
+  const login = loginId ? mockDb.vaultLogins?.find((e) => e.login.id === loginId) : undefined;
+  if (login?.login.password === 'stored') return true;
+  const keyId = loginId ? login?.login.keyId : s.ssh.auth.keyId;
+  const key = keyId ? mockDb.vault?.find((x) => x.key.id === keyId) : undefined;
+  return !!key && (key.key.kind === 'stored' || !!key.passphrase);
+}
+
+/**
+ * The Credentials key a mock SSH connection signs in with (its login's key, else its own keyId), when that key is
+ * passphrase protected and has no remembered passphrase: the mock connection asks for it, as the real one does.
+ */
+export function mockKeyToUnlock(s: SessionConfig): MockVaultEntry | undefined {
+  if (s.protocol !== 'ssh') return undefined;
+  const loginId = s.ssh.auth.loginId;
+  const keyId = loginId ? mockDb.vaultLogins?.find((e) => e.login.id === loginId)?.login.keyId : s.ssh.auth.keyId;
+  const e = keyId ? mockDb.vault?.find((x) => x.key.id === keyId) : undefined;
+  return e && e.key.encrypted && !e.passphrase ? e : undefined;
 }
 
 function load(): MockDb {
@@ -191,7 +283,13 @@ export function registerCoreMocks(ctx: MockContext): void {
   ctx.on('app:setBackgroundMaterial', () => undefined);
   ctx.on('app:setUiScale', () => undefined);
   ctx.on('app:beep', () => undefined);
-  ctx.handle('app:listFonts', () => []);
+  // The fonts a fresh system has (no JetBrains Mono, Fira Code, ...), so the font picker's "not installed" shows.
+  ctx.handle('app:listFonts', () =>
+    (isMac
+      ? [['Andale Mono', true], ['Arial', false], ['Courier New', true], ['Helvetica', false], ['Menlo', true], ['Monaco', true], ['SF Mono', true], ['Times New Roman', false]]
+      : [['Arial', false], ['Calibri', false], ['Cascadia Code', true], ['Cascadia Mono', true], ['Consolas', true], ['Courier New', true], ['Lucida Console', true], ['Segoe UI', false], ['Times New Roman', false]]
+    ).map(([family, monospace]) => ({ family, monospace }))
+  );
   ctx.on('app:toggleFullscreen', () => {
     if (document.fullscreenElement) void document.exitFullscreen();
     else void document.documentElement.requestFullscreen?.();

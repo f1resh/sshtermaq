@@ -1,5 +1,6 @@
 /**
- * In-pane authentication prompt card: username / password / keyboard-interactive / key passphrase.
+ * In-pane authentication prompt card: username / password / keyboard-interactive / key passphrase / the master
+ * password of Credentials ("Unlock Credentials").
  */
 import { useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff, KeyRound, Lock, User } from 'lucide-react';
@@ -20,6 +21,8 @@ function fieldsOf(p: PromptRequest): Field[] {
       return [{ label: p.username ? `Password for ${p.username}` : 'Password', secret: true }];
     case 'passphrase':
       return [{ label: 'Passphrase', secret: true }];
+    case 'unlock':
+      return [{ label: 'Master password', secret: true }];
     case 'kbdint':
       return p.prompts.map((q) => ({ label: q.prompt.trim().replace(/:$/, '') || 'Response', secret: !q.echo }));
     default:
@@ -47,7 +50,7 @@ export function PromptOverlay({ prompt, host, focusSignal = 0 }: { prompt: Promp
     if (focusSignal) firstRef.current?.focus();
   }, [focusSignal]);
 
-  const allowSave = (prompt.kind === 'password' || prompt.kind === 'kbdint') && prompt.allowSave;
+  const allowSave = (prompt.kind === 'password' || prompt.kind === 'kbdint' || prompt.kind === 'passphrase') && !!prompt.allowSave;
   const submit = () => respond(prompt.id, { cancelled: false, values, remember: allowSave ? remember : false });
   const cancel = () => respond(prompt.id, { cancelled: true });
 
@@ -118,13 +121,17 @@ export function PromptOverlay({ prompt, host, focusSignal = 0 }: { prompt: Promp
         ))}
 
         <div className="prompt-card__foot">
-          {allowSave ? <Checkbox checked={remember} onChange={setRemember} label="Remember password" /> : <span />}
+          {allowSave ? (
+            <Checkbox checked={remember} onChange={setRemember} label={prompt.kind === 'passphrase' ? 'Remember for this key' : 'Remember password'} />
+          ) : (
+            <span />
+          )}
           <div className="prompt-card__buttons">
             <Button size="sm" onClick={cancel}>
               Cancel
             </Button>
             <Button size="sm" variant="primary" type="submit">
-              {prompt.kind === 'username' ? 'Continue' : 'Log in'}
+              {prompt.kind === 'username' ? 'Continue' : prompt.kind === 'unlock' ? 'Unlock' : 'Log in'}
             </Button>
           </div>
         </div>

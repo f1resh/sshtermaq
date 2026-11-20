@@ -1,9 +1,26 @@
 #pragma once
 // Small crypto/encoding helpers on top of OpenSSL.
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
 namespace st::crypto {
+
+/**
+ * Argon2 (RFC 9106, version 0x13) via OpenSSL 3.2+ EVP_KDF. `variant`: "ARGON2ID", "ARGON2I" or "ARGON2D". False
+ * with `error` set on bad parameters or a failure; `out` is wiped then.
+ */
+bool argon2(const char* variant, std::string_view pass, std::string_view salt, uint32_t memoryKiB, uint32_t passes,
+            uint32_t lanes, size_t outLen, std::string& out, std::string& error);
+
+/** AES-256-GCM with a random 12-byte nonce: returns nonce | ciphertext | 16-byte tag. `aad` is authenticated too. */
+std::string aesGcmSeal(std::string_view key32, std::string_view plain, std::string_view aad);
+/** Opens what aesGcmSeal made; nullopt when the key, the data or the aad do not match. */
+std::optional<std::string> aesGcmOpen(std::string_view key32, std::string_view sealed, std::string_view aad);
+
+/** Overwrites the string's bytes (OPENSSL_cleanse) and clears it. */
+void cleanse(std::string& s);
 
 std::string sha256(std::string_view data);
 std::string sha1(std::string_view data);

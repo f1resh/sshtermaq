@@ -26,6 +26,7 @@ import { resolveLocalTarget, shellToOpen } from '@/components/quickconnect/local
 import { restoreWorkspace, startWorkspaceAutosave } from '@/store/workspacePersist';
 import { initConnEvents } from '@/terminal/connEvents';
 import { ThemeController } from '@/theme/ThemeController';
+import { UnlockHost } from '@/components/dialogs/credentials/MasterPassword';
 import type { OpenRequest } from '@shared/types';
 import './app.css';
 
@@ -157,6 +158,7 @@ export function App() {
       </div>
       {!fullscreen && <StatusBar />}
       <DialogHost />
+      <UnlockHost />
       <CommandPalette />
       <ContextMenuHost />
       <ToastHost />

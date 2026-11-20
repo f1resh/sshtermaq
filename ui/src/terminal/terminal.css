@@ -192,7 +192,7 @@
 .prompt-card__info {
   font-size: var(--fs-sm);
   color: var(--text-muted);
-  word-break: break-all;
+  overflow-wrap: anywhere;  /* long key paths break; words in messages stay whole */
 }
 .prompt-card__info pre {
   margin: 4px 0 0;

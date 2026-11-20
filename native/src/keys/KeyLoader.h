@@ -22,6 +22,9 @@ using PassphraseCallback = std::function<std::optional<std::string>(int attempt)
  */
 ssh_key loadPrivateKey(const std::string& path, const PassphraseCallback& askPassphrase, std::string& error);
 
+/** The same from the key text (a key stored in Credentials). Never looks for a "<path>.pub" file. */
+ssh_key loadPrivateKeyText(const std::string& content, const PassphraseCallback& askPassphrase, std::string& error);
+
 /** Detects the key file format without decrypting: 'openssh' | 'pem' | 'ppk2' | 'ppk3' | 'unknown'. */
 std::string detectKeyFormat(const std::string& fileContent);
 

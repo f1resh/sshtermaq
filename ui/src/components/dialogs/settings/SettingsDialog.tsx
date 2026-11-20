@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Brush,
+  KeySquare,
   Database,
   FileUp,
   FolderOpen,
@@ -38,18 +39,20 @@ import type { AppSettings, ColorScheme, CommandId, DeepPartial, KnownHost } from
 import { AboutContent } from '../about/AboutContent';
 import { ColorSwatches, FormField, NavList, SegmentedControl, Section, SettingRow, Slider, ToggleRow, type NavItem } from '../common/controls';
 import { FontPicker } from '../common/FontPicker';
+import { CredentialsPage } from '../credentials/CredentialsPage';
 import { errorMessage } from '../common/hooks';
 import { SchemeCard } from '../common/SchemeCard';
 import { ANSI_KEYS, TerminalSample } from '../common/SchemePreview';
 import './settings.css';
 
-type SectionId = 'appearance' | 'terminal' | 'behavior' | 'files' | 'keys' | 'schemes' | 'hosts' | 'defaults' | 'data' | 'about';
+type SectionId = 'appearance' | 'terminal' | 'behavior' | 'files' | 'credentials' | 'keys' | 'schemes' | 'hosts' | 'defaults' | 'data' | 'about';
 
 const NAV: NavItem[] = [
   { id: 'appearance', label: 'Appearance', icon: <Brush size={15} /> },
   { id: 'terminal', label: 'Terminal', icon: <SquareTerminal size={15} /> },
   { id: 'behavior', label: 'Behavior', icon: <MousePointerClick size={15} /> },
   { id: 'files', label: 'File manager', icon: <FolderOpen size={15} /> },
+  { id: 'credentials', label: 'Credentials', icon: <KeySquare size={15} /> },
   { id: 'keys', label: 'Keybindings', icon: <Keyboard size={15} /> },
   { id: 'schemes', label: 'Color schemes', icon: <Palette size={15} /> },
   { id: 'hosts', label: 'Known hosts', icon: <ShieldCheck size={15} /> },
@@ -71,6 +74,7 @@ export function SettingsDialog({ initialSection, onClose }: { initialSection?: s
     terminal: <TerminalPage />,
     behavior: <BehaviorPage />,
     files: <FilesPage />,
+    credentials: <CredentialsPage />,
     keys: <KeybindingsPage />,
     schemes: <SchemesPage />,
     hosts: <KnownHostsPage />,
@@ -708,7 +712,10 @@ function DataPage() {
         </FormField>
       </Section>
       <Section title="Backup">
-        <SettingRow label="Export all sessions" description="Passwords are never exported.">
+        <SettingRow
+          label="Export all sessions"
+          description="Passwords are never exported. Sessions keep which key or login from Credentials they use: export Credentials (Settings › Credentials) to take those along."
+        >
           <Button
             size="sm"
             icon={<Save size={13} />}

@@ -53,8 +53,18 @@ private:
     int tryKeyFile(ssh_session s, bool& cancelled);
     int tryKbdInt(ssh_session s, bool& cancelled);
     int tryPassword(ssh_session s, bool& cancelled);
-    /** Saved (or one-time) password not yet tried. */
-    std::optional<std::string> takeStoredPassword();
+    /** Saved (or one-time) password not yet tried. `cancelled`: the user cancelled unlocking Credentials for it. */
+    std::optional<std::string> takeStoredPassword(bool& cancelled);
+    /**
+     * Credentials are locked (a master password) and a secret is needed: asks for the master password ("Unlock
+     * Credentials") until it is right or the user cancels (then `cancelled`). Several connections at once ask once:
+     * the others wait and go on unlocked. True when unlocked (or nothing to unlock).
+     */
+    bool ensureUnlocked(bool& cancelled);
+    /** A login from Credentials (ssh.auth.loginId) replaces the user name and sign-in methods of cfg_. */
+    void applyLogin();
+    /** Whether the password prompts offer "remember" (a session's own password; never with a login). */
+    bool canRemember() const { return loginId_.empty() && !cfg_.id.empty(); }
 
     const TransportContext& ctx_;
     SessionConfig cfg_;
@@ -63,6 +73,12 @@ private:
     std::string user_;
     std::string serverInfo_;
     bool storedPasswordUsed_ = false;
+    /** The login in use ("" = the session's own settings), its name for logs, its password mode. */
+    std::string loginId_;
+    std::string loginName_;
+    std::string loginPassword_;  // 'stored' | 'ask' | 'none'
+    /** ssh.auth.loginId names a login that no longer exists: told once, then the session's own settings. */
+    bool loginMissing_ = false;
     bool bannerShown_ = false;
     std::unique_ptr<AgentRelay> agentRelay_;
 };

@@ -6,9 +6,12 @@
 #include "session/Prompter.h"
 #include "ssh/SshAgent.h"
 #include "store/Credentials.h"
+#include "keys/SshWire.h"
 #include "store/KnownHosts.h"
+#include "store/Vault.h"
 
 #include <algorithm>
+#include <chrono>
 
 namespace st::ssh {
 
@@ -29,7 +32,29 @@ std::string joinList(const std::vector<std::string>& v) { return join(v, ","); }
 
 SshConnector::SshConnector(const TransportContext& ctx, const SessionConfig& session, std::string logPrefix,
                            const std::atomic<bool>& cancel)
-    : ctx_(ctx), cfg_(session), prefix_(std::move(logPrefix)), cancel_(cancel), user_(session.username) {}
+    : ctx_(ctx), cfg_(session), prefix_(std::move(logPrefix)), cancel_(cancel), user_(session.username) {
+    applyLogin();
+}
+
+void SshConnector::applyLogin() {
+    const std::string id = cfg_.ssh.auth.loginId;
+    if (id.empty()) return;
+    const auto login = ctx_.vault ? ctx_.vault->getLogin(id) : std::nullopt;
+    if (!login) {
+        loginMissing_ = true;  // reported when connecting; the session's own settings stay
+        return;
+    }
+    loginId_ = login->id;
+    loginName_ = login->name;
+    loginPassword_ = login->password;
+    cfg_.username = login->username;
+    user_ = login->username;
+    auto& a = cfg_.ssh.auth;
+    a.keyId = login->keyId;
+    a.privateKeyPath.clear();
+    a.tryAgent = login->useAgent;
+    a.password = a.keyboardInteractive = login->password != "none";
+}
 
 SshConnector::~SshConnector() = default;
 
@@ -160,6 +185,12 @@ bool SshConnector::establish(ssh_session s, sys::SocketHandle sock, int logLevel
 
     if (!verifyHostKey(s, r.error, r.cancelled)) return false;
 
+    if (loginMissing_) {
+        log(LogLevel::Warn, "The login chosen from Credentials no longer exists; using this session's own settings");
+        local("The login chosen from Credentials no longer exists (deleted?): using this session's own settings.\n");
+    } else if (!loginId_.empty()) {
+        log(LogLevel::Info, "Signing in with login \"" + loginName_ + "\" from Credentials");
+    }
     if (user_.empty()) {
         if (!ctx_.prompter) {
             r.error = "No user name specified";
@@ -233,10 +264,62 @@ bool SshConnector::verifyHostKey(ssh_session s, std::string& error, bool& cancel
     return true;
 }
 
-std::optional<std::string> SshConnector::takeStoredPassword() {
+bool SshConnector::ensureUnlocked(bool& cancelled) {
+    if (!ctx_.vault || !ctx_.vault->locked()) return true;
+    // One prompt for every connection that needs it now (e.g. restored tabs): the others wait here, then go on.
+    std::unique_lock wait(ctx_.vault->unlockPromptMutex(), std::defer_lock);
+    while (!wait.try_lock_for(std::chrono::milliseconds(100))) {
+        if (cancel_) {
+            cancelled = true;
+            return false;
+        }
+    }
+    if (!ctx_.vault->locked()) return true;
+    log(LogLevel::Info, "Credentials are locked: asking for the master password");
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        if (!ctx_.prompter) break;
+        PromptResponse pr = ctx_.prompter->prompt(
+            prompts::unlock("Unlock Credentials", attempt > 0 ? "Wrong master password, try again."
+                                                              : "Enter the master password of Credentials. It is asked once until the app quits or you lock them."));
+        if (pr.cancelled || pr.values.empty()) {
+            cancelled = true;
+            log(LogLevel::Info, "Unlocking Credentials cancelled");
+            return false;
+        }
+        std::string pw = pr.values[0];
+        bool ok = false;
+        try {
+            ok = ctx_.vault->unlock(pw);
+        } catch (const std::exception& e) {
+            wipe(pw);
+            log(LogLevel::Warn, std::string("Cannot unlock Credentials: ") + e.what());
+            local(std::string("Cannot unlock Credentials: ") + e.what() + "\n");
+            return false;
+        }
+        wipe(pw);
+        if (ok) {
+            log(LogLevel::Info, "Credentials unlocked");
+            return true;
+        }
+        log(LogLevel::Info, "Wrong master password");
+    }
+    local("Credentials are locked: unlock them in Settings › Credentials.\n");
+    return false;
+}
+
+std::optional<std::string> SshConnector::takeStoredPassword(bool& cancelled) {
     if (storedPasswordUsed_) return std::nullopt;
     storedPasswordUsed_ = true;
     if (!ctx_.oneTimePassword.empty() && cfg_.id == ctx_.session.id) return ctx_.oneTimePassword;
+    if (!loginId_.empty()) {
+        if (loginPassword_ != "stored" || !ctx_.vault) return std::nullopt;
+        if (ctx_.vault->needsUnlock(Vault::loginSecretKey(loginId_)) && !ensureUnlocked(cancelled)) return std::nullopt;
+        try {
+            return ctx_.vault->loginPassword(loginId_);
+        } catch (const VaultLocked&) {
+            return std::nullopt;  // locked again meanwhile: the password is asked
+        }
+    }
     if (ctx_.credentials && !cfg_.id.empty()) return ctx_.credentials->get(Credentials::passwordKey(cfg_.id));
     return std::nullopt;
 }
@@ -274,7 +357,8 @@ bool SshConnector::authenticate(ssh_session s, std::string& error, bool& cancell
         if (!agentTried && cfg_.ssh.auth.tryAgent && (methods & SSH_AUTH_METHOD_PUBLICKEY)) {
             agentTried = true;
             rc = tryAgent(s);
-        } else if (!keyTried && !cfg_.ssh.auth.privateKeyPath.empty() && (methods & SSH_AUTH_METHOD_PUBLICKEY)) {
+        } else if (!keyTried && (!cfg_.ssh.auth.keyId.empty() || !cfg_.ssh.auth.privateKeyPath.empty()) &&
+                   (methods & SSH_AUTH_METHOD_PUBLICKEY)) {
             keyTried = true;
             rc = tryKeyFile(s, cancelled);
         } else if (!kbdTried && cfg_.ssh.auth.keyboardInteractive && (methods & SSH_AUTH_METHOD_INTERACTIVE)) {
@@ -343,30 +427,102 @@ int SshConnector::tryAgent(ssh_session s) {
 }
 
 int SshConnector::tryKeyFile(ssh_session s, bool& cancelled) {
-    const std::string& path = cfg_.ssh.auth.privateKeyPath;
-    log(LogLevel::Info, "Reading key file \"" + path + "\"");
+    // Which key: one from Credentials (ssh.auth.keyId) wins over the session's own key file. A Credentials key is
+    // either a linked file (read from its path) or a stored key (its text, decrypted). Logs name the key, never its text.
+    std::string path, what, shown;
+    std::optional<std::string> text, remembered;
+    const std::string& keyId = cfg_.ssh.auth.keyId;
+    if (!keyId.empty()) {
+        const auto entry = ctx_.vault ? ctx_.vault->get(keyId) : std::nullopt;
+        if (!entry) {
+            log(LogLevel::Warn, "The key chosen from Credentials no longer exists");
+            local("The key chosen from Credentials no longer exists (deleted?). Choose another one in the session's settings.\n");
+            return SSH_AUTH_DENIED;
+        }
+        what = "key \"" + entry->name + "\" from Credentials";
+        shown = entry->name;
+        if (entry->kind == "file") {
+            path = entry->path;
+        } else {
+            if (ctx_.vault->needsUnlock(Vault::secretKey(keyId)) && !ensureUnlocked(cancelled)) return SSH_AUTH_DENIED;
+            try {
+                text = ctx_.vault->storedKeyText(keyId);
+            } catch (const VaultLocked&) {
+                local("Credentials are locked: " + what + " cannot be read.\n");
+                return SSH_AUTH_DENIED;
+            }
+            if (!text) {
+                log(LogLevel::Warn, "Cannot decrypt " + what + " on this computer");
+                local("Cannot decrypt " + what + " on this computer (it was saved by another user or computer).\n");
+                return SSH_AUTH_DENIED;
+            }
+        }
+        if (ctx_.vault->needsUnlock(Vault::passphraseSecretKey(keyId)) && !ensureUnlocked(cancelled)) return SSH_AUTH_DENIED;
+        try {
+            remembered = ctx_.vault->passphrase(keyId);
+        } catch (const VaultLocked&) {
+            remembered.reset();  // locked again meanwhile: the passphrase is asked
+        }
+    } else {
+        path = cfg_.ssh.auth.privateKeyPath;
+        what = "key file \"" + path + "\"";
+        shown = path;
+    }
+    std::string none, typed;
+    keys::ScopedWipe wipeText(text ? *text : none);  // the decrypted key text is wiped when this attempt ends
+    keys::ScopedWipe wipeTyped(typed);
+    keys::ScopedWipe wipeRemembered(remembered ? *remembered : none);
+    log(LogLevel::Info, "Reading " + what + (text || path == shown ? "" : " (" + path + ")"));
     std::string error;
-    ssh_key key = loadPrivateKey(
-        path,
-        [&](int attempt) -> std::optional<std::string> {
-            if (!ctx_.prompter) return std::nullopt;
-            PromptResponse pr = ctx_.prompter->prompt(
-                prompts::passphrase("Passphrase for key", path, attempt > 1 ? "Wrong passphrase, try again." : ""));
-            if (pr.cancelled || pr.values.empty()) return std::nullopt;
-            return pr.values[0];
-        },
-        error);
+    // A remembered passphrase (a key from Credentials) is tried first, without asking; one that no longer works (the
+    // file was replaced, the passphrase changed) is forgotten and the user is asked. "Remember for this key" is
+    // offered for a Credentials key only and saved once the key has opened with what was typed.
+    bool usedRemembered = false, rememberTyped = false;
+    auto ask = [&](int attempt) -> std::optional<std::string> {
+        if (attempt == 1 && remembered) {
+            usedRemembered = true;
+            log(LogLevel::Info, "Using the remembered passphrase");
+            return *remembered;
+        }
+        std::string message = attempt > 1 ? "Wrong passphrase, try again." : "";
+        if (usedRemembered && attempt == 2) {
+            ctx_.vault->forgetPassphrase(keyId);
+            log(LogLevel::Warn, "The remembered passphrase no longer opens the key: forgotten");
+            message = "The remembered passphrase no longer opens this key. Enter it again.";
+        }
+        if (!ctx_.prompter) return std::nullopt;
+        PromptResponse pr = ctx_.prompter->prompt(prompts::passphrase("Passphrase for key", shown, message, !keyId.empty()));
+        if (pr.cancelled || pr.values.empty()) return std::nullopt;
+        wipe(typed);
+        typed = pr.values[0];
+        rememberTyped = pr.remember && !keyId.empty();
+        return typed;
+    };
+    ssh_key key = text ? loadPrivateKeyText(*text, ask, error) : loadPrivateKey(path, ask, error);
+    if (key && rememberTyped && !typed.empty() && ctx_.vault) {
+        bool unlockCancelled = false;  // not remembering it is no reason to stop the connection
+        if (!ensureUnlocked(unlockCancelled)) {
+            log(LogLevel::Info, "The passphrase was not remembered: Credentials stay locked");
+        } else {
+            try {
+                ctx_.vault->rememberPassphrase(keyId, typed);
+                log(LogLevel::Info, "Passphrase remembered for " + what);
+            } catch (const std::exception& e) {
+                log(LogLevel::Warn, std::string("Could not remember the passphrase: ") + e.what());
+            }
+        }
+    }
     if (!key) {
         if (error == "Cancelled") {
             cancelled = true;
             return SSH_AUTH_DENIED;
         }
-        log(LogLevel::Warn, "Unable to use key file \"" + path + "\": " + error);
-        local("Unable to use key file \"" + path + "\" (" + error + ")\n");
+        log(LogLevel::Warn, "Unable to use " + what + ": " + error);
+        local("Unable to use " + what + " (" + error + ")\n");
         return SSH_AUTH_DENIED;
     }
     KeyPtr owned(key);
-    log(LogLevel::Info, "Trying public key authentication with \"" + path + "\"");
+    log(LogLevel::Info, "Trying public key authentication with " + what);
     const int rc = ssh_userauth_publickey(s, nullptr, owned.get());
     if (rc == SSH_AUTH_DENIED) {
         log(LogLevel::Info, "Server refused our key");
@@ -392,12 +548,13 @@ int SshConnector::tryKbdInt(ssh_session s, bool& cancelled) {
         std::vector<std::string> answers;
         bool remember = false;
         if (n == 1 && !items[0].echo) {
-            if (auto stored = takeStoredPassword()) answers.push_back(*stored);
+            if (auto stored = takeStoredPassword(cancelled)) answers.push_back(*stored);
+            if (cancelled) return SSH_AUTH_DENIED;
         }
         if (n > 0 && answers.empty()) {
             if (!ctx_.prompter) return SSH_AUTH_DENIED;
             PromptResponse pr = ctx_.prompter->prompt(prompts::kbdint(name.empty() ? "Keyboard-interactive authentication" : name,
-                                                                      name, instruction, items, !cfg_.id.empty()));
+                                                                      name, instruction, items, canRemember()));
             if (pr.cancelled) {
                 cancelled = true;
                 return SSH_AUTH_DENIED;
@@ -410,7 +567,7 @@ int SshConnector::tryKbdInt(ssh_session s, bool& cancelled) {
             ssh_userauth_kbdint_setanswer(s, static_cast<unsigned>(i), a.c_str());
         }
         rc = ssh_userauth_kbdint(s, nullptr, nullptr);
-        if (rc == SSH_AUTH_SUCCESS && remember && n == 1 && !items[0].echo && ctx_.credentials && !cfg_.id.empty() &&
+        if (rc == SSH_AUTH_SUCCESS && remember && canRemember() && n == 1 && !items[0].echo && ctx_.credentials &&
             !answers.empty()) {
             ctx_.credentials->set(Credentials::passwordKey(cfg_.id), answers[0]);
             log(LogLevel::Info, "Password saved");
@@ -423,12 +580,13 @@ int SshConnector::tryKbdInt(ssh_session s, bool& cancelled) {
 
 int SshConnector::tryPassword(ssh_session s, bool& cancelled) {
     for (int attempt = 0; attempt < 3; ++attempt) {
-        std::optional<std::string> pw = takeStoredPassword();
+        std::optional<std::string> pw = takeStoredPassword(cancelled);
+        if (cancelled) return SSH_AUTH_DENIED;
         bool remember = false;
         if (!pw) {
             if (!ctx_.prompter) return SSH_AUTH_DENIED;
             PromptResponse pr = ctx_.prompter->prompt(
-                prompts::password(user_ + "@" + cfg_.host + "'s password", attempt > 0 ? "Access denied" : "", user_, !cfg_.id.empty()));
+                prompts::password(user_ + "@" + cfg_.host + "'s password", attempt > 0 ? "Access denied" : "", user_, canRemember()));
             if (pr.cancelled || pr.values.empty()) {
                 cancelled = true;
                 return SSH_AUTH_DENIED;
@@ -438,7 +596,7 @@ int SshConnector::tryPassword(ssh_session s, bool& cancelled) {
         }
         log(LogLevel::Info, "Sent password");
         const int rc = ssh_userauth_password(s, nullptr, pw->c_str());
-        if (rc == SSH_AUTH_SUCCESS && remember && ctx_.credentials && !cfg_.id.empty()) {
+        if (rc == SSH_AUTH_SUCCESS && remember && canRemember() && ctx_.credentials) {
             ctx_.credentials->set(Credentials::passwordKey(cfg_.id), *pw);
             log(LogLevel::Info, "Password saved");
         }

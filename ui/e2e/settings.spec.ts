@@ -103,4 +103,34 @@ test.describe('settings', () => {
     await app.keyboard.press('Escape');
     await openPalette(app, os);
   });
+
+  test('the font picker: installed monospace fonts first, missing suggestions greyed, a note for a missing font', async ({ app, os }) => {
+    // The mock's computer has only the system fonts (src/bridge/mock/core.ts, app:listFonts).
+    const dialog = await openSettings(app);
+    await section(dialog, 'Terminal');
+    const field = dialog.locator('.font-picker input[role="combobox"]');
+    await field.click();
+    const list = app.getByRole('listbox');
+    const groups = list.locator('.dlg-combo__group');
+    await expect(groups).toHaveText(['Monospace fonts', 'Not installed (free downloads)', 'Other installed fonts']);
+    const systemMono = os === 'darwin' ? 'Menlo' : 'Consolas';
+    await expect(list.getByRole('option', { name: new RegExp(`^${systemMono}`) })).not.toHaveAttribute('aria-disabled');
+    const jb = list.getByRole('option', { name: /^JetBrains Mono/ });
+    await expect(jb).toHaveAttribute('aria-disabled', 'true');
+    await expect(jb).toContainText('not installed');
+    await expect(jb.getByRole('button', { name: 'Get it' })).toBeVisible();
+
+    // A missing suggestion cannot be picked; an installed one can.
+    await jb.click({ force: true });   // Playwright itself won't click an aria-disabled option: force it, as a user might
+    await expect(list).toBeVisible();
+    await expect(field).not.toHaveValue('JetBrains Mono');
+    await list.getByRole('option', { name: new RegExp(`^${systemMono}`) }).click();
+    await expect.poll(async () => String((await saved(app)).terminal.fontFamily)).toContain(systemMono);
+    await expect(dialog.locator('.font-picker__note')).toHaveCount(0);
+
+    // A font typed by hand that is not installed gets the note (and where to get it, for a known one).
+    await field.fill('JetBrains Mono');
+    await expect(dialog.locator('.font-picker__note')).toContainText('JetBrains Mono is not installed on this computer');
+    await expect(dialog.locator('.font-picker__note').getByRole('button', { name: 'Download JetBrains Mono' })).toBeVisible();
+  });
 });

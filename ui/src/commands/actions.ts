@@ -218,6 +218,35 @@ export async function moveSessions(sessions: SessionConfig[], folder: string): P
   }
 }
 
+/** Sets (or clears, '') the Credentials login of SSH sessions (ssh.auth.loginId); other protocols are left alone. */
+/** "Lock Credentials" (command palette): forgets the master key until the next unlock. */
+export async function lockCredentials(): Promise<void> {
+  try {
+    const status = await api.vault.status();
+    if (status === 'none') {
+      toast.info('No master password', 'Set one in Settings › Credentials to be able to lock them.');
+      return;
+    }
+    await api.vault.lock();
+    toast.success('Credentials locked', 'The master password is asked again when a stored secret is needed.');
+  } catch (e) {
+    reportError('Could not lock Credentials', e);
+  }
+}
+
+export async function setSessionsLogin(sessions: SessionConfig[], loginId: string): Promise<void> {
+  const changed = sessions
+    .filter((s) => s.protocol === 'ssh' && (s.ssh.auth.loginId ?? '') !== loginId)
+    .map((s) => ({ ...s, ssh: { ...s.ssh, auth: { ...s.ssh.auth, loginId } } }));
+  if (!changed.length) return;
+  try {
+    if (changed.length === 1) await api.sessions.save(changed[0]);
+    else await api.sessions.saveMany(changed);
+  } catch (e) {
+    reportError('Could not change the login', e);
+  }
+}
+
 export async function deleteSessions(sessions: SessionConfig[]): Promise<void> {
   if (!sessions.length) return;
   const ok = await confirmDialog({

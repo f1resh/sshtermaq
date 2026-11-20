@@ -20,6 +20,7 @@ import {
   Hash,
   Import,
   KeyRound,
+  Lock,
   Maximize,
   PanelLeft,
   Pencil,
@@ -50,6 +51,7 @@ import {
   changePaneSettings,
   closePane,
   closeTab,
+  lockCredentials,
   newSessionDraft,
   openLocalTerminal,
   reportError,
@@ -89,6 +91,7 @@ export const COMMANDS: CommandInfo[] = [
   c('app.importPutty', 'Import sessions from PuTTY…', 'App', Import, { keywords: 'registry migrate putty reg' }),
   c('app.fullscreen', 'Toggle full screen', 'App', Maximize, { keywords: 'fullscreen' }),
   c('app.keygen', 'Key generator…', 'App', KeyRound, { keywords: 'puttygen ssh-keygen keys ed25519 rsa' }),
+  c('app.lockCredentials', 'Lock Credentials', 'App', Lock, { keywords: 'master password vault secrets keys logins' }),
   c('tab.new', 'New tab…', 'Tab', Plus, { keywords: 'open session' }),
   c('tab.newLocal', 'New local terminal', 'Tab', SquareTerminal, { keywords: 'shell console cmd powershell pwsh bash zsh wsl' }),
   c('tab.close', 'Close tab', 'Tab', X, { needsPane: true }),
@@ -219,6 +222,9 @@ function execute(id: CommandId, target?: CommandTarget): void {
       return;
     case 'app.keygen':
       ui.openDialog({ type: 'keygen' });
+      return;
+    case 'app.lockCredentials':
+      void lockCredentials();
       return;
 
     /* ---- tabs ---- */

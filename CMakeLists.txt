@@ -164,7 +164,7 @@ st_library(st_bridge SOURCES ${bridge_src} DEPS st_core)
 # drag & drop, embedded UI; uses st_core.
 st_platform_glob(platform_ui_src ui)
 if(WIN32)
-  set(platform_ui_libs unofficial::webview2::webview2 ole32 shell32 shlwapi uuid dwmapi shcore comctl32 winmm version)
+  set(platform_ui_libs unofficial::webview2::webview2 ole32 shell32 shlwapi uuid dwmapi dwrite shcore comctl32 winmm version)
 endif()
 if(APPLE)
   set(platform_ui_libs "-framework AppKit" "-framework WebKit" "-framework UniformTypeIdentifiers")

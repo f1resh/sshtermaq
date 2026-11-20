@@ -7,6 +7,7 @@
 #include "platform/sys/Secret.h"
 #include "store/JsonFile.h"
 
+#include <algorithm>
 #include <map>
 #include <stdexcept>
 
@@ -90,6 +91,44 @@ void Credentials::remove(const std::string& key) {
 bool Credentials::has(const std::string& key) const {
     std::lock_guard lock(mutex_);
     return blobs_.count(key) != 0;
+}
+
+std::vector<std::string> Credentials::keysWithPrefix(const std::string& prefix) const {
+    std::vector<std::string> out;
+    {
+        std::lock_guard lock(mutex_);
+        for (const auto& [k, v] : blobs_)
+            if (k.compare(0, prefix.size(), prefix) == 0) out.push_back(k);
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+void Credentials::apply(const std::vector<std::pair<std::string, std::optional<std::string>>>& changes) {
+    std::vector<std::pair<std::string, std::string>> blobs;  // "" = remove
+    blobs.reserve(changes.size());
+    for (const auto& [key, value] : changes) {
+        if (key.empty()) throw std::invalid_argument("Credential key is empty");
+        blobs.emplace_back(key, value && !value->empty() ? protect(*value) : std::string());  // encrypt outside the lock
+    }
+    {
+        std::lock_guard lock(mutex_);
+        const auto previous = blobs_;
+        for (const auto& [key, blob] : blobs) {
+            if (blob.empty())
+                blobs_.erase(key);
+            else
+                blobs_[key] = blob;
+        }
+        try {
+            saveLocked();
+        } catch (...) {
+            blobs_ = previous;
+            throw;
+        }
+    }
+    if (onChanged)
+        for (const auto& [key, blob] : blobs) onChanged(key);
 }
 
 std::string Credentials::protect(const std::string& plain) {

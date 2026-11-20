@@ -1,10 +1,16 @@
 /**
- * Font family combo box: curated monospace suggestions plus installed fonts (Local Font Access API, loaded
- * lazily on first open because it may need a permission prompt). Options render in their own typeface.
+ * Font family combo box: the installed monospace fonts, the suggested ones that are not installed (greyed, with a
+ * download link), then the other installed fonts. The list comes from the host (app:listFonts) and is loaded when the
+ * picker appears, so a chosen font that is not installed gets a note under the field. Options render in their own
+ * typeface.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { api } from '@/bridge/api';
+import type { InstalledFont } from '@shared/types';
 import { ComboInput, type ComboOption } from './controls';
-import { MONO_FONT_SUGGESTIONS, canQueryLocalFonts, familyToCss, primaryFamily, queryInstalledFonts } from './fonts';
+import { familyToCss, fontOptions, missingFont, primaryFamily, queryInstalledFonts, type FontOption } from './fonts';
+
+const openDownload = (url: string) => void api.app.openExternal(url).catch(() => undefined);
 
 export function FontPicker({
   value,
@@ -18,15 +24,18 @@ export function FontPicker({
   placeholder?: string;
   id?: string;
 }) {
-  const [installed, setInstalled] = useState<string[] | null>(null);
+  const [installed, setInstalled] = useState<InstalledFont[] | null>(null);
   const [text, setText] = useState<string | null>(null);
 
-  const options = useMemo<ComboOption[]>(() => {
-    const curated: ComboOption[] = MONO_FONT_SUGGESTIONS.map((f) => ({ value: f, group: 'Monospace' }));
-    const curatedSet = new Set<string>(MONO_FONT_SUGGESTIONS);
-    const rest: ComboOption[] = (installed ?? []).filter((f) => !curatedSet.has(f)).map((f) => ({ value: f, group: 'Installed fonts' }));
-    return [...curated, ...rest];
-  }, [installed]);
+  useEffect(() => {
+    let alive = true;
+    void queryInstalledFonts().then((list) => alive && setInstalled(list));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const options = useMemo<FontOption[]>(() => fontOptions(installed), [installed]);
 
   // Drop the typed text when the value is changed from outside (reset, undo, ...).
   useEffect(() => {
@@ -35,32 +44,67 @@ export function FontPicker({
 
   // Show the friendly primary family while the user is not typing.
   const display = text ?? primaryFamily(value);
+  const missing = missingFont(value, installed);
 
   return (
-    <ComboInput
-      id={id}
-      value={display}
-      placeholder={placeholder}
-      options={options}
-      filter={text !== null}
-      onOpen={() => {
-        if (installed === null && canQueryLocalFonts()) void queryInstalledFonts().then(setInstalled);
-      }}
-      onChange={(v) => {
-        setText(v);
-        onChange(familyToCss(v));
-      }}
-      renderOption={(o) => (
-        <span className="font-option">
-          <span className="font-option__name" style={{ fontFamily: `'${o.value}', var(--font-ui)` }}>
-            {o.value}
-          </span>
-          <span className="font-option__sample" style={{ fontFamily: `'${o.value}', monospace` }}>
-            {'{ } 0O 1lI ->'}
-          </span>
-        </span>
+    <div className="font-picker">
+      <ComboInput
+        id={id}
+        value={display}
+        placeholder={placeholder}
+        options={options}
+        filter={text !== null}
+        onChange={(v) => {
+          setText(v);
+          onChange(familyToCss(v));
+        }}
+        renderOption={(o: ComboOption) => {
+          const url = (o as FontOption).url;
+          return (
+            <span className="font-option">
+              <span className="font-option__name" style={o.disabled ? undefined : { fontFamily: `'${o.value}', var(--font-ui)` }}>
+                {o.value}
+              </span>
+              {o.disabled ? (
+                <span className="font-option__missing">
+                  not installed
+                  {url && (
+                    <button
+                      type="button"
+                      className="font-option__get"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openDownload(url);
+                      }}
+                    >
+                      Get it
+                    </button>
+                  )}
+                </span>
+              ) : (
+                <span className="font-option__sample" style={{ fontFamily: `'${o.value}', monospace` }}>
+                  {'{ } 0O 1lI ->'}
+                </span>
+              )}
+            </span>
+          );
+        }}
+        emptyText="No matching fonts"
+      />
+      {missing && (
+        <div className="font-picker__note" role="note">
+          {missing.family} is not installed on this computer, so the terminal uses the default monospace font.
+          {missing.url && (
+            <>
+              {' '}
+              <button type="button" onClick={() => openDownload(missing.url!)}>
+                Download {missing.family}
+              </button>
+            </>
+          )}
+        </div>
       )}
-      emptyText={canQueryLocalFonts() ? 'No matching fonts' : 'Type any installed font name'}
-    />
+    </div>
   );
 }

@@ -10,9 +10,9 @@ them depends on another.
 
 | Part | What it tests | Framework | Where | Automated | Size | Run time |
 |---|---|---|---|---|---|---|
-| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 232 test cases | about 1 minute |
-| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 16 files, 142 tests | under 2 seconds |
-| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart, the SFTP panel, the two-pane file manager, import and export, the key generator, settings | Playwright Test | `ui/e2e/*.spec.ts` | yes | 14 files, 73 tests, each run twice (146, of which 2 macOS-only skip in the Windows layout) | about 5 minutes |
+| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 245 test cases | about 1 minute |
+| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system; finished transfers' times; the font picker's lists; Credentials (which sessions and logins use a key or a login, how a login signs in, names; unlocking and retrying when they are locked; what an import did) | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 20 files, 171 tests | under 2 seconds |
+| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart, the SFTP panel, the two-pane file manager, import and export, the key generator, settings, Credentials (keys, logins, remembered passphrases, the master password, export and import) | Playwright Test | `ui/e2e/*.spec.ts` | yes | 19 files, 91 tests, each run twice (182, of which 2 macOS-only skip in the Windows layout) | about 5 minutes |
 | **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs`, `ui/scripts/checks/` | no, run by hand | `checks/local-terminal.mjs` | seconds |
 
 The browser tests cover the main screens and dialogs, not yet the host key and password prompts or the color scheme
@@ -208,7 +208,7 @@ TEST_CASE("ssh: password authentication, shell echo and exit code", "[ssh]") {
 
 ## 5. What is tested
 
-### Native tests (232 test cases)
+### Native tests (245 test cases)
 
 215 run by default; `putty: real registry smoke test` and `codepage (Windows): regenerate the tables` are hidden. The **Needs** column shows the tool without which a
 test case is skipped. On macOS every suite runs; its `platform_ui` has the macOS local files tests (listed after
@@ -263,7 +263,7 @@ Strings (UTF-8 paths, UTF-8 validation, UTF-16LE), crypto helpers, session defau
 | bridge: invoke, send and events | — |  | `core_tests.cpp` |
 | log: a full log is kept as `<name>.1.log` and a new one starts | — |  | `core_tests.cpp` |
 
-#### keys — `st_test_keys.exe` (7)
+#### keys — `st_test_keys.exe` (8)
 
 Key generation, PuTTY PPK v2/v3 read/write and encryption, OpenSSH <-> PPK conversion, cross-checks with `ssh-keygen` and `plink`. *Kind: unit + cross-check.* Source: [native/tests/keys](../native/tests/keys).
 
@@ -276,6 +276,7 @@ Key generation, PuTTY PPK v2/v3 read/write and encryption, OpenSSH <-> PPK conve
 | OpenSSH keys made by ssh-keygen load (encrypted with bcrypt KDF) | `[keys][openssh]` | OpenSSH `ssh-keygen` | `keys_tests.cpp` |
 | plink authenticates with PPK files written by us | `[keys][plink]` | PuTTY `plink` | `keys_tests.cpp` |
 | detectKeyFormat | `[keys]` |  | `keys_tests.cpp` |
+| key text (pasted or stored in Credentials): inspect and load without a file | `[keys][vault]` | OpenSSH and PPK text; a public key and junk refused | `keys_tests.cpp` |
 
 #### net — `st_test_net.exe` (32)
 
@@ -352,7 +353,7 @@ The platform layer's tier 0 (`native/src/platform/sys`): what every OS's impleme
 
 On macOS, `pty_posix_tests.cpp` has the POSIX counterparts (7): output and exit code, command-line splitting, input / resize / environment / a non-ASCII folder, default signal handling for the program, kill hangs it up, readable errors, and the shell list starting with the login shell.
 
-#### platform_ui — `st_test_platform_ui.exe` (8)
+#### platform_ui — `st_test_platform_ui.exe` (9)
 
 Windows command-line splitting for second instances, local files (`platform/ui/LocalFs`: paths, listings, file operations, long paths, "This PC", folder watcher, the local:* bridge handlers), and drag & drop of local files (`platform/ui/DragDrop`): the shell data object. *Kind: integration (Windows shell, file system).* Source: [native/tests/platform/win/ui](../native/tests/platform/win/ui).
 
@@ -366,8 +367,9 @@ Windows command-line splitting for second instances, local files (`platform/ui/L
 | localfs: This PC lists known folders and drives | `[localfs]` |  | `localfs_win_tests.cpp` |
 | localfs: folder watcher reports changes, debounced | `[localfs]` |  | `localfs_win_tests.cpp` |
 | localfs: bridge handlers | `[localfs]` |  | `localfs_win_tests.cpp` |
+| fonts: the installed families, with the monospace ones marked | `[platform][fonts]` | sorted, each once; Consolas monospace, Arial not (macOS: Menlo / Helvetica) | `common/ui/fonts_tests.cpp` |
 
-#### platform_ui on macOS — `st_test_platform_ui` (9)
+#### platform_ui on macOS — `st_test_platform_ui` (10)
 
 Local files (`platform/ui/LocalFs`, `LocalFsMac.mm`): paths with `~`, listings (dot files and Finder's hidden flag,
 links described by their targets, locked files), rename never onto an existing item but with a change of letter case,
@@ -387,6 +389,7 @@ found by name; dragging itself needs a mouse and is checked by hand. *Kind: inte
 | localfs: the watched folder itself goes away | `[localfs]` |  | `localfs_mac_tests.cpp` |
 | localfs: bridge handlers | `[localfs]` |  | `localfs_mac_tests.cpp` |
 | dnd (macOS): dropped files are found by the page's names | `[dnd]` |  | `dnd_mac_tests.cpp` |
+| fonts: the installed families, with the monospace ones marked | `[platform][fonts]` |  | `common/ui/fonts_tests.cpp` |
 
 #### putty — `st_test_putty.exe` (12)
 
@@ -443,7 +446,7 @@ Charset decoding/encoding, session logging, the session manager (ordering, batch
 | session manager: closeAll tears everything down | `[manager]` |  | `sessionmanager_tests.cpp` |
 | session manager: bridge handlers | `[manager]` |  | `sessionmanager_tests.cpp` |
 
-#### sftp — `st_test_sftp.exe` (24)
+#### sftp — `st_test_sftp.exe` (25)
 
 File manager backend over SFTP and SCP: browsing, transfers, conflicts, resume, move, find, synchronize, edit. *Kind: integration (test SSH server).* Source: [native/tests/sftp](../native/tests/sftp).
 
@@ -473,8 +476,9 @@ File manager backend over SFTP and SCP: browsing, transfers, conflicts, resume, 
 | transfer: folder transfers report the listing before copying | `[sftp][transfer]` |  | `transfer_tests.cpp` |
 | transfer: folder uploads can leave out macOS Finder's files | `[sftp][transfer]` |  | `transfer_tests.cpp` |
 | transfer: upload as / download as give the one item a new name | `[sftp][transfer]` | also moved under a new name (the source goes), and a move skipped at a conflict keeps the source | `transfer_tests.cpp` |
+| transfer: start and end times of a transfer | `[sftp][transfer]` | a finished one has both, in order; one cancelled while it ran too | `transfer_tests.cpp` |
 
-#### ssh — `st_test_ssh.exe` (25)
+#### ssh — `st_test_ssh.exe` (30)
 
 SSH transport end to end: every login method, host-key prompts, PTY, signals, port forwarding (including backpressure: bounded buffers, no busy loop, nothing lost when the far end closes), X11 forwarding (display names, Xauthority files, the cookie gate, and a forwarded X client reaching a local X server with the real cookie), jump hosts, Pageant and `ssh-agent`. *Kind: integration (test SSH server).* Source: [native/tests/ssh](../native/tests/ssh).
 
@@ -485,7 +489,12 @@ SSH transport end to end: every login method, host-key prompts, PTY, signals, po
 | ssh: changed host key is reported as a mismatch and can be rejected | `[ssh]` |  | `ssh_tests.cpp` |
 | ssh: keyboard-interactive with several prompts | `[ssh]` |  | `ssh_tests.cpp` |
 | ssh: public key authentication from an OpenSSH key file | `[ssh]` |  | `ssh_tests.cpp` |
-| ssh: encrypted key asks for the passphrase | `[ssh]` |  | `ssh_tests.cpp` |
+| ssh: a key from Credentials: stored, linked file, gone | `[ssh][vault]` | login with a stored key and a linked file; a deleted key is refused with a message, no fallback to the session's own path | `ssh_tests.cpp` |
+| ssh: a login from Credentials replaces the session's user and sign-in | `[ssh][vault]` | the login's user and stored password are used, nothing is saved to the session; "ask" prompts without offering to save; a deleted login falls back to the session's own settings with a message | `ssh_tests.cpp` |
+| ssh: a login with a key from Credentials and no password | `[ssh][vault]` | the login's key signs in; no password is tried | `ssh_tests.cpp` |
+| ssh: encrypted key asks for the passphrase | `[ssh]` | a wrong passphrase asks again; a key file of the session's own is not offered "Remember for this key" | `ssh_tests.cpp` |
+| ssh: locked Credentials ask for the master password | `[ssh][vault][master]` | a login's sealed password: "Unlock Credentials" asked, a wrong one asks again with a message, the right one unlocks and signs in without a password prompt; already unlocked: no prompt; cancelled: the connection stops and Credentials stay locked | `ssh_tests.cpp` |
+| ssh: a remembered passphrase of a key from Credentials | `[ssh][vault]` | "Remember for this key" saves it once the key opens (not when unticked); a remembered one is used without asking; one that no longer opens the key is forgotten and asked again with a message | `ssh_tests.cpp` |
 | ssh: saved password is used without prompting, wrong password retries | `[ssh]` |  | `ssh_tests.cpp` |
 | ssh: resize, environment and terminal type | `[ssh]` |  | `ssh_tests.cpp` |
 | ssh: remote command and signals | `[ssh]` |  | `ssh_tests.cpp` |
@@ -506,7 +515,7 @@ SSH transport end to end: every login method, host-key prompts, PTY, signals, po
 | x11: the real cookie from an Xauthority file | `[ssh][x11]` |  | `x11_tests.cpp` |
 | x11: the cookie gate | `[ssh][x11]` |  | `x11_tests.cpp` |
 
-#### store — `st_test_store.exe` (25)
+#### store — `st_test_store.exe` (30)
 
 Persistent data: atomic files, DPAPI credentials, known hosts, sessions, folders, settings, UI state, corrupt-file recovery. *Kind: unit (temp folders).* Source: [native/tests/store](../native/tests/store).
 
@@ -537,6 +546,11 @@ Persistent data: atomic files, DPAPI credentials, known hosts, sessions, folders
 | store: corrupt files are backed up and replaced by defaults | `[store][corrupt]` |  | `store_tests.cpp` |
 | store: bare array sessions file (legacy shape) is accepted | `[store][corrupt]` |  | `store_tests.cpp` |
 | store: concurrent writers smoke test | `[store][concurrency]` |  | `store_tests.cpp` |
+| vault: keys of Credentials (linked files and stored text) | `[store][vault]` | add, list sorted, unique names, rename, persistence, the secret only encrypted in credentials.json, remove deletes the secret, corrupt file | `store_tests.cpp` |
+| vault: export and import (one sealed file, ids kept, merged) | `[store][vault][export]` | a short file password refused; secrets counted (a stored key's text always, passwords and passphrases when chosen); nothing readable in the file, not even names; on another store with a master password: a wrong password and a foreign file refused, locked refused with nothing half done, then imported with ids kept, a taken name renamed "(2)", sealed with that store's master password; a second import skips everything; without secrets a stored-password login asks | `store_tests.cpp` |
+| vault: master password (set, lock, unlock, wrong, change, remove, reset) | `[store][vault][master]` | at least 8 characters; every secret sealed ("mp1:", no plain text) and a session's own password untouched; locked: secrets refused (VaultLocked), lists and linked keys still work; wrong password; locked again after a restart; change (the old one stops working), remove (plain again, no record), reset (stored keys and every secret gone, linked keys and logins stay, a stored password becomes "ask") | `store_tests.cpp` |
+| vault: remembered key passphrases (per key, forgotten with the key) | `[store][vault]` | remember / forget (change events only when something changed), the flag in list / get / rename, only encrypted in credentials.json (vault.json does not record it), deleting the key forgets it | `store_tests.cpp` |
+| vault: logins (user name, password stored / asked / none, key, agent) | `[store][vault]` | add (a stored password is required, names unique, name and user required), the password only encrypted, edit keeps / removes / requires the stored password, persistence, remove deletes the secret | `store_tests.cpp` |
 
 #### support — `st_test_support.exe` (8)
 
@@ -553,7 +567,7 @@ Self-tests of the fake servers, validated with independent clients (`plink`, `ps
 | TestSshServer serves SFTP to psftp | `[support][plink]` | PuTTY `psftp` | `support_tests.cpp` |
 | TestSshServer honours local forwarding from plink | `[support][plink]` | PuTTY `plink` | `support_tests.cpp` |
 
-### UI unit tests (142 tests)
+### UI unit tests (171 tests)
 
 #### `actions.test.ts` (7)
 
@@ -779,7 +793,21 @@ The UI's own errors in the app log (`app:log`): how errors are described, repeat
 | reportError | stops after 50 reports |
 | reportError | reports uncaught errors and unhandled rejections from the window |
 
-### UI browser tests (73 tests, each run as `windows` and `macos`; the two marked macOS only skip in the Windows layout)
+#### `transferTimes.test.ts` (8), `fonts.test.ts` (7), `vaultModel.test.ts` (10), `store/vault.test.ts` (4)
+
+What a finished transfer shows ("Done · 3,000 files · 23 MB in 41 s", "Failed after 12 s", the tooltip with the average
+speed and the clock times, the queue's "All done · … in …"; without times as before), and the font picker's lists
+(installed monospace fonts, missing suggestions greyed with a download page, other installed fonts; the note for a
+chosen font that is not installed); Credentials: the sessions and logins that use a key, the sessions that use a
+login, how a login signs in ("password stored · key work-laptop · agent", "key missing"), unique names; when the host
+answers "Credentials are locked", one unlock dialog (shared by requests at the same time) and the call once more,
+cancelled: the error stands, other errors never ask; what an import says ("Added 2 keys and 1 login (3 secrets).",
+"Already here, left as they are: …", "Renamed, the name was taken: …", "Nothing new: …"). Sources: [ui/src/components/files/transferTimes.test.ts](../ui/src/components/files/transferTimes.test.ts),
+[ui/src/components/dialogs/common/fonts.test.ts](../ui/src/components/dialogs/common/fonts.test.ts),
+[ui/src/components/dialogs/credentials/vaultModel.test.ts](../ui/src/components/dialogs/credentials/vaultModel.test.ts),
+[ui/src/store/vault.test.ts](../ui/src/store/vault.test.ts).
+
+### UI browser tests (91 tests, each run as `windows` and `macos`; the two marked macOS only skip in the Windows layout)
 
 Source: [ui/e2e](../ui/e2e).
 
@@ -858,6 +886,24 @@ Source: [ui/e2e](../ui/e2e).
 | `settings.spec.ts` | switches are saved (copy on select, restore tabs enabling "Keep tab and pane names", confirm before deleting) |
 | `settings.spec.ts` | rows only one system has (Option as Meta on macOS; the Mica / Acrylic backdrop is hidden on both while it is off) |
 | `settings.spec.ts` | a new key binding works at once; "Reset to default" brings the old one back |
+| `settings.spec.ts` | the font picker: installed monospace fonts first, missing suggestions greyed (not pickable, "Get it"), a note for a missing font |
+| `credentials.spec.ts` | the page lists stored and linked keys; copy the public key, rename (unique names), delete |
+| `credentials.spec.ts` | pasting: junk and public keys refused; a private key shown, named from its comment, added |
+| `credentials.spec.ts` | linking a key file keeps only its path |
+| `credentials.spec.ts` | a session uses a key from Credentials; the page counts it and the delete question names it (and the login that uses it) |
+| `credentials.spec.ts` | "Paste key…" in the session editor stores the key under its name and selects it |
+| `credentials.spec.ts` | the key generator saves a new key to Credentials |
+| `credentials-logins.spec.ts` | the page lists logins and how they sign in; new (taken name, no way to sign in, a stored password needed), edit keeps the password, duplicate, delete |
+| `credentials-logins.spec.ts` | a session signs in with a saved login: the key, agent and password settings step aside; the username hint; back to the session's settings; the key's delete question names the login |
+| `credentials-logins.spec.ts` | "Use login" in the sidebar for one session and for every SSH session of a folder; "This session's settings" clears it |
+| `credentials-passphrase.spec.ts` | "Forget passphrase" on the page; connecting with the key asks for it with "Remember for this key" (a wrong one asks again), ticked: remembered again; the key's delete question says the passphrase goes too |
+| `credentials-passphrase.spec.ts` | without "Remember for this key" every connection asks again |
+| `credentials-master.spec.ts` | set a master password (too short, the two differ, the warning), Lock now (badge, the page's notice); pasting a key while locked asks "Unlock Credentials" (a wrong one says so) and then adds it |
+| `credentials-master.spec.ts` | a connection whose login has a sealed password asks "Unlock Credentials" in the pane (wrong, then right) and connects; "Lock Credentials" in the command palette locks again |
+| `credentials-master.spec.ts` | change (a wrong current one is refused), remove, and reset when it is forgotten (counts what goes; the stored key goes, the linked key and the login stay, asking for its password) |
+| `credentials-export.spec.ts` | export (a short password, the two differ), the file written owner-only; a deleted login comes back from the file (a wrong password is refused), what was still here is left as it is; a second import adds nothing |
+| `credentials-export.spec.ts` | a cancelled save exports nothing; exported without secrets, a login that stored its password asks for it after import |
+| `credentials-export.spec.ts` | locked Credentials are unlocked first, then exported |
 
 ## 6. How to run the tests
 

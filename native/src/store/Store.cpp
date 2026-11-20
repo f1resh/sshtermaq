@@ -141,7 +141,8 @@ Json uniqueFolders(const Json& folders) {
 /* ------------------------------------------------------------------------ */
 
 Store::Store(std::filesystem::path dataDir)
-    : dir_(std::move(dataDir)), knownHosts_(dir_ / "known_hosts.json"), credentials_(dir_ / "credentials.json") {}
+    : dir_(std::move(dataDir)), knownHosts_(dir_ / "known_hosts.json"), credentials_(dir_ / "credentials.json"),
+      vault_(dir_ / "vault.json", credentials_) {}
 
 Store::~Store() = default;
 
@@ -219,6 +220,7 @@ void Store::load() {
     }
     knownHosts_.load();
     credentials_.load();
+    vault_.load();
     applog::info("Store: loaded " + std::to_string(sessionCount) + " sessions, " + std::to_string(folderCount) + " folders, " +
                  std::to_string(knownHosts_.list().size()) + " known host keys");
 }

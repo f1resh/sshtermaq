@@ -14,7 +14,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
+#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -56,18 +58,96 @@ struct CommandRelay {
     }
 };
 
+std::mutex g_relayMu;
+std::map<SocketHandle, std::shared_ptr<CommandRelay>> g_relays;
+
+/**
+ * The helper threads (relays, reaper, SIGKILL timer). None may outlive exit(): one still running while static objects
+ * and the C++ runtime are torn down uses them after they are gone (g_relays among them). A killed command's readers
+ * wake only once its processes are gone, which can be after the caller has already returned from main. So threads
+ * are joined here once they have ended (on the next start) and, at the latest, by the destructor at exit, which also
+ * ends the commands still running. Declared after g_relayMu / g_relays so that it is destroyed before them.
+ */
+class RelayThreads {
+public:
+    template <class F>
+    void start(F body) {
+        std::lock_guard lock(state_->mu);
+        for (auto it = state_->threads.begin(); it != state_->threads.end();) {
+            if (it->done) {
+                it->thread.join();  // past its body: only the thread's own exit is left
+                it = state_->threads.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        Entry& e = state_->threads.emplace_back();
+        // `done` is set under state_->mu, which is held until `e.thread` is assigned.
+        e.thread = std::thread([state = state_, entry = &e, body = std::move(body)]() mutable {
+            body();
+            {
+                std::lock_guard l(state->mu);
+                entry->done = true;
+            }
+            state->cv.notify_all();
+        });
+    }
+    ~RelayThreads();
+
+private:
+    struct Entry {
+        std::thread thread;
+        bool done = false;
+    };
+    struct State {  // shared with the threads: one given up on at exit may still finish later
+        std::mutex mu;
+        std::condition_variable cv;
+        std::list<Entry> threads;
+    };
+    std::shared_ptr<State> state_ = std::make_shared<State>();
+};
+RelayThreads g_relayThreads;
+
 /** Ends the command's process group: SIGTERM, and SIGKILL a second later if it is still there. */
 void kill(const std::shared_ptr<CommandRelay>& r) {
     if (r->killed.exchange(true) || r->exited) return;
     ::killpg(r->pid, SIGTERM);
-    std::thread([r] {
+    g_relayThreads.start([r] {
         for (int i = 0; i < 20 && !r->exited; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(50));
         if (!r->exited) ::killpg(r->pid, SIGKILL);
-    }).detach();
+    });
 }
 
-std::mutex g_relayMu;
-std::map<SocketHandle, std::shared_ptr<CommandRelay>> g_relays;
+RelayThreads::~RelayThreads() {
+    std::map<SocketHandle, std::shared_ptr<CommandRelay>> live;
+    {
+        std::lock_guard lock(g_relayMu);
+        live.swap(g_relays);
+    }
+    for (const auto& entry : live) {
+        const std::shared_ptr<CommandRelay>& r = entry.second;
+        r->detach();
+        kill(r);
+        shutdownBoth(r->relaySock);
+    }
+    live.clear();
+    std::unique_lock lock(state_->mu);
+    // A process that will not die must not hang the exit (kill() sends SIGKILL after one second).
+    state_->cv.wait_for(lock, std::chrono::seconds(3), [&] {
+        for (const Entry& e : state_->threads)
+            if (!e.done) return false;
+        return true;
+    });
+    for (auto it = state_->threads.begin(); it != state_->threads.end();) {
+        if (it->done) {
+            it->thread.join();
+            it = state_->threads.erase(it);
+        } else {
+            it->thread.detach();  // keeps its Entry (in the shared state): the thread still sets `done` there
+            ++it;
+        }
+    }
+}
 
 bool sameSocket(SocketHandle s, const CommandRelay& r) {
     struct stat st {};
@@ -193,15 +273,15 @@ SocketHandle startProxyCommand(const std::string& command, std::function<void(co
     }
 
     // Reaper: no zombie once the command exits.
-    std::thread([r] {
+    g_relayThreads.start([r] {
         int status = 0;
         while (::waitpid(r->pid, &status, 0) < 0 && errno == EINTR) {
         }
         r->exited = true;
-    }).detach();
+    });
 
     // socket -> process stdin. EOF/error on the socket means our end was closed: end the command.
-    std::thread([r, mine] {
+    g_relayThreads.start([r, mine] {
         char buf[16384];
         for (;;) {
             const long got = recvSome(r->relaySock, buf, sizeof(buf));
@@ -226,10 +306,10 @@ SocketHandle startProxyCommand(const std::string& command, std::function<void(co
         kill(r);
         shutdownBoth(r->relaySock);
         forgetRelay(mine, r);
-    }).detach();
+    });
 
     // process stdout -> socket. EOF (process exited) half-closes the socket so the transport sees the close.
-    std::thread([r] {
+    g_relayThreads.start([r] {
         char buf[16384];
         for (;;) {
             const ssize_t got = ::read(r->stdoutRead, buf, sizeof(buf));
@@ -238,10 +318,10 @@ SocketHandle startProxyCommand(const std::string& command, std::function<void(co
             if (!sendAll(r->relaySock, std::string_view(buf, static_cast<size_t>(got)))) break;
         }
         shutdownWrite(r->relaySock);
-    }).detach();
+    });
 
     // process stderr -> callback, line by line.
-    std::thread([r] {
+    g_relayThreads.start([r] {
         std::string pending;
         char buf[4096];
         auto flushLine = [&](std::string line) {
@@ -264,7 +344,7 @@ SocketHandle startProxyCommand(const std::string& command, std::function<void(co
             }
         }
         flushLine(pending);
-    }).detach();
+    });
 
     return mine;
 }

@@ -166,6 +166,7 @@ int runApp(const std::vector<std::string>& args) {
         store.onSessionsChanged = nullptr;
         store.onSettingsChanged = nullptr;
         store.knownHosts().onChanged = nullptr;
+        store.vault().onChanged = nullptr;
     }
 
     applog::info("Bye");

@@ -19,6 +19,7 @@ import {
   type ComboOption,
   type SegmentOption
 } from '../../common/controls';
+import { useVaultLogins } from '@/store/vault';
 import { useEditor } from '../editorContext';
 import { fallbackSessionName, splitHostInput, switchProtocol } from '../sessionModel';
 import { LocalFields } from './localFields';
@@ -54,6 +55,8 @@ const FAMILY_OPTIONS: readonly SegmentOption<AddressFamily>[] = [
 
 export function SessionSection() {
   const { draft, update, fieldError, warning, isDefault, folders } = useEditor();
+  const logins = useVaultLogins();
+  const loginUser = draft.ssh.auth.loginId ? logins.find((l) => l.id === draft.ssh.auth.loginId)?.username : undefined;
   const network = draft.protocol !== 'serial' && draft.protocol !== 'local';
   const folderOptions = useMemo<ComboOption[]>(
     () => [{ value: '', label: '(root)' }, ...folders.map((f) => ({ value: f }))],
@@ -142,7 +145,13 @@ export function SessionSection() {
             {draft.protocol !== 'raw' && (
               <FormField
                 label={draft.protocol === 'rlogin' ? 'Remote username' : 'Username'}
-                hint={draft.protocol === 'ssh' ? 'Leave empty to be asked when connecting' : 'Sent automatically when logging in'}
+                hint={
+                  draft.protocol === 'ssh' && draft.ssh.auth.loginId
+                    ? `Replaced by the login's user name (${loginUser ?? 'login not found'}): Authentication › Sign in with`
+                    : draft.protocol === 'ssh'
+                      ? 'Leave empty to be asked when connecting'
+                      : 'Sent automatically when logging in'
+                }
                 span={2}
                 htmlFor="se-user"
               >

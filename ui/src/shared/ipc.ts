@@ -25,6 +25,12 @@
  */
 import type {
   AppInfo,
+  InstalledFont,
+  VaultKey,
+  VaultExportResult,
+  VaultImportResult,
+  VaultLogin,
+  VaultStatus,
   AppSettings,
   BackgroundMaterial,
   ConflictResolution,
@@ -202,6 +208,50 @@ export interface Api {
     /** Returns converted key file content. */
     convert(path: string, passphrase: string, to: 'openssh' | 'ppk'): Promise<string>;
   };
+  /** Credentials: keys (linked files or stored key text). Key text goes UI -> host only when pasted; never back. */
+  vault: {
+    list(): Promise<VaultKey[]>;
+    /** What a pasted text is (type, fingerprint, passphrase protected), before it is stored. Throws for junk / a public key. */
+    inspectText(text: string): Promise<KeyInfo>;
+    /** Stores key text, encrypted. `name` '' = the key's comment. Throws for junk, a public key, a taken name. */
+    addKeyText(name: string, text: string): Promise<VaultKey>;
+    /** Links a key file (only the path is stored); no path: the Open dialog (null when cancelled). */
+    addKeyFile(name: string, path?: string): Promise<VaultKey | null>;
+    rename(id: string, name: string): Promise<VaultKey>;
+    delete(id: string): Promise<void>;
+    /** Forgets the key's remembered passphrase (it is remembered only at the passphrase prompt). */
+    forgetPassphrase(id: string): Promise<void>;
+    /* The optional master password (the secrets are sealed with it on top of the OS protection). */
+    status(): Promise<VaultStatus>;
+    /** Sets it (at least 8 characters); leaves Credentials unlocked. */
+    setMaster(password: string): Promise<void>;
+    /** Rejects when the current one is wrong. */
+    changeMaster(oldPassword: string, newPassword: string): Promise<void>;
+    /** Back to OS protection only; rejects when the password is wrong. */
+    removeMaster(password: string): Promise<void>;
+    /** True when unlocked; a wrong password answers false after a short, growing wait. */
+    unlock(password: string): Promise<boolean>;
+    lock(): Promise<void>;
+    /** The master password is forgotten: deletes every stored secret (stored keys, passwords, passphrases). */
+    reset(): Promise<void>;
+    /**
+     * Writes every key and login to one file sealed with `password` (at least 8 characters); `includeSecrets` adds the
+     * logins' stored passwords and the keys' remembered passphrases. Asks where (save dialog) unless `path` is given;
+     * null when cancelled.
+     */
+    exportFile(password: string, includeSecrets: boolean, path?: string): Promise<VaultExportResult | null>;
+    /** Adds what an exported file holds (merged: what is already here is skipped). Open dialog unless `path`; null when cancelled. */
+    importFile(password: string, path?: string): Promise<VaultImportResult | null>;
+    /** A stored key written to a file the user picks (owner-only). The path, or null when cancelled. */
+    exportKey(id: string): Promise<string | null>;
+    listLogins(): Promise<VaultLogin[]>;
+    /** `password`: the password to store when login.password is 'stored' (required then). Throws for a taken name, no user. */
+    addLogin(login: Omit<VaultLogin, 'id' | 'createdAt' | 'updatedAt'>, password?: string | null): Promise<VaultLogin>;
+    /** `password`: a new password to store; null / omitted keeps the stored one. Leaving 'stored' deletes it. */
+    updateLogin(login: VaultLogin, password?: string | null): Promise<VaultLogin>;
+    deleteLogin(id: string): Promise<void>;
+    onChanged(cb: () => void): Unsubscribe;
+  };
   serial: {
     listPorts(): Promise<SerialPortInfo[]>;
   };
@@ -241,7 +291,8 @@ export interface Api {
     /** System bell. */
     beep(): void;
     /** Installed font families, sorted; [] where the page can list them itself (Windows: Local Font Access). */
-    listFonts(): Promise<string[]>;
+    /** The font families installed on this computer, sorted, with the monospace ones marked. */
+    listFonts(): Promise<InstalledFont[]>;
     /** data: URL of a local (audio) file, null if unreadable. */
     readFileDataUrl(path: string): Promise<string | null>;
     logDirectory(): Promise<string>;
@@ -410,6 +461,30 @@ export const API_SCHEMA = {
     generate: 'invoke',
     inspect: 'invoke',
     convert: 'invoke'
+  },
+  vault: {
+    list: 'invoke',
+    inspectText: 'invoke',
+    addKeyText: 'invoke',
+    addKeyFile: 'invoke',
+    rename: 'invoke',
+    delete: 'invoke',
+    forgetPassphrase: 'invoke',
+    status: 'invoke',
+    setMaster: 'invoke',
+    changeMaster: 'invoke',
+    removeMaster: 'invoke',
+    unlock: 'invoke',
+    lock: 'invoke',
+    reset: 'invoke',
+    exportFile: 'invoke',
+    importFile: 'invoke',
+    exportKey: 'invoke',
+    listLogins: 'invoke',
+    addLogin: 'invoke',
+    updateLogin: 'invoke',
+    deleteLogin: 'invoke',
+    onChanged: 'event'
   },
   serial: {
     listPorts: 'invoke'

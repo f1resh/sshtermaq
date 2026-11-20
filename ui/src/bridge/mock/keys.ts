@@ -7,7 +7,8 @@
  * passphrase even to read the public key; the mock passphrase is anything except "wrong"), names containing
  * "missing" fail as if the file did not exist.
  */
-import type { KeyInfo, KeygenRequest, KeygenResult } from '@shared/types';
+import type { KeyInfo, KeygenRequest, KeygenResult, VaultKey, VaultLogin } from '@shared/types';
+import { LOCKED_MESSAGE, mockDb, mockVaultLocked, mockVaultState, persistMock, seedVault, seedVaultLogins, type MockVaultEntry } from './core';
 import type { MockContext } from './index';
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -132,4 +133,257 @@ export function registerKeysMocks(ctx: MockContext): void {
       ''
     ].join('\n');
   });
+
+  /* ---- Credentials (vault:*), kept in the mock database ---- */
+  const vault = () => (mockDb.vault ??= seedVault());
+  const changed = () => {
+    persistMock();
+    ctx.emit('vault:onChanged');
+  };
+  const listed = (e: MockVaultEntry): VaultKey => ({
+    ...e.key,
+    missing: e.key.kind === 'file' && fileName(e.key.path).toLowerCase().includes('missing'),
+    passphraseRemembered: !!e.passphrase
+  });
+  const taken = (name: string, exceptId = '') =>
+    vault().some((e) => e.key.id !== exceptId && e.key.name.trim().toLowerCase() === name.trim().toLowerCase());
+  const entry = (info: KeyInfo, name: string, fallback: string, kind: VaultKey['kind'], path = ''): VaultKey => {
+    const n = name.trim() || info.comment.trim() || fallback;
+    if (taken(n)) throw new Error(`A key named "${n}" already exists`);
+    const now = Date.now();
+    return {
+      id: `vault-${now}-${Math.round(Math.random() * 1e6)}`,
+      name: n,
+      kind,
+      path,
+      format: info.format,
+      keyType: info.keyType,
+      fingerprint: info.fingerprint,
+      publicKeyOpenSsh: info.publicKeyOpenSsh,
+      comment: info.comment,
+      encrypted: info.encrypted,
+      createdAt: now,
+      updatedAt: now
+    };
+  };
+
+  ctx.handle('vault:list', () => [...vault()].map(listed).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })));
+  ctx.handle('vault:inspectText', async (text: string) => {
+    await delay(40);
+    return inspectTextMock(text);
+  });
+  ctx.handle('vault:addKeyText', async (name: string, text: string) => {
+    await delay(60);
+    if (mockVaultLocked()) throw new Error(LOCKED_MESSAGE);
+    const e = { key: entry(inspectTextMock(text), name, 'pasted key', 'stored'), text };
+    vault().push(e);
+    changed();
+    return listed(e);
+  });
+  ctx.handle('vault:addKeyFile', async (name: string, path?: string) => {
+    await delay(60);
+    const file = path || (await ctx.invoke<string | null>('dialog:openFile', { title: 'Choose a private key file' }));
+    if (!file) return null;
+    const e = { key: entry(inspectMock(file), name, fileName(file), 'file', file) };
+    vault().push(e);
+    changed();
+    return listed(e);
+  });
+  ctx.handle('vault:rename', (id: string, name: string) => {
+    const e = vault().find((x) => x.key.id === id);
+    if (!e) throw new Error('Key not found');
+    if (!name.trim()) throw new Error('The key needs a name');
+    if (taken(name, id)) throw new Error(`A key named "${name.trim()}" already exists`);
+    e.key = { ...e.key, name: name.trim(), updatedAt: Date.now() };
+    changed();
+    return listed(e);
+  });
+  /* The master password (mock: kept as is; the host keeps a derived check value). */
+  ctx.handle('vault:status', () => (!mockDb.vaultMaster ? 'none' : mockVaultState.unlocked ? 'unlocked' : 'locked'));
+  ctx.handle('vault:setMaster', async (password: string) => {
+    await delay(80);
+    if (mockDb.vaultMaster) throw new Error('A master password is already set');
+    if (password.length < 8) throw new Error('Use at least 8 characters');
+    mockDb.vaultMaster = password;
+    mockVaultState.unlocked = true;
+    changed();
+  });
+  ctx.handle('vault:unlock', async (password: string) => {
+    await delay(80);
+    if (!mockDb.vaultMaster) throw new Error('No master password is set');
+    if (password !== mockDb.vaultMaster) return false;
+    mockVaultState.unlocked = true;
+    changed();
+    return true;
+  });
+  ctx.handle('vault:lock', () => {
+    if (!mockVaultState.unlocked) return;
+    mockVaultState.unlocked = false;
+    changed();
+  });
+  ctx.handle('vault:changeMaster', async (oldPassword: string, newPassword: string) => {
+    await delay(80);
+    if (!mockDb.vaultMaster) throw new Error('No master password is set');
+    if (newPassword.length < 8) throw new Error('Use at least 8 characters');
+    if (oldPassword !== mockDb.vaultMaster) throw new Error('The current master password is wrong');
+    mockDb.vaultMaster = newPassword;
+    mockVaultState.unlocked = true;
+    changed();
+  });
+  ctx.handle('vault:removeMaster', async (password: string) => {
+    await delay(80);
+    if (!mockDb.vaultMaster) throw new Error('No master password is set');
+    if (password !== mockDb.vaultMaster) throw new Error('The master password is wrong');
+    delete mockDb.vaultMaster;
+    mockVaultState.unlocked = false;
+    changed();
+  });
+  ctx.handle('vault:reset', () => {
+    delete mockDb.vaultMaster;
+    mockVaultState.unlocked = false;
+    mockDb.vault = vault()
+      .filter((e) => e.key.kind !== 'stored')
+      .map((e) => ({ key: e.key }));
+    for (const e of logins()) {
+      if (e.login.password === 'stored') e.login = { ...e.login, password: 'ask' };
+      delete e.password;
+    }
+    changed();
+  });
+  /* Export / import. The mock file is plain JSON with the password in it (the host seals it); import reads what the
+     mock save dialog wrote (__mockSaved) at that path. */
+  const FORMAT = 'SSHTermaq credentials (mock)';
+  ctx.handle('vault:exportFile', async (password: string, includeSecrets: boolean, path?: string) => {
+    await delay(80);
+    if (password.length < 8) throw new Error("Use at least 8 characters for the file's password");
+    if (mockVaultLocked()) throw new Error(LOCKED_MESSAGE);
+    let secrets = 0;
+    const keys = vault().map((e) => {
+      if (e.key.kind === 'stored') secrets++;
+      if (includeSecrets && e.passphrase) secrets++;
+      return { key: e.key, text: e.text, passphrase: includeSecrets ? e.passphrase : undefined };
+    });
+    const ls = logins().map((e) => {
+      if (includeSecrets && e.password) secrets++;
+      return { login: e.login, password: includeSecrets ? e.password : undefined };
+    });
+    const content = JSON.stringify({ format: FORMAT, password, keys, logins: ls });
+    const saved = path ?? (await ctx.invoke<string | null>('dialog:saveTextFile', content, { title: 'Export Credentials', defaultPath: 'credentials.sshtcred' }, true));
+    if (!saved) return null;
+    return { path: saved, keys: keys.length, logins: ls.length, secrets, skipped: [] };
+  });
+  ctx.handle('vault:importFile', async (password: string, path?: string) => {
+    await delay(80);
+    const file = path || (await ctx.invoke<string | null>('dialog:openFile', { title: 'Import Credentials' }));
+    if (!file) return null;
+    const saved = (globalThis as unknown as { __mockSaved: { path: string; content: string }[] }).__mockSaved.filter((f) => f.path === file).pop();
+    if (!saved) throw new Error(`Cannot read ${file}`);
+    let data: { format?: string; password?: string; keys: MockVaultEntry[]; logins: { login: VaultLogin; password?: string }[] };
+    try {
+      data = JSON.parse(saved.content);
+    } catch {
+      throw new Error('Not a Credentials file');
+    }
+    if (data.format !== FORMAT) throw new Error('Not a Credentials file');
+    if (data.password !== password) throw new Error('Wrong password, or the file is damaged');
+    if (mockVaultLocked()) throw new Error(LOCKED_MESSAGE);
+    const r = { path: file, keysAdded: 0, keysSkipped: 0, loginsAdded: 0, loginsSkipped: 0, secrets: 0, renamed: [] as string[] };
+    const free = (name: string, isTaken: (n: string) => boolean) => {
+      let n = name;
+      for (let i = 2; isTaken(n); i++) n = `${name} (${i})`;
+      return n;
+    };
+    for (const e of data.keys) {
+      if (vault().some((x) => x.key.id === e.key.id || (!!e.key.fingerprint && x.key.fingerprint === e.key.fingerprint))) {
+        r.keysSkipped++;
+        continue;
+      }
+      const name = free(e.key.name, (n) => taken(n));
+      if (name !== e.key.name) r.renamed.push(`key ${e.key.name} → ${name}`);
+      vault().push({ key: { ...e.key, name }, text: e.text, passphrase: e.passphrase });
+      r.secrets += (e.key.kind === 'stored' ? 1 : 0) + (e.passphrase ? 1 : 0);
+      r.keysAdded++;
+    }
+    for (const e of data.logins) {
+      if (logins().some((x) => x.login.id === e.login.id)) {
+        r.loginsSkipped++;
+        continue;
+      }
+      const name = free(e.login.name, (n) => loginTaken(n));
+      if (name !== e.login.name) r.renamed.push(`login ${e.login.name} → ${name}`);
+      const asks = e.login.password === 'stored' && !e.password;
+      logins().push({ login: { ...e.login, name, password: asks ? 'ask' : e.login.password }, password: e.password });
+      if (e.password) r.secrets++;
+      r.loginsAdded++;
+    }
+    if (r.keysAdded || r.loginsAdded) changed();
+    return r;
+  });
+  ctx.handle('vault:forgetPassphrase', (id: string) => {
+    const e = vault().find((x) => x.key.id === id);
+    if (!e?.passphrase) return;
+    delete e.passphrase;
+    changed();
+  });
+  ctx.handle('vault:delete', (id: string) => {
+    mockDb.vault = vault().filter((e) => e.key.id !== id);
+    changed();
+  });
+  const logins = () => (mockDb.vaultLogins ??= seedVaultLogins());
+  const loginTaken = (name: string, exceptId = '') =>
+    logins().some((e) => e.login.id !== exceptId && e.login.name.trim().toLowerCase() === name.trim().toLowerCase());
+  const checkLogin = (l: VaultLogin) => {
+    if (!l.name.trim()) throw new Error('The login needs a name');
+    if (!l.username.trim()) throw new Error('The login needs a user name');
+  };
+  ctx.handle('vault:listLogins', () => logins().map((e) => e.login).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })));
+  ctx.handle('vault:addLogin', (l: VaultLogin, password?: string | null) => {
+    checkLogin(l);
+    if (loginTaken(l.name)) throw new Error(`A login named "${l.name.trim()}" already exists`);
+    if (l.password === 'stored' && !password) throw new Error('Enter the password to store');
+    if (l.password === 'stored' && mockVaultLocked()) throw new Error(LOCKED_MESSAGE);
+    const now = Date.now();
+    const login: VaultLogin = { ...l, id: `login-${now}-${Math.round(Math.random() * 1e6)}`, name: l.name.trim(), username: l.username.trim(), createdAt: now, updatedAt: now };
+    logins().push({ login, password: l.password === 'stored' ? (password ?? undefined) : undefined });
+    changed();
+    return login;
+  });
+  ctx.handle('vault:updateLogin', (l: VaultLogin, password?: string | null) => {
+    checkLogin(l);
+    const e = logins().find((x) => x.login.id === l.id);
+    if (!e) throw new Error('Login not found');
+    if (loginTaken(l.name, l.id)) throw new Error(`A login named "${l.name.trim()}" already exists`);
+    if (l.password === 'stored') {
+      if (password && mockVaultLocked()) throw new Error(LOCKED_MESSAGE);
+      if (password) e.password = password;
+      else if (!e.password) throw new Error('Enter the password to store');
+    } else e.password = undefined;
+    e.login = { ...l, name: l.name.trim(), username: l.username.trim(), createdAt: e.login.createdAt, updatedAt: Date.now() };
+    changed();
+    return e.login;
+  });
+  ctx.handle('vault:deleteLogin', (id: string) => {
+    mockDb.vaultLogins = logins().filter((e) => e.login.id !== id);
+    changed();
+  });
+  ctx.handle('vault:exportKey', async (id: string) => {
+    const e = vault().find((x) => x.key.id === id);
+    if (!e) throw new Error('Key not found');
+    if (e.key.kind !== 'stored') throw new Error('This key is a linked file: it is already a file');
+    return ctx.invoke<string | null>('dialog:saveTextFile', e.text ?? '', { title: `Export the key "${e.key.name}"`, defaultPath: e.key.name }, true);
+  });
+}
+
+/** What pasted text is, as the host's keys::inspectKeyText says it (format from the header lines). */
+function inspectTextMock(text: string): KeyInfo {
+  const t = text.trim();
+  if (/^(ssh-|ecdsa-|sk-)/.test(t) || t.includes('PUBLIC KEY')) throw new Error('This is a public key: paste the private key');
+  const ppk = /^PuTTY-User-Key-File-(\d):\s*(\S+)/m.exec(t);
+  const format: KeyInfo['format'] = ppk ? (ppk[1] === '2' ? 'ppk2' : 'ppk3') : t.includes('BEGIN OPENSSH PRIVATE KEY') ? 'openssh' : /BEGIN (RSA |EC |DSA )?PRIVATE KEY/.test(t) ? 'pem' : 'unknown';
+  if (format === 'unknown') throw new Error('Not a recognised private key file');
+  const keyType = ppk ? ppk[2] : /RSA PRIVATE/.test(t) ? 'ssh-rsa' : 'ssh-ed25519';
+  const comment = /^Comment:\s*(.*)$/m.exec(t)?.[1]?.trim() ?? '';
+  const encrypted = ppk ? !/^Encryption:\s*none/m.test(t) : t.includes('ENCRYPTED') || t.includes('CmFlczI1Ni1jdHI');
+  const blob = `AAAA${hashB64(t, keyType === 'ssh-rsa' ? 360 : 64)}`;
+  return { path: '', format, keyType, comment, encrypted, fingerprint: `SHA256:${hashB64(t, 43)}`, publicKeyOpenSsh: `${keyType} ${blob}${comment ? ` ${comment}` : ''}` };
 }

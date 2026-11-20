@@ -9,6 +9,8 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace st {
 
@@ -24,6 +26,10 @@ public:
     void set(const std::string& key, const std::string& secret);
     void remove(const std::string& key);
     bool has(const std::string& key) const;
+    /** The keys that start with `prefix`, sorted. */
+    std::vector<std::string> keysWithPrefix(const std::string& prefix) const;
+    /** Sets (a value) or removes (nullopt or "") several keys in one atomic write: all or nothing. */
+    void apply(const std::vector<std::pair<std::string, std::optional<std::string>>>& changes);
 
     static std::string passwordKey(const std::string& sessionId) { return "session:" + sessionId + ":password"; }
     static std::string passphraseKey(const std::string& keyPath) { return "key:" + keyPath + ":passphrase"; }

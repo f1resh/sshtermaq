@@ -9,6 +9,7 @@ import { Button, IconButton, cx, toast } from '@/components/ui';
 import { osTerms } from '@shared/platform';
 import { isFinal, summarize, useFiles, type TransferEntry } from './filesStore';
 import { fmtDuration, fmtSize } from './paths';
+import { finishedText, finishedTitle, queueDoneText } from './transferTimes';
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -17,11 +18,9 @@ function stateLabel(t: TransferEntry): string {
     case 'queued':
       return 'Queued';
     case 'error':
-      return 'Failed';
     case 'cancelled':
-      return 'Cancelled';
     case 'done':
-      return t.skipped ? `Done, ${t.skipped} skipped` : t.direction === 'delete' ? 'Deleted' : fmtSize(t.total);
+      return finishedText(t);
     default: {
       if (t.listing) return `Listing… ${t.filesTotal ?? 0} files · ${fmtSize(t.total)}`;
       const pct = t.total > 0 ? Math.min(100, Math.floor((t.transferred / t.total) * 100)) : 0;
@@ -84,7 +83,7 @@ export function TransferQueue({ sftpId }: { sftpId: string | null }) {
             {sum.speed > 0 && sum.total > sum.transferred ? ` · ${fmtDuration((sum.total - sum.transferred) / sum.speed)} left` : ''}
           </span>
         ) : (
-          <span className="fm-queue__summary fm-muted">All done</span>
+          <span className="fm-queue__summary fm-muted">{queueDoneText(list)}</span>
         )}
         {sum.active > 0 && (
           <span className="fm-bar fm-bar--inline">
@@ -119,7 +118,7 @@ export function TransferQueue({ sftpId }: { sftpId: string | null }) {
                         {t.filesDone ?? 0}/{t.filesTotal} files
                       </span>
                     ) : null}
-                    <span className="fm-transfer__meta" title={t.error}>
+                    <span className="fm-transfer__meta" title={t.error || finishedTitle(t) || undefined}>
                       {stateLabel(t)}
                     </span>
                   </div>

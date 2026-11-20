@@ -4,7 +4,7 @@
  * Private key material only ever lives in component state and is handed straight to the save dialog.
  */
 import { useId, useMemo, useState, type ReactNode } from 'react';
-import { FileKey2, FolderOpen, KeyRound, Save, Sparkles } from 'lucide-react';
+import { FileKey2, FolderOpen, KeyRound, KeySquare, Save, Sparkles } from 'lucide-react';
 import { api } from '@/bridge/api';
 import { Button, Modal, TextArea, TextInput, toast } from '@/components/ui';
 import type { KeyInfo, KeyType, KeygenResult } from '@shared/types';
@@ -21,6 +21,7 @@ import {
   type SegmentOption
 } from '../common/controls';
 import { errorMessage, useStableCallback } from '../common/hooks';
+import { AddKeyDialog } from '../credentials/AddKeyDialog';
 import { defaultKeyComment, defaultKeyFileName, isPassphraseError, keyBitsFor, KEY_BITS, type KeygenMode } from './keygenModel';
 
 const TYPE_OPTIONS: readonly SegmentOption<KeyType>[] = [
@@ -111,6 +112,7 @@ function GeneratePane() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<(KeygenResult & { type: KeyType; bits?: number; comment: string }) | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [toVault, setToVault] = useState(false);
   const passId = useId();
 
   const mismatch = pass2.length > 0 && pass !== pass2;
@@ -203,7 +205,21 @@ function GeneratePane() {
             <Button icon={<FileKey2 size={14} />} onClick={() => void saveText(result.publicKeyOpenSsh + '\n', 'Save public key', `${base}.pub`, PRIVATE_FILTERS.pub)}>
               Save public key
             </Button>
+            <Button icon={<KeySquare size={14} />} onClick={() => setToVault(true)}>
+              Save to Credentials…
+            </Button>
           </div>
+          {toVault && (
+            <AddKeyDialog
+              mode="paste"
+              initialText={result.privateKeyOpenSsh}
+              onClose={() => setToVault(false)}
+              onAdded={(k) => {
+                setToVault(false);
+                toast.success('Saved to Credentials', k.name);
+              }}
+            />
+          )}
         </Section>
       )}
     </>
