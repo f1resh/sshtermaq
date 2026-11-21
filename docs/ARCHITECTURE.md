@@ -43,6 +43,15 @@ for `https://app.sshtermaq.local/` by WebView2's `WebResourceRequested` (`HostWi
 as two sections of `SSHTermaq.app`'s executable (`-sectcreate`), served for `sshtermaq://app/` by a
 `WKURLSchemeHandler` (`HostWindowMac`). There is no `ui` folder on disk (dev: `--dev-url http://localhost:5173`).
 
+Terminal renderer: WebGL (default) or DOM (Settings › Terminal › Renderer); WebGL falls back to DOM when its context
+is lost or unavailable, and for a font a canvas can't draw. WebGL draws every glyph on a canvas first, and WKWebView
+gives canvases only the system fonts and the page's web fonts, so a font the user installed (a Nerd Font in
+`~/Library/Fonts`) would be drawn in a fallback font with boxes for its icons. `ui/src/terminal/canvasFont.ts` measures
+the font list on a canvas and in the page; different widths keep that pane on DOM, and the Renderer setting says so.
+WebView2 gives canvases the installed fonts, so on Windows the check always passes. Cost, measured on an M1 (one pane,
+a full screen redrawn at 60 Hz): the same 60 fps, about 30% CPU with WebGL and 45% with DOM; output speed is the same
+(xterm.js parsing is the limit, not drawing).
+
 Version: set only in `CMakeLists.txt` (`project(SSHTermaq VERSION x.y.z)`). On every build `cmake/BuildInfo.cmake`
 writes `build/<preset>/generated/st_build_info.h` (version, build number = commit count, short commit hash with
 `-dirty`), used by `native/res/windows/app.rc` (file version `x.y.z.<build>`) and `app/BuildInfo.h`, which adds the link time

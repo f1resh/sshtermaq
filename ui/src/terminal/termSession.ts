@@ -27,6 +27,7 @@ import { resolveTerminalScheme } from '@/theme/resolve';
 import { useSystemThemeStore } from '@/theme/ThemeController';
 import { isMac } from '@shared/platform';
 import type { ColorScheme, ConnStatusEvent, SessionConfig } from '@shared/types';
+import { canvasDrawsFont } from './canvasFont';
 import { forgetConn, lastStatusOf, PANE_PROMPT_KINDS, subscribeConn } from './connEvents';
 import { translateKey } from './keymap';
 import { terminalRegistry, type TerminalHandle } from './registry';
@@ -333,7 +334,9 @@ export class TermSession {
 
   private updateRenderer(): void {
     if (!this.opened || this.disposed) return;
-    const want = useSettings.getState().settings.terminal.renderer !== 'dom' && !this.webglFailed;
+    // A font a canvas can't draw (a user-installed font on macOS, canvasFont.ts) stays on the DOM renderer.
+    const want =
+      useSettings.getState().settings.terminal.renderer !== 'dom' && !this.webglFailed && canvasDrawsFont(String(this.term.options.fontFamily ?? ''));
     if (!want) {
       this.disableWebgl();
       return;

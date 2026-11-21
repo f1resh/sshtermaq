@@ -29,6 +29,7 @@ import { Button, Checkbox, Modal, NumberInput, Select, TextArea, TextInput, cx, 
 import { useSettings } from '@/store/data';
 import { useShells } from '@/store/shells';
 import { useUi } from '@/store/ui';
+import { canvasDrawsFont } from '@/terminal/canvasFont';
 import { APP_THEMES } from '@/theme/appThemes';
 import { BUILTIN_SCHEMES } from '@/theme/schemes';
 import { BACKDROPS_ENABLED, useSystemDark } from '@/theme/ThemeController';
@@ -263,7 +264,14 @@ function TerminalPage() {
         <SettingRow label="Padding">
           <Slider value={t.padding} min={0} max={24} onChange={(padding) => update({ terminal: { padding } })} format={(v) => `${v}px`} />
         </SettingRow>
-        <SettingRow label="Renderer" description="GPU rendering is faster; DOM rendering is the compatible fallback.">
+        <SettingRow
+          label="Renderer"
+          description={
+            t.renderer === 'webgl' && !canvasDrawsFont(t.fontFamily)
+              ? 'GPU rendering on macOS can’t use fonts you installed yourself, only those that come with the system, so terminals with this font use DOM rendering.'
+              : 'GPU rendering uses less CPU; DOM rendering is the compatible fallback.'
+          }
+        >
           <SegmentedControl value={t.renderer} onChange={(renderer) => update({ terminal: { renderer } })} size="sm" options={[{ value: 'webgl', label: 'GPU (WebGL)' }, { value: 'dom', label: 'DOM' }]} />
         </SettingRow>
       </Section>

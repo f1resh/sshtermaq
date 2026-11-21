@@ -2,6 +2,14 @@
 
 All notable changes to SSHTermaq. Newest first.
 
+## [1.2.0] - Unreleased
+
+### Fixed
+- macOS: fonts you installed yourself, such as Nerd Fonts, showed as a fallback font with boxes instead of icons when
+  the renderer was GPU (WebGL). The GPU renderer on macOS can only use the fonts that come with the system, so
+  terminals with such a font now use the DOM renderer, and Settings › Terminal › Renderer says so. DOM rendering looks
+  the same; it uses somewhat more CPU when a program redraws the whole screen quickly.
+
 ## [1.1.0] - 2026-11-14
 
 ### Added

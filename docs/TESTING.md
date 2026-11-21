@@ -11,9 +11,9 @@ them depends on another.
 | Part | What it tests | Framework | Where | Automated | Size | Run time |
 |---|---|---|---|---|---|---|
 | **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 260 test cases | about 1 minute |
-| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system; finished transfers' times; the font picker's lists; Credentials (which sessions and logins use a key or a login, how a login signs in, names; unlocking and retrying when they are locked; what an import did); host names (the cases shared with the native check); the question before a link connects; imported sessions that run a command on this computer | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 23 files, 224 tests | under 2 seconds |
+| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system; finished transfers' times; the font picker's lists; Credentials (which sessions and logins use a key or a login, how a login signs in, names; unlocking and retrying when they are locked; what an import did); host names (the cases shared with the native check); the question before a link connects; imported sessions that run a command on this computer; the WebGL renderer's font check (DOM for fonts a canvas can't draw) | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 24 files, 229 tests | under 2 seconds |
 | **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart, the SFTP panel, the two-pane file manager, import and export, the key generator, settings, Credentials (keys, logins, remembered passphrases, the master password, export and import), links asking before they connect | Playwright Test | `ui/e2e/*.spec.ts` | yes | 20 files, 95 tests, each run twice (190, of which 2 macOS-only skip in the Windows layout) | about 5 minutes |
-| **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs`, `ui/scripts/checks/` | no, run by hand | `checks/local-terminal.mjs` | seconds |
+| **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs`, `ui/scripts/checks/` | no, run by hand | `checks/local-terminal.mjs`, `checks/terminal-fonts.mjs` | seconds |
 
 The browser tests cover the main screens and dialogs, not yet the host key and password prompts or the color scheme
 editor. There is no CI: tests run when a developer runs them, or through the build scripts:
@@ -582,7 +582,7 @@ Self-tests of the fake servers, validated with independent clients (`plink`, `ps
 | TestSshServer serves SFTP to psftp | `[support][plink]` | PuTTY `psftp` | `support_tests.cpp` |
 | TestSshServer honours local forwarding from plink | `[support][plink]` | PuTTY `plink` | `support_tests.cpp` |
 
-### UI unit tests (224 tests)
+### UI unit tests (229 tests)
 
 #### `actions.test.ts` (7)
 
@@ -758,6 +758,18 @@ PuTTY keyboard modes: which escape sequence each key sends for every function-ke
 | PuTTY local actions | Shift+PageUp/PageDown scroll pages, Ctrl+PageUp/PageDown scroll lines |
 | PuTTY local actions | Ctrl+Break sends the break special, Pause sends ^Z |
 | PuTTY local actions | ordinary keys are left to xterm.js |
+
+#### `canvasFont.test.ts` (5)
+
+Whether the WebGL renderer can draw the terminal font: a canvas and a page element measure the same text in the font list, and different widths (a font the user installed, which WKWebView on macOS doesn't give canvases) send the pane to the DOM renderer. Source: [ui/src/terminal/canvasFont.test.ts](../ui/src/terminal/canvasFont.test.ts).
+
+| Test |
+|---|
+| widths within half a pixel match |
+| a font the canvas and the page both draw is drawable |
+| a font only the page finds is not (a user-installed font in WKWebView) |
+| measures the font list at a fixed size and remembers the answer per list |
+| without a canvas or a page it leaves the renderer alone and asks again later |
 
 #### `themes.test.ts` (5)
 
@@ -1090,6 +1102,34 @@ The same steps on both systems (Debug build): the shell list (at least one, exac
 the default shell, `TERM_PROGRAM` / `COLORTERM`, non-ASCII text both ways, the window size and (macOS) `LANG` for
 bash-like shells, `exit` closes the tab, a second shell from the + menu, and on Windows a WSL distribution if there is one. Prints a `PASS` / `FAIL` line per check and
 exits non-zero on the first failure.
+
+### `checks/terminal-fonts.mjs`: terminal fonts with both renderers (Windows and macOS)
+
+```
+node scripts/app.mjs --steps scripts/checks/terminal-fonts.mjs --out ../artifacts/check.png
+```
+
+The same steps on both systems (Debug build, a PowerShell or POSIX default shell). For the system font (Menlo /
+Consolas) and the first Nerd Font installed (skipped if there is none; install one, such as CaskaydiaMono Nerd Font,
+to check it), with the Renderer setting on GPU (WebGL) and on DOM, it prints a line of text, powerline arrows, Nerd
+Font icons, box drawing and blocks in a local terminal. It checks automatically:
+- With the GPU setting, the pane uses WebGL exactly when a canvas draws the font as page text does. The script
+  measures this itself, apart from the app's own `canvasFont.ts`.
+- With the DOM setting, the pane uses DOM.
+- On Windows, a Nerd Font stays on WebGL.
+- When a font falls back to DOM, Settings › Terminal › Renderer says so.
+
+Prints `PASS` / `FAIL` lines and saves a screenshot per case, `check-fonts-<font>-<webgl|dom>.png`. **Look at them**:
+- Every case shows the font's own letters, joined box lines and the powerline arrows (xterm.js draws those itself).
+- The Nerd Font shows its icons as pictures with both settings, never boxes or blanks.
+- The system font shows boxes for the icons it doesn't have; that is expected.
+
+Expected results:
+
+| | System font, GPU | System font, DOM | Nerd Font, GPU | Nerd Font, DOM |
+|---|---|---|---|---|
+| macOS | WebGL | DOM | DOM, with the note in Settings | DOM |
+| Windows | WebGL | DOM | WebGL | DOM |
 
 ### `shot.mjs`: the UI in a browser, with the mock backend
 
