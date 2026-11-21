@@ -5,6 +5,7 @@
 
 #include "net/Proxy.h"
 #include "platform/sys/Net.h"
+#include "platform/sys/Process.h"
 #include "session/LineDiscipline.h"
 #include "transport/RawTransport.h"
 #include "transport/RloginTransport.h"
@@ -128,6 +129,50 @@ TEST_CASE("proxy: telnet/command template expansion", "[net][proxy]") {
     REQUIRE(expandProxyTemplate("connect %host %port\\n", p, "target", 22) == "connect target 22\n");
     REQUIRE(expandProxyTemplate("%user:%pass@%proxyhost:%proxyport %%", p, "t", 1) == "bob:pw@proxy.example:8080 %");
     REQUIRE(expandProxyTemplate("\\x41\\t\\\\", p, "t", 1) == "A\t\\");
+}
+
+TEST_CASE("proxy: a local proxy command takes only plain names; the password goes through the environment",
+          "[net][proxy]") {
+    ProxyConfig p;
+    p.host = "proxy.example";
+    p.port = 8080;
+    p.username = "bob@corp";
+    p.password = "p&w|\"d;$(x)`!%";
+    ProxyCommandLine line;
+    std::string error;
+    REQUIRE(expandProxyCommand("nc -X connect -x %proxyhost:%proxyport %host %port", p, "target.example", 22, line, error));
+    CHECK(line.command == "nc -X connect -x proxy.example:8080 target.example 22");
+    CHECK(line.env.empty());
+    // %pass: a reference to the variable, the value in the environment only.
+    REQUIRE(expandProxyCommand("connect --user %user --pass %pass %host", p, "fe80::1%eth0", 22, line, error));
+    CHECK(line.command == "connect --user bob@corp --pass " + sys::shellVariableReference(kProxyPassVariable) + " fe80::1%eth0");
+    CHECK(line.command.find(p.password) == std::string::npos);
+    REQUIRE(line.env.size() == 1);
+    CHECK(line.env[0].first == kProxyPassVariable);
+    CHECK(line.env[0].second == p.password);
+    // A token not used is not checked; one used with shell characters fails before anything runs.
+    for (const std::string host : {"x&calc.exe&", "a|b", "a;b", "$(id)", "`id`", "a b", "\"q\"", "-oops", "fe80::1%&x"}) {
+        INFO("host: " << host);
+        CHECK(expandProxyCommand("nc %proxyhost %proxyport", p, host, 22, line, error));
+        REQUIRE_FALSE(expandProxyCommand("nc %host %port", p, host, 22, line, error));
+        CHECK(error == "The host name \"" + host + "\" has characters that cannot go into a local proxy command; nothing "
+                       "was run");
+        CHECK(line.command.empty());
+        CHECK(line.env.empty());
+    }
+    ProxyConfig q = p;
+    q.host = "proxy&calc";
+    REQUIRE_FALSE(expandProxyCommand("nc %proxyhost %host", q, "target", 22, line, error));
+    CHECK(error.rfind("The proxy host name \"proxy&calc\"", 0) == 0);
+    q = p;
+    for (const std::string user : {"bo b", "a&b", "-l", "u;id", "u$x"}) {
+        INFO("user: " << user);
+        q.username = user;
+        REQUIRE_FALSE(expandProxyCommand("connect %user %host", q, "target", 22, line, error));
+        CHECK(error.rfind("The proxy user name", 0) == 0);
+    }
+    q.username.clear();  // no user name: nothing to check
+    CHECK(expandProxyCommand("connect %user %host", q, "target", 22, line, error));
 }
 
 TEST_CASE("sockets: connect refused, pair and listen", "[net]") {

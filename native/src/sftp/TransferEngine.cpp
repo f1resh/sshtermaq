@@ -1,5 +1,6 @@
 #include "sftp/TransferEngine.h"
 
+#include "core/Json.h"
 #include "core/Log.h"
 #include "core/Strings.h"
 #include "core/Uuid.h"
@@ -26,6 +27,35 @@ namespace {
 
 constexpr auto kProgressInterval = std::chrono::milliseconds(100);
 constexpr const char* kPartialSuffix = ".st-partial";
+/** Next to a partial file: which version of the remote file it is the start of (remote path, size, time). */
+constexpr const char* kPartialInfoSuffix = ".st-partial.info";
+
+fs::path partialInfoPath(const fs::path& target) {
+    fs::path p = target;
+    p += kPartialInfoSuffix;
+    return p;
+}
+
+/** The record for a download of `remote` (`size` bytes, modified `mtime`) into `target`'s partial file. */
+std::string partialRecord(const std::string& remote, uint64_t size, int64_t mtime) {
+    return Json{{"remote", remote}, {"size", size}, {"mtime", mtime}}.dump();
+}
+
+/** True when the record next to `target`'s partial file says it came from this version of the remote file. */
+bool partialMatches(const fs::path& target, const std::string& remote, uint64_t size, int64_t mtime) {
+    const auto text = sys::readFile(partialInfoPath(target));
+    if (!text) return false;
+    const Json j = Json::parse(*text, nullptr, false);
+    if (!j.is_object()) return false;
+    return j.value("remote", std::string()) == remote && j.value("size", uint64_t{0}) == size &&
+           j.value("mtime", int64_t{0}) == mtime;
+}
+
+void removePartialInfo(const fs::path& target) {
+    std::string ignored;
+    std::error_code ec;
+    if (fs::exists(partialInfoPath(target), ec)) sys::removeFile(partialInfoPath(target), ignored);
+}
 
 std::string u8(const fs::path& p) { return sys::fromPath(p); }
 
@@ -53,6 +83,26 @@ struct Item {
     uint64_t size = 0;
     int64_t mtime = 0;  // Unix s (source side)
     std::string rel;    // shown as "current file"
+    uint32_t mode = 0;  // permission bits of the source (downloads: the remote mode; uploads: 0 = 0644)
+};
+
+/** True when `path` is `root` or inside it ('/'-separated remote paths, or generic local ones). */
+bool within(const std::string& path, const std::string& root) {
+    if (path == root) return true;
+    const std::string prefix = root.empty() || root.back() == '/' ? root : root + "/";
+    return path.size() > prefix.size() && path.compare(0, prefix.size(), prefix) == 0;
+}
+
+/** A folder walk (download or upload): the real paths of the folders on the way down, for links that lead back. */
+struct WalkState {
+    std::vector<std::string> chain;  // real path of the start folder, then of every folder below it on the way
+    size_t entries = 0;              // checkTreeLimits
+    int skippedLinks = 0;
+    /** A link to a folder whose real path is in the tree being walked (or in a folder it came through): a loop or
+     *  a second copy of something that is copied anyway. */
+    bool leadsBack(const std::string& real) const {
+        return std::any_of(chain.begin(), chain.end(), [&](const std::string& c) { return within(real, c); });
+    }
 };
 
 struct PendingConflict {
@@ -446,13 +496,22 @@ struct TransferEngine::Impl : std::enable_shared_from_this<TransferEngine::Impl>
 
     /* ---- download */
 
-    void planDownloadDir(RemoteFs& rfs, const TransferPtr& t, const std::string& remoteDir, const fs::path& localDir,
-                         const std::string& rel, std::vector<Item>& items, uint64_t& total, int& files, bool caseSensitive) {
+    /**
+     * Lists a remote folder for a download, depth first. Links to folders are followed (their content is copied as
+     * a normal folder, as scp -r does), except those whose real path leads back into the tree (WalkState): those are
+     * counted in skippedLinks. Past the tree limits (checkTreeLimits) the transfer fails before anything is copied.
+     */
+    void planDownloadDir(RemoteFs& rfs, const TransferPtr& t, WalkState& walk, const std::string& remoteDir,
+                         const std::string& realDir, const fs::path& localDir, const std::string& rel, int depth,
+                         std::vector<Item>& items, uint64_t& total, int& files, bool caseSensitive) {
         items.push_back(Item{true, remoteDir, localDir, 0, 0, rel});
         setListing(t, total, files, rel, false);
+        walk.chain.push_back(realDir);
         sftputil::LocalNames names(caseSensitive);
         for (auto& [e, targetSize] : rfs.list(remoteDir, true, &t->cancel)) {
             checkCancel(t);
+            const bool folderLink = e.type == "link" && e.linkTargetIsDir;
+            checkTreeLimits(depth + (e.type == "dir" || folderLink ? 1 : 0), ++walk.entries, e.path);
             const std::string childRel = rel.empty() ? e.name : rel + "/" + e.name;
             const std::string wanted = sys::fromPath(sftputil::sanitizeLocalName(e.name));
             const std::string name = names.claim(wanted);
@@ -461,19 +520,37 @@ struct TransferEngine::Impl : std::enable_shared_from_this<TransferEngine::Impl>
                              "ignores: downloaded as " + name);
             const fs::path local = localDir / sys::toPath(name);
             if (e.type == "dir") {
-                planDownloadDir(rfs, t, e.path, local, childRel, items, total, files, caseSensitive);
-            } else if (e.type == "file" || (e.type == "link" && !e.linkTargetIsDir && targetSize > 0)) {
+                planDownloadDir(rfs, t, walk, e.path, sftputil::joinRemote(realDir, e.name), local, childRel, depth + 1,
+                                items, total, files, caseSensitive);
+            } else if (folderLink) {
+                std::string real;
+                try {
+                    real = rfs.realpath(e.path);
+                } catch (const ConnectionLost&) {
+                    throw;
+                } catch (const SftpError&) {
+                }
+                if (real.empty() || walk.leadsBack(real)) {
+                    applog::info("sftp: " + childRel + " is a link to a folder " +
+                                 (real.empty() ? std::string("that cannot be resolved") : "back in the tree (" + real + ")") +
+                                 "; not followed");
+                    ++walk.skippedLinks;
+                    continue;
+                }
+                planDownloadDir(rfs, t, walk, e.path, real, local, childRel, depth + 1, items, total, files, caseSensitive);
+            } else if (e.type == "file" || (e.type == "link" && targetSize > 0)) {
                 const uint64_t size = e.type == "file" ? static_cast<uint64_t>(e.size) : targetSize;
-                items.push_back(Item{false, e.path, local, size, e.mtime / 1000, childRel});
+                items.push_back(Item{false, e.path, local, size, e.mtime / 1000, childRel, e.mode});
                 total += size;
                 ++files;
-            } else if (e.type == "link" && !e.linkTargetIsDir) {
+            } else if (e.type == "link") {
                 // Link to an empty file, or dangling: try it (an open error is reported).
-                items.push_back(Item{false, e.path, local, 0, 0, childRel});
+                items.push_back(Item{false, e.path, local, 0, 0, childRel, e.mode});
                 ++files;
             }
-            // Links to folders are not followed (loop protection); special files are skipped.
+            // Special files (sockets, devices) are skipped.
         }
+        walk.chain.pop_back();
     }
 
     void runDownload(Queue& q, const TransferPtr& t) {
@@ -483,13 +560,23 @@ struct TransferEngine::Impl : std::enable_shared_from_this<TransferEngine::Impl>
         if (!st) throw SftpError("Cannot access " + quotePath(t->remotePath) + ": No such file or folder");
         std::vector<Item> items;
         uint64_t total = 0;
+        WalkState walk;
         if (st->type == "dir") {
             int found = 0;
             setListing(t, 0, 0, "", true);
-            planDownloadDir(rfs, t, t->remotePath, t->localPath, "", items, total, found, sys::caseSensitiveFolder(t->localPath));
+            std::string real = t->remotePath;
+            try {
+                real = rfs.realpath(t->remotePath);
+            } catch (const ConnectionLost&) {
+                throw;
+            } catch (const SftpError&) {
+            }
+            planDownloadDir(rfs, t, walk, t->remotePath, real, t->localPath, "", 0, items, total, found,
+                            sys::caseSensitiveFolder(t->localPath));
+            if (walk.skippedLinks) update(t, false, [&](TransferProgress& p) { p.skippedLinks = walk.skippedLinks; });
         } else if (st->type == "file") {
             total = static_cast<uint64_t>(st->size);
-            items.push_back(Item{false, t->remotePath, t->localPath, total, st->mtime / 1000, st->name});
+            items.push_back(Item{false, t->remotePath, t->localPath, total, st->mtime / 1000, st->name, st->mode});
         } else {
             throw SftpError(quotePath(t->remotePath) + " is not a regular file or folder");
         }
@@ -580,8 +667,25 @@ struct TransferEngine::Impl : std::enable_shared_from_this<TransferEngine::Impl>
             uint64_t psize = 0;
             int64_t pmtime = 0;
             bool pdir = false;
-            // An interrupted earlier attempt left a shorter partial file: continue it.
-            if (localInfo(part, psize, pmtime, pdir) && !pdir && psize > 0 && psize < item.size) resumeFrom = psize;
+            if (localInfo(part, psize, pmtime, pdir) && !pdir && psize > 0 && psize < item.size) {
+                // An interrupted earlier attempt left a shorter partial file. Continue it by itself only when it is
+                // the start of this version of the remote file (else the result would be the start of the old one
+                // and the end of the new one); the Resume answer to a conflict is the user's own choice.
+                if (resumeTarget || partialMatches(target, item.remote, item.size, item.mtime)) {
+                    resumeFrom = psize;
+                } else {
+                    applog::info("sftp: the partial file of " + u8(target.filename()) +
+                                 " is from another version of the file (or has no record of it); starting over");
+                }
+            }
+        }
+        if (caps.resume) {
+            // Written before the first byte: an interrupted download leaves its partial file with the record.
+            try {
+                sys::writeFileAtomic(partialInfoPath(target), partialRecord(item.remote, item.size, item.mtime));
+            } catch (const std::exception& e) {
+                applog::warn("sftp: cannot write " + u8(partialInfoPath(target).filename()) + ": " + e.what());
+            }
         }
         sys::File h;
         if (!h.open(part, resumeFrom ? sys::File::Mode::WriteKeep : sys::File::Mode::Write)) {
@@ -612,16 +716,26 @@ struct TransferEngine::Impl : std::enable_shared_from_this<TransferEngine::Impl>
             if (!sys::renameReplace(part, target, moveError)) {
                 throw SftpError("Cannot replace '" + u8(target) + "': " + moveError);
             }
+            removePartialInfo(target);
+            // A script stays runnable (macOS; Windows has no such bit). Only the executable bits are taken.
+            if (!sys::addExecutableBits(target, item.mode))
+                applog::warn("sftp: cannot make " + u8(target.filename()) + " executable: " + sys::lastErrorMessage());
         } catch (const Cancelled&) {
             if (reader) reader->abort();
             h.close();
-            if (resumeFrom == 0) sys::removeFile(part, moveError);  // a fresh partial file is not wanted
+            if (resumeFrom == 0) {  // a fresh partial file is not wanted
+                sys::removeFile(part, moveError);
+                removePartialInfo(target);
+            }
             throw;
         } catch (...) {
             if (reader) reader->abort();
             h.close();
-            // Keep the partial file so the next attempt continues it (when the protocol can).
-            if (!caps.resume) sys::removeFile(part, moveError);
+            // Keep the partial file (and its record) so the next attempt continues it (when the protocol can).
+            if (!caps.resume) {
+                sys::removeFile(part, moveError);
+                removePartialInfo(target);
+            }
             throw;
         }
         return true;
@@ -643,33 +757,14 @@ struct TransferEngine::Impl : std::enable_shared_from_this<TransferEngine::Impl>
             items.push_back(Item{true, t->remotePath, t->localPath, 0, mtime, ""});
             int found = 0;
             setListing(t, 0, 0, "", true);
+            WalkState walk;
             std::error_code ec;
-            fs::recursive_directory_iterator it(t->localPath, fs::directory_options::skip_permission_denied, ec), end;
-            if (ec) throw SftpError("Cannot read folder '" + u8(t->localPath) + "': " + ec.message());
-            for (; it != end; it.increment(ec)) {
-                if (ec) break;
-                checkCancel(t);
-                const fs::path& p = it->path();
-                const std::string rel = sys::fromGenericPath(fs::relative(p, t->localPath, ec));
-                if (ec || rel.empty()) continue;
-                uint64_t sz = 0;
-                int64_t mt = 0;
-                bool d = false;
-                if (!localInfo(p, sz, mt, d)) continue;
-                const std::string remote = sftputil::joinRemote(t->remotePath, rel);
-                if (d) {
-                    items.push_back(Item{true, remote, p, 0, mt, rel});
-                    setListing(t, total, found, rel, false);
-                } else if (t->options.skipMacFiles && isMacFile(p.filename())) {
-                    continue;
-                } else if (it->is_regular_file(ec)) {
-                    items.push_back(Item{false, remote, p, sz, mt, rel});
-                    total += sz;
-                    ++found;
-                }
-            }
+            const fs::path real = fs::weakly_canonical(t->localPath, ec);
+            planUploadDir(t, walk, t->localPath, ec ? t->localPath : real, t->remotePath, "", 0, items, total, found);
+            if (walk.skippedLinks) update(t, false, [&](TransferProgress& p) { p.skippedLinks = walk.skippedLinks; });
         } else {
-            items.push_back(Item{false, t->remotePath, t->localPath, size, mtime, u8(t->localPath.filename())});
+            items.push_back(Item{false, t->remotePath, t->localPath, size, mtime, u8(t->localPath.filename()),
+                                 sys::permissionBits(t->localPath).value_or(0)});
             total = size;
         }
         const int files = static_cast<int>(std::count_if(items.begin(), items.end(), [](const Item& i) { return !i.dir; }));
@@ -700,6 +795,60 @@ struct TransferEngine::Impl : std::enable_shared_from_this<TransferEngine::Impl>
                 if (it->dir) fs::remove(it->local, ec);  // best effort: only empty folders go (hidden leftovers keep it)
             }
         }
+    }
+
+    /** The local side of planDownloadDir: folders depth first, links to folders followed unless they lead back. */
+    void planUploadDir(const TransferPtr& t, WalkState& walk, const fs::path& dir, const fs::path& realDir,
+                       const std::string& remoteDir, const std::string& rel, int depth, std::vector<Item>& items,
+                       uint64_t& total, int& found) {
+        walk.chain.push_back(sys::fromGenericPath(realDir));
+        std::error_code ec;
+        fs::directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec), end;
+        if (ec) throw SftpError("Cannot read folder '" + u8(dir) + "': " + ec.message());
+        std::vector<fs::path> children;
+        for (; it != end; it.increment(ec)) {
+            if (ec) break;
+            children.push_back(it->path());
+        }
+        std::sort(children.begin(), children.end());
+        for (const fs::path& p : children) {
+            checkCancel(t);
+            const std::string name = u8(p.filename());
+            const std::string childRel = rel.empty() ? name : rel + "/" + name;
+            const std::string remote = sftputil::joinRemote(remoteDir, name);
+            const auto info = sys::fileInfo(p);
+            if (!info) continue;
+            // A symbolic link, and on Windows also a junction (any reparse point): its real path decides.
+            const bool link = info->isLink;
+            const bool isDirectory = fs::is_directory(p, ec);  // follows links
+            checkTreeLimits(depth + (isDirectory ? 1 : 0), ++walk.entries, u8(p));
+            uint64_t sz = info->size;
+            const int64_t mt = info->mtime;
+            if (isDirectory) {
+                fs::path real = realDir / p.filename();
+                if (link) {
+                    real = fs::canonical(p, ec);
+                    if (ec || walk.leadsBack(sys::fromGenericPath(real))) {
+                        applog::info("sftp: " + childRel + " is a link to a folder " +
+                                     (ec ? std::string("that cannot be resolved") : "back in the tree (" + u8(real) + ")") +
+                                     "; not followed");
+                        ++walk.skippedLinks;
+                        continue;
+                    }
+                }
+                items.push_back(Item{true, remote, p, 0, mt, childRel});
+                setListing(t, total, found, childRel, false);
+                planUploadDir(t, walk, p, real, remote, childRel, depth + 1, items, total, found);
+            } else if (t->options.skipMacFiles && isMacFile(p.filename())) {
+                continue;
+            } else if (fs::is_regular_file(p, ec)) {  // follows links: a link to a file is uploaded as its content
+                if (link) sz = fs::file_size(p, ec);
+                items.push_back(Item{false, remote, p, ec ? 0 : sz, mt, childRel, sys::permissionBits(p).value_or(0)});
+                total += ec ? 0 : sz;
+                ++found;
+            }
+        }
+        walk.chain.pop_back();
     }
 
     static void ensureRemoteDir(RemoteFs& rfs, const std::string& path) {
@@ -767,7 +916,9 @@ struct TransferEngine::Impl : std::enable_shared_from_this<TransferEngine::Impl>
             throw SftpError("Cannot read '" + u8(item.local) + "': " + h.error());
         }
         WriteSpec spec;
-        spec.mode = 0644;
+        // A new remote file gets the local file's permission bits (macOS; Windows has none: 0644). An existing one
+        // keeps its own (SFTP and scp apply the mode only when they create the file).
+        spec.mode = item.mode ? item.mode : 0644;
         spec.offset = offset;
         spec.size = item.size;
         spec.mtime = t->options.preserveTimestamps ? item.mtime : 0;

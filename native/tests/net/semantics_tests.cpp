@@ -4,6 +4,7 @@
 // against the original Winsock implementation.
 #include "TestExecProcess.h"
 #include "TestNet.h"
+#include "TestServers.h"
 #include "TestTransport.h"
 
 #include "platform/Platform.h"
@@ -348,6 +349,40 @@ TEST_CASE("edge: a proxy command's output reaches the session, its errors the ev
     REQUIRE(l.waitClosed());  // the command exited: its end of the stream closed
     REQUIRE(l.info.clean);
     REQUIRE(l.allLogs().find("proxy: oops") != std::string::npos);
+}
+
+TEST_CASE("edge: a proxy command gets any password unchanged, and a bad host name runs nothing", "[net][edge][proxy]") {
+    {
+        RecordingListener l;
+        SessionConfig s = sessionFor(Protocol::Raw, 22);
+        s.host = "target.example";
+        s.proxy.type = ProxyType::Command;
+        s.proxy.password = "p&w|d<x>y;z \"q\" ^c $(id) `id` 100%";
+        // The shell sees only the variable's name; echo prints its value as it is.
+        s.proxy.localCommand = isWindows() ? "echo got:%pass:end& ping -n 2 127.0.0.1 >nul" : "echo got:%pass:end; sleep 1";
+        auto t = makeRawTransport(contextFor(s, l));
+        t->start();
+        REQUIRE(l.waitData("got:" + s.proxy.password + ":end"));
+        REQUIRE(l.waitClosed());
+        CHECK(l.allLogs().find(s.proxy.password) == std::string::npos);  // nor in the log
+    }
+    {
+        TempDir dir;
+        const auto marker = dir.path() / "ran.txt";
+        RecordingListener l;
+        SessionConfig s = sessionFor(Protocol::Raw, 22);
+        s.host = "x&calc.exe&";
+        s.proxy.type = ProxyType::Command;
+        s.proxy.localCommand = (isWindows() ? "echo ran> \"" : "echo ran > '") + sys::fromPath(marker) +
+                               (isWindows() ? "\" & echo %host" : "'; echo %host");
+        auto t = makeRawTransport(contextFor(s, l));
+        t->start();
+        REQUIRE(l.waitClosed());
+        CHECK_FALSE(l.info.clean);
+        CHECK(l.info.reason.find("cannot go into a local proxy command") != std::string::npos);
+        std::this_thread::sleep_for(500ms);
+        CHECK_FALSE(std::filesystem::exists(marker));
+    }
 }
 
 TEST_CASE("edge: closing the session ends a running proxy command promptly", "[net][edge][proxy]") {

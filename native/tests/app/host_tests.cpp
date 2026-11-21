@@ -7,9 +7,12 @@
 #include "TestBridge.h"
 #include "TestServers.h"
 
+#include "core/Threading.h"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <future>
 #include <thread>
 
 using namespace st;
@@ -195,6 +198,35 @@ TEST_CASE("host: the window placement is kept in state.json", "[app][host]") {
     f.window.onPlacementChanged({7, 8, 803, 603, true}, true);
     std::this_thread::sleep_for(150ms);
     CHECK(f.store.getState("window")["x"] == 7);
+}
+
+TEST_CASE("host: resizing does not hold up the shared worker pool", "[app][host]") {
+    // Saving the size used to sleep on a pool worker per change: at 60 changes a second the pool's other jobs (file
+    // panels, dialogs) waited for over a minute (review 3).
+    HostFixture f;
+    f.host.placementDelay = 200ms;
+    for (int i = 0; i < 500; ++i) f.window.onPlacementChanged({i, i, 800 + i, 600, false}, false);
+    std::promise<void> ran;
+    auto job = ran.get_future();
+    const auto begin = std::chrono::steady_clock::now();
+    ThreadPool::shared().submit([&] { ran.set_value(); });
+    REQUIRE(job.wait_for(5s) == std::future_status::ready);
+    CHECK(std::chrono::steady_clock::now() - begin < 100ms);
+    // Once quiet, the newest placement is saved.
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    const auto savedWidth = [&] {
+        const Json w = f.store.getState("window");
+        return w.is_object() ? w.value("w", 0) : 0;
+    };
+    while (savedWidth() != 1299 && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(10ms);
+    CHECK(f.store.getState("window") == Json{{"x", 499}, {"y", 499}, {"w", 1299}, {"h", 600}, {"maximized", false}});
+    // A final change saves at once.
+    f.window.onPlacementChanged({1, 1, 640, 480, false}, false);
+    f.window.onPlacementChanged({2, 2, 641, 481, false}, true);
+    CHECK(f.store.getState("window")["w"] == 641);
+    std::this_thread::sleep_for(300ms);
+    CHECK(f.store.getState("window")["w"] == 641);  // the pending one was dropped
 }
 
 TEST_CASE("host: the bundled UI is served under its origin", "[app][host]") {

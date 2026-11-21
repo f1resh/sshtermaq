@@ -126,12 +126,12 @@ void runFind(RemoteFs& rfs, const FindRequest& req, const std::atomic<bool>& can
     const std::string root = req.root.empty() ? rfs.home() : req.root;
 
     FindEvent ev;
-    size_t found = 0;
+    size_t found = 0, scanned = 0;
     auto lastEmit = std::chrono::steady_clock::now();
-    std::deque<std::string> dirs{root};
+    std::deque<std::pair<std::string, int>> dirs{{root, 0}};  // folder, levels below the root
     bool first = true;
-    while (!dirs.empty() && !cancel && !ev.truncated) {
-        const std::string dir = dirs.front();
+    while (!dirs.empty() && !cancel && !ev.truncated && ev.error.empty()) {
+        const auto [dir, depth] = dirs.front();
         dirs.pop_front();
         std::vector<RemoteEntry> entries;
         try {
@@ -152,6 +152,12 @@ void runFind(RemoteFs& rfs, const FindRequest& req, const std::atomic<bool>& can
         ev.currentDir = dir;
         for (const auto& re : entries) {
             const SftpEntry& e = re.entry;
+            try {
+                checkTreeLimits(depth + (e.type == "dir" ? 1 : 0), ++scanned, e.path);
+            } catch (const SftpError& limit) {
+                ev.error = limit.what();  // what was found so far stays, with the message
+                break;
+            }
             if (!req.includeHidden && hidden(e.name)) continue;
             bool match = false;
             for (const auto& m : masks) {
@@ -167,7 +173,7 @@ void runFind(RemoteFs& rfs, const FindRequest& req, const std::atomic<bool>& can
                     break;
                 }
             }
-            if (e.type == "dir") dirs.push_back(e.path);
+            if (e.type == "dir") dirs.emplace_back(e.path, depth + 1);
         }
         const auto now = std::chrono::steady_clock::now();
         if (ev.results.size() >= 200 || now - lastEmit >= std::chrono::milliseconds(300)) {
@@ -315,18 +321,24 @@ Tree walkLocal(const fs::path& root, const SyncFilter& filter, const std::atomic
 
 Tree walkRemote(RemoteFs& rfs, const std::string& root, const SyncFilter& filter, const std::atomic<bool>& cancel) {
     Tree tree;
-    std::deque<std::pair<std::string, std::string>> dirs{{root, ""}};
+    struct Dir {
+        std::string path, rel;
+        int depth;
+    };
+    std::deque<Dir> dirs{{root, "", 0}};
+    size_t scanned = 0;
     while (!dirs.empty()) {
         if (cancel) throw Cancelled();
-        auto [dir, rel] = dirs.front();
+        auto [dir, rel, depth] = dirs.front();
         dirs.pop_front();
         for (const auto& [e, targetSize] : rfs.list(dir, true, &cancel)) {
             const bool isDir = e.type == "dir";
             if (!filter.accepts(e.name, isDir)) continue;
+            checkTreeLimits(depth + (isDir ? 1 : 0), ++scanned, e.path);  // before anything is compared or changed
             const std::string childRel = rel.empty() ? e.name : rel + "/" + e.name;
             if (isDir) {
                 tree[childRel] = TreeEntry{true, 0, 0};
-                dirs.emplace_back(e.path, childRel);
+                dirs.push_back({e.path, childRel, depth + 1});
             } else if (e.type == "file") {
                 tree[childRel] = TreeEntry{false, static_cast<uint64_t>(e.size), e.mtime / 1000};
             } else if (e.type == "link" && !e.linkTargetIsDir && targetSize > 0) {

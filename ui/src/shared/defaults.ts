@@ -300,6 +300,7 @@ export function createDefaultSettings(): AppSettings {
       wordSeparators: ' ()[]{}\'"`,;:|<>',
       warnOnMultilinePaste: true,
       confirmCloseConnected: true,
+      confirmLinks: true,
       restoreTabs: false,
       restoreNames: true,
       reconnect: 'prompt',

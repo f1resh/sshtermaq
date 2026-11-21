@@ -35,6 +35,10 @@ describe('a finished transfer', () => {
     const folder = t({ filesTotal: 3000, filesDone: 3000, total: 24_535_219, transferred: 24_535_219, finishedAt: T0 + 41_000 });
     expect(finishedText(folder)).toBe('Done · 3,000 files · 23 MB in 41 s');
     expect(finishedText({ ...folder, skipped: 12 })).toBe('Done · 3,000 files, 12 skipped · 23 MB in 41 s');
+    expect(finishedText({ ...folder, skippedLinks: 2 })).toBe('Done · 3,000 files, 2 links to folders skipped · 23 MB in 41 s');
+    expect(finishedText({ ...folder, skipped: 1, skippedLinks: 1 })).toBe(
+      'Done · 3,000 files, 1 skipped, 1 link to folders skipped · 23 MB in 41 s'
+    );
   });
 
   it('failed and cancelled ones say how long they ran', () => {
@@ -47,6 +51,7 @@ describe('a finished transfer', () => {
     expect(ranFor(t(none))).toBeNull();
     expect(finishedText(t(none))).toBe('825 KB');
     expect(finishedText(t({ ...none, skipped: 2 }))).toBe('Done, 2 skipped');
+    expect(finishedText(t({ ...none, skippedLinks: 2 }))).toBe('Done, 2 links to folders skipped');
     expect(finishedText(t({ ...none, state: 'cancelled' }))).toBe('Cancelled');
     expect(finishedText(t({ ...none, state: 'error' }))).toBe('Failed');
     expect(finishedText(t({ ...none, direction: 'delete' }))).toBe('Deleted');

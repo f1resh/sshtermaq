@@ -13,6 +13,8 @@
 #include <atomic>
 #include <functional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace st {
 
@@ -31,6 +33,23 @@ bool proxyExcludes(const ProxyConfig& proxy, const std::string& host);
 
 /** PuTTY template substitution: %host %port %user %pass %proxyhost %proxyport %% and \n \r \t \\ \xHH escapes. */
 std::string expandProxyTemplate(const std::string& tmpl, const ProxyConfig& proxy, const std::string& host, int port);
+
+/** A local proxy command ready to start: the command line and the environment variables it needs. */
+struct ProxyCommandLine {
+    std::string command;
+    std::vector<std::pair<std::string, std::string>> env;
+};
+/** Name of the environment variable that carries %pass to a local proxy command. */
+inline constexpr const char* kProxyPassVariable = "ST_PROXY_PASS";
+/**
+ * The local proxy command (it runs through cmd.exe / sh): expandProxyTemplate, except that %host and %proxyhost must
+ * be host names or addresses (isValidHostName) and %user a plain user name (letters, digits, . _ - @ +, not starting
+ * with '-'); anything else fails with `error`, and nothing may be run. %pass becomes a reference to the environment
+ * variable kProxyPassVariable (sys::shellVariableReference), which `out.env` sets: the shell never parses the
+ * password, so any password works.
+ */
+bool expandProxyCommand(const std::string& tmpl, const ProxyConfig& proxy, const std::string& host, int port,
+                        ProxyCommandLine& out, std::string& error);
 
 /* ---- additions (net module) ------------------------------------------------------------------------ */
 

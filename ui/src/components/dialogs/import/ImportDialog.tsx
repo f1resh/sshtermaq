@@ -4,7 +4,7 @@
  * SSHTermaq JSON backup.
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowLeft, CheckCircle2, Download, FileCode2, FileJson, FolderOpen, KeyRound, Monitor } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CheckCircle2, Download, FileCode2, FileJson, FolderOpen, KeyRound, Monitor, SquareTerminal } from 'lucide-react';
 import { api } from '@/bridge/api';
 import { Button, Checkbox, Modal, Select, TextInput, cx } from '@/components/ui';
 import { useSessions } from '@/store/data';
@@ -21,6 +21,9 @@ import {
   filterCandidates,
   initialSelection,
   isPuttySource,
+  LOCAL_COMMAND_LABELS,
+  commandsSummary,
+  localCommands,
   SOURCE_LABELS,
   type ImportOptions
 } from './importModel';
@@ -227,6 +230,7 @@ function PreviewStep({
               {visible.map((c) => {
                 const exists = candidateExists(c, sessions, opts.targetFolder);
                 const open = expanded === c.key;
+                const commands = localCommands(c.session);
                 return (
                   <div key={c.key} className={cx('imp-item', !selected.has(c.key) && 'imp-item--off')}>
                     <div className="dlg-table__row imp-row">
@@ -252,6 +256,16 @@ function PreviewStep({
                       <span className="imp-proto">{c.session.protocol}</span>
                       <span className="imp-badges">
                         {exists && <Badge tone="warning" title="A saved session with this name already exists in the target folder">exists</Badge>}
+                        {commands.length > 0 && (
+                          <button
+                            className="link-btn imp-command-mark"
+                            onClick={() => setExpanded(open ? null : c.key)}
+                            title="Runs a command on this computer: show it"
+                            aria-label="Runs a command on this computer"
+                          >
+                            <SquareTerminal size={13} />
+                          </button>
+                        )}
                         {c.warnings.length > 0 && (
                           <button className="link-btn" onClick={() => setExpanded(open ? null : c.key)} title="Show import notes">
                             <AlertTriangle size={13} /> {c.warnings.length}
@@ -259,7 +273,16 @@ function PreviewStep({
                         )}
                       </span>
                     </div>
-                    {open && (
+                    {open && commands.length > 0 && (
+                      <ul className="imp-commands">
+                        {commands.map((cmd, i) => (
+                          <li key={i}>
+                            {LOCAL_COMMAND_LABELS[cmd.kind]}:<code className="mono-text">{cmd.command}</code>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {open && c.warnings.length > 0 && (
                       <ul className="imp-warnings">
                         {c.warnings.map((w, i) => (
                           <li key={i}>{w}</li>
@@ -313,6 +336,12 @@ function PreviewStep({
                   label={'Use PuTTY’s "Default Settings" as the template for new sessions'}
                 />
               )}
+              {puttySrc && preview.defaultSettings && localCommands(preview.defaultSettings).length > 0 && (
+                <div className="imp-default-command">
+                  Every new session would then run this command on this computer:
+                  <code className="mono-text">{localCommands(preview.defaultSettings)[0].command}</code>
+                </div>
+              )}
             </div>
           </div>
         </>
@@ -321,7 +350,13 @@ function PreviewStep({
         <Button icon={<ArrowLeft size={14} />} onClick={onBack}>
           Back
         </Button>
-        <span className="imp-footer__spacer" />
+        <span className="imp-footer__spacer imp-footer__note">
+          {commandsSummary(preview.candidates, selected) && (
+            <>
+              <SquareTerminal size={13} /> {commandsSummary(preview.candidates, selected)}
+            </>
+          )}
+        </span>
         <Button
           variant="primary"
           disabled={selected.size === 0 && !(opts.importHostKeys && preview.hostKeys.length) && !opts.useDefaultSettings}

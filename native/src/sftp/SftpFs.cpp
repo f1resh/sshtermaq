@@ -219,11 +219,18 @@ public:
             unlink(path);
             return;
         }
+        size_t entries = 0;
+        removeFolder(path, cancel, 0, entries);
+    }
+
+    /** A folder's files in batches, its folders one level deeper (checkTreeLimits). */
+    void removeFolder(const std::string& path, const std::atomic<bool>* cancel, int depth, size_t& entries) {
         std::vector<std::string> files;
         for (const auto& e : list(path, false, cancel)) {
             if (cancel && *cancel) throw Cancelled();
+            checkTreeLimits(depth + (e.entry.type == "dir" ? 1 : 0), ++entries, e.entry.path);
             if (e.entry.type == "dir")
-                removeTree(e.entry.path, cancel);
+                removeFolder(e.entry.path, cancel, depth + 1, entries);
             else
                 files.push_back(e.entry.path);
         }

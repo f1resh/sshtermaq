@@ -108,7 +108,11 @@ bool argon2(std::string_view kdf, std::string_view pass, std::string_view salt, 
         error = "Unsupported key derivation '" + std::string(kdf) + "'";
         return false;
     }
-    return crypto::argon2(name, pass, salt, memoryKiB, passes, lanes, outLen, out, error);
+    if (crypto::argon2(name, pass, salt, memoryKiB, passes, lanes, outLen, out, error)) return true;
+    // The parameters were checked when parsing (parsePpk), so a failed derivation is the memory it could not get.
+    if (error == "Argon2 key derivation failed")
+        error = "Not enough free memory to unlock this key (it needs " + std::to_string((memoryKiB + 1023) / 1024) + " MB)";
+    return false;
 }
 
 void appendBase64Lines(std::string& out, std::string_view header, std::string_view data) {
@@ -224,6 +228,18 @@ bool parsePpk(std::string_view text, PpkFile& out, std::string& error) {
         if (!hexDecode(saltHex, f.argonSalt) || f.argonSalt.empty() || f.argonMemory == 0 || f.argonPasses == 0 ||
             f.argonParallelism == 0) {
             error = "Malformed Argon2 parameters";
+            return false;
+        }
+        const uint32_t mb = (f.argonMemory + 1023) / 1024;
+        if (f.argonMemory > kMaxArgonMemoryKiB) {
+            error = "This key asks for " + std::to_string(mb) + " MB of memory to unlock; the limit is " +
+                    std::to_string(kMaxArgonMemoryKiB / 1024) + " MB";
+            return false;
+        }
+        if (uint64_t{f.argonMemory} * f.argonPasses > kMaxArgonWorkKiB) {
+            error = "Unlocking this key would take too long: it asks for " + std::to_string(mb) + " MB x " +
+                    std::to_string(f.argonPasses) + " passes (the limit is " +
+                    std::to_string(kMaxArgonWorkKiB >> 20) + " GB x passes, about a minute)";
             return false;
         }
     }

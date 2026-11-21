@@ -99,7 +99,7 @@
 }
 .imp-row {
   display: grid;
-  grid-template-columns: 36px minmax(140px, 1.2fr) minmax(160px, 1.5fr) 80px 110px;
+  grid-template-columns: 36px minmax(140px, 1.2fr) minmax(160px, 1.5fr) 80px 130px;
   align-items: center;
   gap: 8px;
   padding: 0 10px;
@@ -135,6 +135,36 @@
   gap: 6px;
   justify-content: flex-end;
   align-items: center;
+}
+.imp-command-mark {
+  color: var(--danger);
+}
+.imp-commands,
+.imp-default-command {
+  margin: 0 0 8px;
+  padding: 6px 12px 6px 60px;
+  color: var(--danger);
+  font-size: var(--fs-sm);
+  list-style: none;
+}
+.imp-default-command {
+  padding: 4px 0 0;
+}
+.imp-commands code,
+.imp-default-command code {
+  display: block;
+  margin-top: 2px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.imp-footer__note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--danger);
+  font-size: var(--fs-sm);
+  padding: 0 12px;
 }
 .imp-warnings {
   margin: 0 0 8px;

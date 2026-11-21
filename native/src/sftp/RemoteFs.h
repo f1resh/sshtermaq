@@ -31,6 +31,22 @@ struct Cancelled : std::runtime_error {
     Cancelled() : std::runtime_error("Cancelled") {}
 };
 
+/**
+ * Limits of every walk through a remote tree (folder download, delete, find, synchronize): a server that keeps
+ * answering "here is one more subfolder", or endless entries, must not use up the stack or the memory. Real trees
+ * stay far below both (a path 64 folders deep is already near the path limits of Windows and Linux).
+ */
+struct TreeLimits {
+    int depth = 64;           // folder levels below the starting folder
+    size_t entries = 1000000; // files and folders in one walk
+};
+TreeLimits treeLimits();
+/** Tests only: smaller limits (restore with setTreeLimitsForTests({})). */
+void setTreeLimitsForTests(TreeLimits limits);
+/** Throws SftpError ("The folder is nested too deeply (more than 64 levels)" / "... has more than 1,000,000 files and
+ *  folders") when `depth` or `entries` is past the limit, and logs `where` (the remote path it stopped at). */
+void checkTreeLimits(int depth, size_t entries, const std::string& where);
+
 /** A directory entry plus the size of what a symlink points to (links: target size, 0 when dangling or a folder). */
 struct RemoteEntry {
     SftpEntry entry;

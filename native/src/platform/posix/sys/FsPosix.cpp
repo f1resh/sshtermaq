@@ -122,6 +122,20 @@ std::optional<FileInfo> fileInfo(const fs::path& p) {
     return info;
 }
 
+std::optional<std::uint32_t> permissionBits(const fs::path& p) {
+    struct stat st {};
+    if (::stat(p.c_str(), &st) != 0) return std::nullopt;
+    return static_cast<std::uint32_t>(st.st_mode & 0777);
+}
+
+bool addExecutableBits(const fs::path& p, std::uint32_t remoteMode) {
+    const mode_t exec = static_cast<mode_t>(remoteMode & 0111);
+    if (!exec) return true;
+    struct stat st {};
+    if (::stat(p.c_str(), &st) != 0) return false;
+    return ::chmod(p.c_str(), static_cast<mode_t>((st.st_mode & 0777) | exec)) == 0;
+}
+
 bool isReadableNow(const fs::path& p) {
     const int fd = openFd(p, O_RDONLY);
     if (fd < 0) return false;

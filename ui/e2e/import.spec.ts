@@ -125,6 +125,37 @@ test.describe('import', () => {
     await expect(counter(preview)).toBeVisible();
   });
 
+  test('sessions that run a command on this computer: marked, the command shown, from a file unticked', async ({ app, os }) => {
+    const dialog = await openSources(app, os);
+    await dialog.getByRole('button', { name: /^SSHTermaq backup/ }).click();
+    const preview = app.getByRole('dialog', { name: /^Import from / });
+    const mark = (name: string) => item(preview, name).getByRole('button', { name: 'Runs a command on this computer' });
+    await expect(mark('tunnel-box')).toBeVisible();
+    await expect(mark('build-shell')).toBeVisible();
+    await expect(item(preview, 'tunnel-box').getByRole('checkbox')).not.toBeChecked();   // from a file: on purpose only
+    await expect(item(preview, 'build-shell').getByRole('checkbox')).not.toBeChecked();
+    await expect(counter(preview)).toHaveText('4 of 6 selected');
+    await expect(preview.locator('.imp-footer__note')).toHaveText('');
+
+    await mark('tunnel-box').click();
+    await expect(item(preview, 'tunnel-box')).toContainText('Local proxy command, run when it connects');
+    await expect(item(preview, 'tunnel-box').locator('code')).toHaveText('ncat --proxy proxy.example:8080 %host %port');
+    await mark('build-shell').click();
+    await expect(item(preview, 'build-shell')).toContainText('Local terminal command, run when it opens');
+
+    await item(preview, 'tunnel-box').getByRole('checkbox').check();
+    await expect(preview.locator('.imp-footer__note')).toHaveText('1 of the 5 selected sessions runs a command on this computer');
+    await preview.getByRole('button', { name: 'Back' }).click();
+
+    // From this computer's PuTTY: ticked, with the mark.
+    const sources = app.getByRole('dialog', { name: 'Import sessions' });
+    await sources.getByRole('button', { name: /^PuTTY on this (PC|Mac)/ }).click();
+    const putty = app.getByRole('dialog', { name: /^Import from / });
+    await expect(item(putty, 'db via jump').getByRole('button', { name: 'Runs a command on this computer' })).toBeVisible();
+    await expect(item(putty, 'db via jump').getByRole('checkbox')).toBeChecked();
+    await expect(putty.locator('.imp-footer__note')).toContainText('runs a command on this computer');
+  });
+
   test('a session exports to a PuTTY .reg file and to JSON', async ({ app }) => {
     await sessionItem(app, 'web-01').click({ button: 'right' });
     await app.getByRole('menuitem', { name: 'Export to PuTTY .reg…' }).click();

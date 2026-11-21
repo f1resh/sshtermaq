@@ -11,6 +11,7 @@
 #include "platform/sys/Fs.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <cstdio>
 #include <filesystem>
@@ -119,6 +120,51 @@ TEST_CASE("ppk: encrypted v3 asks for the passphrase and rejects wrong ones", "[
     // The encrypted OpenSSH output works too.
     writeText(dir.path() / "e", r.privateKeyOpenSsh);
     REQUIRE(load(dir.path() / "e", {"correct horse"}, err) == blobOfLine(r.publicKeyOpenSsh));
+}
+
+TEST_CASE("ppk: a v3 file may ask for at most 1 GiB and about a minute of work to unlock", "[keys][ppk]") {
+    using namespace st::keys;
+    KeygenRequest req;
+    req.comment = "cost";
+    req.passphrase = "pw";
+    const KeygenResult r = keys::generateKey(req);
+    const std::string defaults = "Argon2-Memory: 8192\nArgon2-Passes: 13\n";  // PuTTYgen's default, as we write it
+    REQUIRE(r.privateKeyPpk.find(defaults) != std::string::npos);
+    auto withCost = [&](uint32_t kib, uint32_t passes) {
+        std::string text = r.privateKeyPpk;
+        text.replace(text.find(defaults), defaults.size(),
+                     "Argon2-Memory: " + std::to_string(kib) + "\nArgon2-Passes: " + std::to_string(passes) + "\n");
+        return text;
+    };
+    PpkFile f;
+    std::string err;
+    // Refused while parsing: before a passphrase is asked and before any memory is taken.
+    REQUIRE_FALSE(parsePpk(withCost(kMaxArgonMemoryKiB + 1, 1), f, err));
+    REQUIRE(err == "This key asks for 1025 MB of memory to unlock; the limit is 1024 MB");
+    REQUIRE_FALSE(parsePpk(withCost(kMaxArgonMemoryKiB, 33), f, err));
+    REQUIRE(err == "Unlocking this key would take too long: it asks for 1024 MB x 33 passes (the limit is 32 GB x passes, "
+                   "about a minute)");
+    REQUIRE_FALSE(parsePpk(withCost(8192, 10000), f, err));  // a small memory with huge passes: the same limit
+    REQUIRE_THAT(err, Catch::Matchers::StartsWith("Unlocking this key would take too long"));
+    // At the limits: accepted (parsed only; unlocking would really take that long).
+    REQUIRE(parsePpk(withCost(kMaxArgonMemoryKiB, 32), f, err));
+    REQUIRE(parsePpk(withCost(8192, 4096), f, err));
+    // The default and a 64 MB key open.
+    REQUIRE(parsePpk(r.privateKeyPpk, f, err));
+    KeyMaterial m;
+    REQUIRE(decryptPpk(f, "pw", m, err) == PpkStatus::Ok);
+    PpkWriteOptions big;
+    big.passphrase = "pw";
+    big.argonMemory = 64 * 1024;
+    big.argonPasses = 2;
+    std::string bigText;
+    REQUIRE(writePpk(m, big, bigText, err));
+    PpkFile g;
+    REQUIRE(parsePpk(bigText, g, err));
+    REQUIRE(g.argonMemory == 64 * 1024);
+    KeyMaterial m2;
+    REQUIRE(decryptPpk(g, "pw", m2, err) == PpkStatus::Ok);
+    REQUIRE(m2.publicBlob == m.publicBlob);
 }
 
 TEST_CASE("ppk: v2 writer round-trips and tampering is detected", "[keys][ppk]") {

@@ -72,9 +72,9 @@ function DialogSwitch({ dialog }: { dialog: DialogState }) {
       return (
         <ConfirmDialog
           dialog={dialog}
-          onResolve={(ok) => {
+          onResolve={(ok, option) => {
             // Run the callback first: it may open a follow-up dialog, which must not be closed here.
-            if (ok) dialog.onConfirm();
+            if (ok) dialog.onConfirm(option);
             else dialog.onCancel?.();
             closeIfCurrent(dialog);
           }}

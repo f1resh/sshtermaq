@@ -165,9 +165,17 @@ TEST_CASE("transfer: resume", "[sftp][transfer]") {
     const std::string big = pattern(2 * 1024 * 1024 + 77, 7);
     spit(r / "big.bin", big);
 
-    SECTION("an interrupted download continues its partial file") {
+    // An interrupted download leaves big.bin.st-partial and, next to it, the record of the remote file it came from.
+    setMtime(r / "big.bin", 1700000000);
+    auto record = [&](int64_t mtime) {
+        spit(l / "big.bin.st-partial.info",
+             Json{{"remote", "/big.bin"}, {"size", big.size()}, {"mtime", mtime}}.dump());
+    };
+
+    SECTION("an interrupted download continues its partial file when the remote file is unchanged") {
         // The partial file deliberately differs from the remote prefix: a resumed download keeps it.
         spit(l / "big.bin.st-partial", std::string(1000, 'X'));
+        record(1700000000);
         const std::string tid = f.download("/big.bin", l);
         CHECK(f.waitDone(tid)["state"] == "done");
         const std::string got = slurp(l / "big.bin");
@@ -175,6 +183,47 @@ TEST_CASE("transfer: resume", "[sftp][transfer]") {
         CHECK(got.substr(0, 1000) == std::string(1000, 'X'));
         CHECK(got.substr(1000) == big.substr(1000));
         CHECK_FALSE(fs::exists(l / "big.bin.st-partial"));
+        CHECK_FALSE(fs::exists(l / "big.bin.st-partial.info"));
+    }
+
+    SECTION("the remote file changed since (same size, other content and time): the whole file is fetched again") {
+        spit(l / "big.bin.st-partial", std::string(1000, 'X'));
+        record(1600000000);
+        const std::string tid = f.download("/big.bin", l);
+        CHECK(f.waitDone(tid)["state"] == "done");
+        CHECK(slurp(l / "big.bin") == big);
+        CHECK_FALSE(fs::exists(l / "big.bin.st-partial"));
+        CHECK_FALSE(fs::exists(l / "big.bin.st-partial.info"));
+    }
+
+    SECTION("a record of another file, or a broken one, starts over too") {
+        spit(l / "big.bin.st-partial", std::string(1000, 'X'));
+        spit(l / "big.bin.st-partial.info", Json{{"remote", "/other/big.bin"}, {"size", big.size()}, {"mtime", 1700000000}}.dump());
+        std::string tid = f.download("/big.bin", l);
+        CHECK(f.waitDone(tid)["state"] == "done");
+        CHECK(slurp(l / "big.bin") == big);
+        fs::remove(l / "big.bin");
+        spit(l / "big.bin.st-partial", std::string(1000, 'X'));
+        spit(l / "big.bin.st-partial.info", "{not json");
+        tid = f.download("/big.bin", l);
+        CHECK(f.waitDone(tid)["state"] == "done");
+        CHECK(slurp(l / "big.bin") == big);
+    }
+
+    SECTION("a partial file without a record (left by 1.1.0 or older) starts over") {
+        spit(l / "big.bin.st-partial", std::string(1000, 'X'));
+        const std::string tid = f.download("/big.bin", l);
+        CHECK(f.waitDone(tid)["state"] == "done");
+        CHECK(slurp(l / "big.bin") == big);
+        CHECK_FALSE(fs::exists(l / "big.bin.st-partial.info"));
+    }
+
+    SECTION("a cancelled fresh download leaves neither the partial file nor its record") {
+        const std::string tid = f.download("/big.bin", l, Json{{"conflict", "overwrite"}});
+        f.h.send("sftp:cancelTransfer", Json::array({tid}));
+        CHECK(f.waitDone(tid)["state"] == "cancelled");
+        CHECK_FALSE(fs::exists(l / "big.bin.st-partial"));
+        CHECK_FALSE(fs::exists(l / "big.bin.st-partial.info"));
     }
 
     SECTION("resume answer continues a shorter existing file") {

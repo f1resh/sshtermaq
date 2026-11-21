@@ -12,6 +12,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -209,8 +210,10 @@ std::vector<std::string> commandEnvironment() {
 
 }  // namespace
 
+std::string shellVariableReference(const std::string& name) { return "\"$" + name + "\""; }
+
 SocketHandle startProxyCommand(const std::string& command, std::function<void(const std::string& line)> onStderrLine,
-                               std::string& error) {
+                               std::string& error, const std::vector<std::pair<std::string, std::string>>& extraEnv) {
     SocketHandle mine = kInvalidSocket, relay = kInvalidSocket;
     if (!makeSocketPair(mine, relay, error)) return kInvalidSocket;
     auto r = std::make_shared<CommandRelay>();
@@ -256,6 +259,18 @@ SocketHandle startProxyCommand(const std::string& command, std::function<void(co
                                         POSIX_SPAWN_CLOEXEC_DEFAULT);
 
     std::vector<std::string> env = commandEnvironment();
+    for (const auto& [name, value] : extraEnv) {
+        const std::string prefix = name + "=";
+        env.erase(std::remove_if(env.begin(), env.end(), [&](const std::string& e) { return e.rfind(prefix, 0) == 0; }),
+                  env.end());
+        env.push_back(prefix + value);
+    }
+    struct WipeEnv {
+        std::vector<std::string>& env;
+        ~WipeEnv() {
+            for (std::string& e : env) std::fill(e.begin(), e.end(), '\0');
+        }
+    } wipeEnv{env};
     std::vector<char*> envp;
     for (auto& e : env) envp.push_back(e.data());
     envp.push_back(nullptr);

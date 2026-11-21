@@ -6,7 +6,10 @@
 import type { TransferProgress } from '@shared/types';
 import { fmtSize } from './paths';
 
-type Timed = Pick<TransferProgress, 'state' | 'direction' | 'total' | 'transferred' | 'filesTotal' | 'filesDone' | 'skipped' | 'startedAt' | 'finishedAt'>;
+type Timed = Pick<
+  TransferProgress,
+  'state' | 'direction' | 'total' | 'transferred' | 'filesTotal' | 'filesDone' | 'skipped' | 'skippedLinks' | 'startedAt' | 'finishedAt'
+>;
 
 /** "0.4 s", "2.3 s", "41 s", "3 min 12 s", "1 h 2 min". */
 export function fmtElapsed(ms: number): string {
@@ -39,7 +42,8 @@ const movedBytes = (t: Timed) => (t.state === 'done' ? t.total : t.transferred);
 /**
  * The status text of a transfer that has ended. Without times, as before: the size, "Failed", "Cancelled".
  * Done: "Done · 845.1 KB in 0.4 s"; a folder: "Done · 3,000 files · 23.4 MB in 41 s"; with skipped files:
- * "Done · 3,000 files, 12 skipped · 23.4 MB in 41 s". Failed / cancelled: "Failed after 12 s".
+ * "Done · 3,000 files, 12 skipped · 23.4 MB in 41 s"; links to folders that were not followed: "Done · 40 files,
+ * 2 links to folders skipped · 1 MB in 2 s". Failed / cancelled: "Failed after 12 s".
  */
 export function finishedText(t: Timed): string {
   const ms = ranFor(t);
@@ -51,10 +55,14 @@ export function finishedText(t: Timed): string {
       return ms === null ? 'Cancelled' : `Cancelled after ${fmtElapsed(ms)}`;
     case 'done': {
       if (t.direction === 'delete') return ms === null ? 'Deleted' : `Deleted${took}`;
-      if (ms === null) return t.skipped ? `Done, ${t.skipped} skipped` : fmtSize(t.total);
+      const links = t.skippedLinks ? `${count(t.skippedLinks)} link${t.skippedLinks === 1 ? '' : 's'} to folders skipped` : '';
+      if (ms === null) {
+        const left = [t.skipped ? `${t.skipped} skipped` : '', links].filter(Boolean).join(', ');
+        return left ? `Done, ${left}` : fmtSize(t.total);
+      }
       const files = t.filesTotal && t.filesTotal > 1 ? `${count(t.filesTotal)} files` : '';
       const skipped = t.skipped ? `${t.skipped} skipped` : '';
-      const what = [files, skipped].filter(Boolean).join(', ');
+      const what = [files, skipped, links].filter(Boolean).join(', ');
       return ['Done', what, `${fmtSize(movedBytes(t))}${took}`].filter(Boolean).join(' · ');
     }
     default:

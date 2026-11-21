@@ -148,7 +148,7 @@ function sshConfigPreview(path?: string): ImportPreview {
 }
 
 function jsonPreview(): ImportPreview {
-  const candidates = mockDb.sessions.slice(0, 4).map((s) => ({
+  const candidates: ImportCandidate[] = mockDb.sessions.slice(0, 4).map((s) => ({
     key: s.id,
     name: s.name,
     source: 'json' as const,
@@ -156,6 +156,16 @@ function jsonPreview(): ImportPreview {
     warnings: [],
     exists: false
   }));
+  // Sessions that run a command on this computer (a backup may come from someone else).
+  const defaults = createDefaultSession();
+  candidates.push(
+    candidate('json', 'tunnel-box', {
+      name: 'tunnel-box',
+      host: 'tunnel.example.com',
+      proxy: { ...defaults.proxy, type: 'command', localCommand: 'ncat --proxy proxy.example:8080 %host %port' }
+    }),
+    candidate('json', 'build-shell', { name: 'build-shell', protocol: 'local', host: '', port: 0, local: { ...defaults.local, command: 'powershell -File C:\tools\build.ps1' } })
+  );
   return {
     source: 'json',
     candidates: markExisting(candidates, ''),

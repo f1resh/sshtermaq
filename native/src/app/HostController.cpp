@@ -28,8 +28,7 @@ HostController::HostController(ui::HostWindow& window, Bridge& bridge, Store& st
     : openExternal([](const std::string& url) { ui::shell::openExternal(url); }),
       window_(window),
       bridge_(bridge),
-      store_(store),
-      placementSeq_(std::make_shared<std::atomic<uint64_t>>(0)) {
+      store_(store) {
     if (!devUrl.empty()) {
         appOrigin_ = originOf(devUrl);
     } else {
@@ -64,7 +63,7 @@ HostController::HostController(ui::HostWindow& window, Bridge& bridge, Store& st
 }
 
 HostController::~HostController() {
-    ++*placementSeq_;  // drop pending debounced saves
+    placementSaver_.cancel();  // drop a pending debounced save
     window_.serveUi = nullptr;
     window_.onWebMessage = nullptr;
     window_.onNavigationStarting = nullptr;
@@ -170,19 +169,14 @@ std::optional<ui::WindowPlacement> HostController::loadPlacement() const {
 void HostController::onPlacementChanged(const ui::WindowPlacement& p, bool final) {
     const Json st = {{"x", p.x}, {"y", p.y}, {"w", p.width}, {"h", p.height}, {"maximized", p.maximized}};
     if (final) {
-        ++*placementSeq_;  // drop pending debounced saves
+        placementSaver_.cancel();  // the final placement wins over a pending one
         store_.setState("window", st);
         return;
     }
-    // Debounce: resizing reports many changes.
-    const uint64_t seq = ++*placementSeq_;
-    auto seqPtr = placementSeq_;
+    // Debounce: resizing reports many changes a second; only the newest is saved, once they stop. It waits on the
+    // debouncer's own thread: a job per change on the shared pool held up file panels and dialogs (review 3).
     Store* store = &store_;
-    const auto delay = placementDelay;
-    ThreadPool::shared().submit([seq, seqPtr, store, st, delay] {
-        std::this_thread::sleep_for(delay);
-        if (seqPtr->load() == seq) store->setState("window", st);
-    });
+    placementSaver_.schedule(placementDelay, [store, st] { store->setState("window", st); });
 }
 
 }  // namespace st

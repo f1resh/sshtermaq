@@ -23,6 +23,7 @@
 #include "session/SessionManager.h"
 
 #include "bridge/Bridge.h"
+#include "core/HostName.h"
 #include "core/Log.h"
 #include "core/Strings.h"
 #include "core/Uuid.h"
@@ -773,6 +774,7 @@ void SessionManager::open(const ConnOpenRequest& reqIn) {
     } else {
         s.host = trim(s.host);
         if (s.host.empty()) throw std::invalid_argument("Host name is required");
+        if (!isValidHostName(s.host)) throw std::invalid_argument("Not a valid host name or IP address: \"" + s.host + "\"");
         if (s.port == 0) s.port = defaultPort(s.protocol);
         if (s.port <= 0 || s.port > 65535) throw std::invalid_argument("Invalid port number");
     }

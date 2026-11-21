@@ -520,6 +520,8 @@ struct TransferProgress {
     int filesTotal = 0;
     std::string currentFile;
     int skipped = 0;
+    /** Folder transfers: links to folders that were not followed (they point back into the tree, or nowhere). */
+    int skippedLinks = 0;
     std::string origin = "transfer";  // 'transfer' | 'edit' | 'sync' | 'drag' | 'open'
     /** Folder transfers: the folder tree is still being listed (filesTotal / total: found so far, currentFile: the
      *  folder being listed); copying starts after it. */
@@ -531,6 +533,7 @@ struct TransferProgress {
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TransferProgress, transferId, sftpId, direction, name, localPath, remotePath,
                                                 transferred, total, state, error, move, filesDone, filesTotal, currentFile,
+                                                skippedLinks,
                                                 skipped, origin, listing, startedAt, finishedAt)
 
 struct TransferOptions {
@@ -757,6 +760,7 @@ struct OpenRequest {
     std::string password;        // '' => none
     std::string view;            // '' (session default) | 'terminal' | 'files'
     std::string remotePath;      // '' => none
+    bool fromLink = false;       // opened by a link (ssh://, sftp://, ...): the page asks before connecting
 };
 Json toJson(const OpenRequest& r);
 

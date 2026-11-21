@@ -5,8 +5,14 @@
 // finishOutput() writes to. A finished program's terminal can stay open (a background job still has it), so the
 // output ends when finishOutput() says so, not only when the terminal reports the end. openpty comes from <util.h>
 // (macOS / BSD).
+//
+// _DARWIN_UNLIMITED_SELECT: the master can have a descriptor number above FD_SETSIZE (1024), since NetInit raises the
+// limit; select(2) then takes the larger sets of platform/detail/PosixSelect.h. It must come before any system header.
+#define _DARWIN_UNLIMITED_SELECT 1
+
 #include "platform/sys/Pty.h"
 
+#include "platform/detail/PosixSelect.h"
 #include "platform/sys/Errors.h"
 
 #include <algorithm>
@@ -262,16 +268,9 @@ std::size_t Pty::read(char* buf, std::size_t size) {
             const ssize_t n = ::read(m, buf, size);
             return n > 0 ? static_cast<std::size_t>(n) : 0;
         }
-        fd_set rd;
-        FD_ZERO(&rd);
-        FD_SET(m, &rd);
-        FD_SET(impl_->wake[0], &rd);
-        const int rc = ::select(std::max(m, impl_->wake[0]) + 1, &rd, nullptr, nullptr, nullptr);
-        if (rc < 0) {
-            if (errno == EINTR) continue;
-            return 0;
-        }
-        if (FD_ISSET(impl_->wake[0], &rd)) {
+        bool masterReady = false, woken = false, unused = false;
+        if (!st::sys::detail::waitFds(m, impl_->wake[0], -1, -1, masterReady, woken, unused)) return 0;
+        if (woken) {
             char drain[16];
             while (::read(impl_->wake[0], drain, sizeof drain) > 0) {
             }
@@ -296,11 +295,8 @@ bool Pty::write(std::string_view bytes) {
         if (n < 0 && errno == EINTR) continue;
         if (n < 0 && errno == EAGAIN) {
             // The program does not read: wait, but look at `finishing` now and then.
-            fd_set wr;
-            FD_ZERO(&wr);
-            FD_SET(m, &wr);
-            timeval tv{0, 200000};
-            ::select(m + 1, nullptr, &wr, nullptr, &tv);
+            bool a = false, b = false, writable = false;
+            st::sys::detail::waitFds(-1, -1, m, 200, a, b, writable);
             continue;
         }
         return false;

@@ -1,6 +1,8 @@
 // Unit tests for the PuTTY-compatible command line parser (app/Cli) and app path resolution (app/Paths).
 #include "app/Cli.h"
 #include "app/Paths.h"
+#include "core/HostName.h"
+#include "core/Json.h"
 #include "core/Strings.h"
 #include "platform/sys/Fs.h"
 #include "store/Store.h"
@@ -8,6 +10,9 @@
 #include "TestServers.h"
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <fstream>
+#include <sstream>
 
 using namespace st;
 namespace fs = std::filesystem;
@@ -135,6 +140,102 @@ TEST_CASE("cli: sftp:// and scp:// open the file manager", "[app][cli]") {
     const Json j = toJson(*r.request);
     CHECK(j["view"] == "files");
     CHECK_FALSE(j.contains("remotePath"));
+}
+
+TEST_CASE("host names: the shared cases (the UI's isValidHost passes the same file)", "[app][cli][host]") {
+    std::ifstream in(fs::path(ST_FIXTURES_DIR) / "host-names.json");
+    REQUIRE(in);
+    std::stringstream text;
+    text << in.rdbuf();
+    const Json cases = Json::parse(text.str());
+    REQUIRE(cases["valid"].size() >= 10);
+    REQUIRE(cases["invalid"].size() >= 10);
+    for (const auto& v : cases["valid"]) {
+        INFO("valid: " << v.get<std::string>());
+        CHECK(isValidHostName(v.get<std::string>()));
+    }
+    for (const auto& v : cases["invalid"]) {
+        INFO("invalid: " << v.get<std::string>());
+        CHECK_FALSE(isValidHostName(v.get<std::string>()));
+    }
+}
+
+TEST_CASE("cli: a host with shell characters is refused, in a link and as an argument", "[app][cli][host]") {
+    for (const std::string host : {"x&calc.exe&", "a|b", "a;b", "$(id)", "`id`", "\"q\"", "'q'", "a b", "-oProxyCommand=x",
+                                   "h>f", "fe80::1%&calc"}) {
+        for (const std::string arg : {"ssh://" + host, "ssh://user@" + host + ":22/", "sftp://" + host + "/tmp",
+                                      "telnet://" + host, "user@" + host}) {
+            INFO("argument: " << arg);
+            const auto r = parse({arg});
+            CHECK_FALSE(r.request.has_value());
+            REQUIRE(r.errors.size() == 1);
+            CHECK(r.errors[0].find("not a valid host name or IP address") != std::string::npos);
+        }
+    }
+    // Normal names, IPv4, IPv6 with a zone, punycode.
+    for (const std::string arg : {"ssh://host.example", "sftp://u@10.0.0.1/", "ssh://[fe80::1%eth0]:2222", "xn--bcher-kva.example",
+                                  "my_host", "[2001:db8::1]:22"}) {
+        INFO("argument: " << arg);
+        const auto r = parse({arg});
+        CHECK(r.request.has_value());
+        CHECK(r.errors.empty());
+    }
+    CHECK(parse({"ssh://[fe80::1%eth0]:2222"}).request->session.host == "fe80::1%eth0");
+}
+
+TEST_CASE("cli: user names in links are decoded; a password in a link is dropped", "[app][cli]") {
+    auto r = parse({"sftp://john%40corp@host.test/path"});
+    REQUIRE(r.request);
+    CHECK(r.request->session.username == "john@corp");
+    r = parse({"scp://a%20b@host.test"});
+    CHECK(r.request->session.username == "a b");
+    r = parse({"ssh://bob%2Bops@host.test"});
+    CHECK(r.request->session.username == "bob+ops");
+    // "user:password@": the password is not a user name and is not used.
+    r = parse({"ssh://user:secret@host.test"});
+    REQUIRE(r.request);
+    CHECK(r.request->session.username == "user");
+    CHECK(r.request->password.empty());
+    REQUIRE(r.warnings.size() == 1);
+    CHECK(r.warnings[0] == "the password in the link was ignored (passwords in links are not supported)");
+    // A plain argument is taken as it is: no decoding, a colon stays.
+    r = parse({"a%20b@host.test"});
+    CHECK(r.request->session.username == "a%20b");
+    CHECK(r.warnings.empty());
+}
+
+TEST_CASE("cli: a link is marked, and does not take forwarding or tunnels from Default Settings", "[app][cli]") {
+    CliContext ctx = makeContext();
+    ctx.defaultTemplate.ssh.auth.agentForwarding = true;
+    ctx.defaultTemplate.ssh.x11.enabled = true;
+    PortForward f;
+    f.type = ForwardType::Local;
+    f.sourcePort = 8080;
+    f.destHost = "intranet";
+    f.destPort = 80;
+    ctx.defaultTemplate.ssh.tunnels.push_back(f);
+
+    auto r = parse({"ssh://host.test"}, ctx);
+    REQUIRE(r.request);
+    CHECK(r.request->fromLink);
+    CHECK(toJson(*r.request)["fromLink"] == true);
+    CHECK_FALSE(r.request->session.ssh.auth.agentForwarding);
+    CHECK_FALSE(r.request->session.ssh.x11.enabled);
+    CHECK(r.request->session.ssh.tunnels.empty());
+    CHECK(r.request->session.connection.terminalType == "vt220");  // the rest of Default Settings stays
+
+    // Asked for on the same command line: given.
+    r = parse({"ssh://host.test", "-A", "-X", "-L", "9000:db:5432"}, ctx);
+    CHECK(r.request->session.ssh.auth.agentForwarding);
+    CHECK(r.request->session.ssh.x11.enabled);
+    CHECK(r.request->session.ssh.tunnels.size() == 1);
+
+    // A plain argument is not a link: Default Settings as they are, nothing to ask.
+    r = parse({"host.test"}, ctx);
+    CHECK_FALSE(r.request->fromLink);
+    CHECK_FALSE(toJson(*r.request).contains("fromLink"));
+    CHECK(r.request->session.ssh.auth.agentForwarding);
+    CHECK(r.request->session.ssh.tunnels.size() == 1);
 }
 
 TEST_CASE("cli: -l, -pw, -i, flags", "[app][cli]") {

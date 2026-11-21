@@ -131,10 +131,32 @@ bool createPipe(UniqueHandle& parentEnd, UniqueHandle& childEnd, bool childReads
     return true;
 }
 
+/** Our environment with `extra` set (replacing variables of the same name), as a CreateProcessW block. */
+std::wstring environmentBlock(const std::vector<std::pair<std::string, std::string>>& extra) {
+    std::vector<std::wstring> names;
+    for (const auto& [name, value] : extra) names.push_back(widen(name) + L"=");
+    std::wstring block;
+    if (wchar_t* env = GetEnvironmentStringsW()) {
+        for (const wchar_t* e = env; *e; e += wcslen(e) + 1) {
+            const std::wstring entry(e);
+            bool replaced = false;
+            for (const std::wstring& n : names)
+                replaced = replaced || (entry.size() >= n.size() && _wcsnicmp(entry.c_str(), n.c_str(), n.size()) == 0);
+            if (!replaced) block.append(entry).push_back(L'\0');
+        }
+        FreeEnvironmentStringsW(env);
+    }
+    for (const auto& [name, value] : extra) block.append(widen(name) + L"=" + widen(value)).push_back(L'\0');
+    block.push_back(L'\0');
+    return block;
+}
+
 }  // namespace
 
+std::string shellVariableReference(const std::string& name) { return "!" + name + "!"; }
+
 SocketHandle startProxyCommand(const std::string& command, std::function<void(const std::string& line)> onStderrLine,
-                               std::string& error) {
+                               std::string& error, const std::vector<std::pair<std::string, std::string>>& env) {
     SocketHandle mine = kInvalidSocket, relay = kInvalidSocket;
     if (!makeSocketPair(mine, relay, error)) return kInvalidSocket;
     auto r = std::make_shared<CommandRelay>();
@@ -176,12 +198,20 @@ SocketHandle startProxyCommand(const std::string& command, std::function<void(co
     wchar_t comspec[MAX_PATH] = {};
     DWORD n = GetEnvironmentVariableW(L"ComSpec", comspec, MAX_PATH);
     std::wstring shell = (n > 0 && n < MAX_PATH) ? std::wstring(comspec, n) : std::wstring(L"cmd.exe");
-    std::wstring cmdline = L"\"" + shell + L"\" /d /s /c \"" + widen(command) + L"\"";
+    // With variables (the password, see shellVariableReference): delayed expansion, so "!NAME!" is replaced after
+    // cmd has parsed the line and its value is never read as & | < > or quotes. Without, the line runs as written.
+    const wchar_t* flags = env.empty() ? L" /d /s /c \"" : L" /d /v:on /s /c \"";
+    std::wstring cmdline = L"\"" + shell + L"\"" + flags + widen(command) + L"\"";
+    std::wstring envBlock;
+    if (!env.empty()) envBlock = environmentBlock(env);
 
     PROCESS_INFORMATION pi{};
-    if (!CreateProcessW(nullptr, cmdline.data(), nullptr, nullptr, TRUE,
-                        CREATE_NO_WINDOW | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT, nullptr, nullptr,
-                        &si.StartupInfo, &pi)) {
+    const BOOL started = CreateProcessW(
+        nullptr, cmdline.data(), nullptr, nullptr, TRUE,
+        CREATE_NO_WINDOW | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT | (env.empty() ? 0 : CREATE_UNICODE_ENVIRONMENT),
+        env.empty() ? nullptr : envBlock.data(), nullptr, &si.StartupInfo, &pi);
+    SecureZeroMemory(envBlock.data(), envBlock.size() * sizeof(wchar_t));
+    if (!started) {
         error = "Unable to start proxy command: " + lastErrorMessage();
         closeSocket(mine);
         return kInvalidSocket;

@@ -9,6 +9,7 @@
 //  - the window placement is kept in state.json ("window": x, y, w, h, maximized), debounced while resizing.
 // Everything runs on the UI thread, except that the debounced placement is written on the thread pool.
 #include "app/UiResources.h"
+#include "core/Threading.h"
 #include "platform/ui/HostWindow.h"
 
 #include <atomic>
@@ -79,7 +80,7 @@ private:
     std::optional<ui::ChromeInsets> insets_;  // the last ones the window reported
     bool closeConfirmed_ = false;
     std::optional<std::chrono::steady_clock::time_point> closeRequestedAt_;  // of an unanswered app:onCloseRequested
-    std::shared_ptr<std::atomic<uint64_t>> placementSeq_;
+    Debouncer placementSaver_;  // last member: its thread ends before the others go
 };
 
 }  // namespace st

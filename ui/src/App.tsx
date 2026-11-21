@@ -10,6 +10,7 @@ import { loadRecentCommands, runCommand } from '@/commands/commands';
 import { installKeybindings } from '@/commands/keybindings';
 import { installMenuBar } from '@/commands/menubar';
 import { DialogHost } from '@/components/dialogs/DialogHost';
+import { linkQuestion } from '@/components/dialogs/linkQuestion';
 import { Workspace } from '@/components/layout/Workspace';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { Sidebar } from '@/components/sidebar/Sidebar';
@@ -19,7 +20,7 @@ import { initFilesConnections } from '@/components/files/filesConn';
 import { initFilesEvents } from '@/components/files/filesStore';
 import { ContextMenuHost, ToastHost } from '@/components/ui';
 import { initDataStores, useSessions, useSettings } from '@/store/data';
-import { confirmDialog, useUi } from '@/store/ui';
+import { confirmDialog, confirmWithOption, useUi } from '@/store/ui';
 import { tabTitle, useWorkspace } from '@/store/workspace';
 import { pickDefaultShell, useShells } from '@/store/shells';
 import { resolveLocalTarget, shellToOpen } from '@/components/quickconnect/local';
@@ -30,7 +31,20 @@ import { UnlockHost } from '@/components/dialogs/credentials/MasterPassword';
 import type { OpenRequest } from '@shared/types';
 import './app.css';
 
-function openRequest(req: OpenRequest) {
+async function openRequest(req: OpenRequest) {
+  if (req.fromLink && useSettings.getState().settings.behavior.confirmLinks) {
+    // A link may come from anyone (a web page, a mail): nothing connects, and no proxy command runs, until asked.
+    const q = linkQuestion(req);
+    const answer = await confirmWithOption({
+      title: q.title,
+      message: q.message,
+      details: q.command || undefined,
+      option: "Don't ask again for links",
+      confirmLabel: 'Connect'
+    });
+    if (!answer.ok) return;
+    if (answer.checked) void useSettings.getState().update({ behavior: { confirmLinks: false } });
+  }
   const saved = req.savedSessionId ? useSessions.getState().byId(req.savedSessionId) : undefined;
   if (!saved && req.session.protocol === 'local') {
     // -local [shell name | command line]: resolved like quick connect's "local:".
@@ -82,10 +96,10 @@ function useHostWiring(ready: boolean) {
   // CLI / second-instance open requests (after data stores are ready so saved sessions resolve).
   useEffect(() => {
     if (!ready) return;
-    const off = api.app.onOpenRequest(openRequest);
+    const off = api.app.onOpenRequest((req) => void openRequest(req));
     void api.app
       .takeOpenRequests()
-      .then((list) => (list ?? []).forEach(openRequest))
+      .then((list) => (list ?? []).forEach((req) => void openRequest(req)))
       .catch(() => undefined);
     return off;
   }, [ready]);

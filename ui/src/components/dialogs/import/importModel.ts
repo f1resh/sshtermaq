@@ -80,7 +80,43 @@ export function buildImportRequest(preview: ImportPreview, selected: ReadonlySet
   return req;
 }
 
-/** Keys selected initially: every candidate. */
+/** A command an imported session runs on this computer when it connects (or opens). */
+export interface LocalCommand {
+  kind: 'proxy' | 'terminal';
+  command: string;
+}
+
+/** What `s` runs on this computer: a local proxy command (PuTTY's proxy type "Local", OpenSSH's ProxyCommand), or a
+ *  local terminal session's own command line. */
+export function localCommands(s: SessionConfig): LocalCommand[] {
+  const out: LocalCommand[] = [];
+  if (s.proxy.type === 'command' && s.proxy.localCommand.trim()) out.push({ kind: 'proxy', command: s.proxy.localCommand.trim() });
+  if (s.protocol === 'local' && s.local.command.trim()) out.push({ kind: 'terminal', command: s.local.command.trim() });
+  return out;
+}
+
+export const LOCAL_COMMAND_LABELS: Record<LocalCommand['kind'], string> = {
+  proxy: 'Local proxy command, run when it connects',
+  terminal: 'Local terminal command, run when it opens'
+};
+
+/** A file (a .reg export, a JSON backup) may come from someone else; this computer's PuTTY and ~/.ssh/config not. */
+export function isFileSource(source: ImportSource): boolean {
+  return source === 'putty-regfile' || source === 'json';
+}
+
+/** Keys selected initially: every candidate, except those from a file that run a command on this computer (they are
+ *  ticked on purpose). */
 export function initialSelection(preview: ImportPreview): Set<string> {
-  return new Set(preview.candidates.map((c) => c.key));
+  const fromFile = isFileSource(preview.source);
+  return new Set(preview.candidates.filter((c) => !(fromFile && localCommands(c.session).length)).map((c) => c.key));
+}
+
+/** "2 of the 5 selected sessions run a command on this computer" ('' when none of them do). */
+export function commandsSummary(candidates: readonly ImportCandidate[], selected: ReadonlySet<string>): string {
+  const chosen = candidates.filter((c) => selected.has(c.key));
+  const n = chosen.filter((c) => localCommands(c.session).length).length;
+  if (!n) return '';
+  if (chosen.length === 1) return 'The selected session runs a command on this computer';
+  return `${n} of the ${chosen.length} selected sessions run${n === 1 ? 's' : ''} a command on this computer`;
 }

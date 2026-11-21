@@ -299,6 +299,12 @@ function BehaviorPage() {
           <SegmentedControl value={b.sessionDoubleClick} onChange={(sessionDoubleClick) => update({ behavior: { sessionDoubleClick } })} size="sm" options={[{ value: 'tab', label: 'Opens a tab' }, { value: 'split', label: 'Splits the pane' }]} />
         </SettingRow>
         <ToggleRow label="Confirm before closing connected sessions" checked={b.confirmCloseConnected} onChange={(confirmCloseConnected) => update({ behavior: { confirmCloseConnected } })} />
+        <ToggleRow
+          label="Ask before opening links"
+          description="A clicked ssh://, sftp://, scp:// or telnet:// link asks before it connects, and shows the command a local proxy command would run."
+          checked={b.confirmLinks}
+          onChange={(confirmLinks) => update({ behavior: { confirmLinks } })}
+        />
         <ToggleRow label="Restore tabs on startup" checked={b.restoreTabs} onChange={(restoreTabs) => update({ behavior: { restoreTabs } })} />
         <ToggleRow
           label="Keep tab and pane names"

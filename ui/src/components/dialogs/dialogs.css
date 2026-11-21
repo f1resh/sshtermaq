@@ -57,6 +57,22 @@
   user-select: text;
 }
 
+.dlg-confirm__details {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-sunken, var(--bg-2));
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow: auto;
+  user-select: text;
+}
+
+.dlg-confirm__option {
+  margin: 2px 0 6px;
+}
+
 .dlg-input-form {
   padding: 4px 0 8px;
 }

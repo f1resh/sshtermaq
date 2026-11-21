@@ -134,7 +134,9 @@ UI thread = the host window's event loop (Windows: Win32 message loop + WebView2
 `Dispatcher::post` uses a run-loop source in the common modes: the GCD main queue stops while a modal panel runs, so
 nothing would reach the page) + bridge handlers. Each connection has its own I/O thread (owned by
 its Transport). Prompts block the transport thread, never the UI thread. Long bridge work → `handleAsync`
-(shared ThreadPool) or a dedicated thread. `Dispatcher::post` marshals to the UI thread.
+(shared ThreadPool: 4 workers, up to 16 while all are busy, the extra ones end after a minute idle) or a dedicated
+thread. Waiting for something to settle uses a `Debouncer` (its own thread), never a sleeping pool job (the window
+size while resizing). `Dispatcher::post` marshals to the UI thread.
 
 ### Connection data path
 ```
@@ -166,7 +168,7 @@ breaks existing installs. Change one only with a migration that reads the old va
 | Data file names `sessions.json`, `settings.json`, `state.json`, `known_hosts.json`, `credentials.json`, `vault.json` and their `version` fields | `native/src/store/Store.cpp` | the same; a format change needs a version bump and a reader for the old version |
 | JSON field names and enum values of `SessionConfig` / `AppSettings` | `ui/src/shared/types.ts`, `native/src/core/Types.h` | saved sessions and settings lose those values (they are stored as these names) |
 | Backup format tag `sshtermaq-sessions` | `native/src/importers/Importers.cpp` | exported backups no longer import |
-| Partial download suffix `.st-partial` | `native/src/sftp/TransferEngine.cpp` | interrupted downloads no longer resume |
+| Partial download suffix `.st-partial` and its record `.st-partial.info` (JSON: `remote`, `size`, `mtime`) | `native/src/sftp/TransferEngine.cpp` | interrupted downloads no longer resume (they start over) |
 | Microsoft Store identity `PavelAKulov.SSHTermaq` and publisher | `scripts/windows/AppxManifest.xml.in` (set by Partner Center) | the Store no longer accepts the package as an update |
 | Installer `AppId` `{6C8B2E0B-…}` | `scripts/windows/installer.iss` | an upgrade installs a second copy instead of replacing the first |
 | macOS bundle identifier `io.github.f1resh.sshtermaq` | `native/res/macos/Info.plist.in` | macOS treats it as another app: the local network permission is asked again, macOS's own files for the app (caches, saved window state) start over, and the Homebrew cask's `zap` paths no longer match |
@@ -215,7 +217,11 @@ Native layering (`native/src/sftp`):
   files found so far, before the copy starts; downloads onto a disk that ignores letter case number the names that
   differ only in case; uploads may leave out macOS Finder's `.DS_Store` / `._*` files), conflict policy per request
   (ask → `sftp:onConflict` / `sftp:resolveConflict`, one question per request at a time, "apply to all"), resume
-  (`.st-partial` files; SFTP offset writes), move, synchronize deletes, throttled `sftp:onProgress`.
+  (`.st-partial` files, continued by themselves only when their `.st-partial.info` record matches the remote file's
+  path, size and time; SFTP offset writes), move, synchronize deletes, throttled `sftp:onProgress`. Folder walks
+  follow links to folders unless their real path leads back into the tree (counted in `skippedLinks`); every remote
+  walk (download, delete, find, synchronize) stops past 64 levels or 1,000,000 entries (`checkTreeLimits`). New
+  remote files get the local permission bits (macOS; 0644 from Windows), downloads the remote executable bits.
 - `FindSync` — glob search (`sftp:find` → `sftp:onFind` batches) and the pure synchronize comparison
   (`compareTrees`) with local / remote walkers. `EditWatcher` logic lives in `SftpService` (temp copy polled every
   500 ms, upload after a quiet period; a changed server copy asks first).

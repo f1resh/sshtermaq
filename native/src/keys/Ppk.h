@@ -39,7 +39,15 @@ struct PpkFile {
     bool encrypted() const { return encryption != "none"; }
 };
 
-/** Parses the text form (no decryption, no MAC check). Validates structure and the public blob. */
+/** What a v3 file may ask of the passphrase check: memory, and memory x passes (the work). The work limit is about
+ *  a minute on an ordinary PC (Argon2id measured 2026-11-20: 0.85 ms per MiB and pass, so 32 GiB-passes take ~27 s
+ *  there); PuTTYgen's default (8 MiB x 13 passes) is far below both. A file asking for more is refused by parsePpk,
+ *  before any passphrase is asked or memory allocated. */
+constexpr uint32_t kMaxArgonMemoryKiB = 1u << 20;               // 1 GiB
+constexpr uint64_t kMaxArgonWorkKiB = uint64_t{32} << 20;        // KiB x passes: 32 GiB-passes
+
+/** Parses the text form (no decryption, no MAC check). Validates structure and the public blob, and the v3
+ *  passphrase check's cost (kMaxArgonMemoryKiB, kMaxArgonWorkKiB). */
 bool parsePpk(std::string_view text, PpkFile& out, std::string& error);
 
 enum class PpkStatus {

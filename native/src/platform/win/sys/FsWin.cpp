@@ -103,6 +103,10 @@ std::string sanitizeFileName(std::string_view utf8Name) {
 
 /* ---- information ---------------------------------------------------------------------------------------------- */
 
+std::optional<std::uint32_t> permissionBits(const fs::path&) { return std::nullopt; }  // no such bits here
+
+bool addExecutableBits(const fs::path&, std::uint32_t) { return true; }
+
 std::optional<FileInfo> fileInfo(const fs::path& p) {
     WIN32_FILE_ATTRIBUTE_DATA fad{};
     if (!GetFileAttributesExW(p.c_str(), GetFileExInfoStandard, &fad)) return std::nullopt;

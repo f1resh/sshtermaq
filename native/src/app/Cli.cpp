@@ -1,5 +1,6 @@
 #include "app/Cli.h"
 
+#include "core/HostName.h"
 #include "core/Strings.h"
 #include "core/Uuid.h"
 #include "platform/sys/Fs.h"
@@ -78,6 +79,8 @@ struct HostSpec {
     std::optional<Protocol> protocol;  // from a URL scheme
     std::optional<FileProtocol> fileProtocol;  // sftp:// / scp:// open the file manager
     std::string remotePath;                    // path part of sftp:// / scp:// URLs
+    bool link = false;                         // given as a URL (scheme://...)
+    bool droppedPassword = false;              // a link's "user:password@": the password part was dropped
 };
 
 /** "%20" -> " " (invalid escapes are kept as they are). */
@@ -113,18 +116,27 @@ HostSpec parseHostSpec(std::string spec) {
             out.fileProtocol = s == "sftp" ? FileProtocol::Sftp : FileProtocol::Scp;
         } else
             throw std::invalid_argument("unsupported URL scheme \"" + s + "\"");
+        out.link = true;
         spec = spec.substr(scheme + 3);
         auto slash = spec.find('/');
         if (slash != std::string::npos) {
             if (out.fileProtocol) out.remotePath = percentDecode(spec.substr(slash));
             spec.resize(slash);
         }
-        if (out.fileProtocol) out.user = percentDecode(out.user);
     }
     auto at = spec.rfind('@');
     if (at != std::string::npos) {
         out.user = spec.substr(0, at);
         spec = spec.substr(at + 1);
+        if (out.link) {
+            // A link's user part is percent-encoded ("john%40corp" is "john@corp"), as OpenSSH's and PuTTY's ssh://
+            // handling expects; "user:password" is not a user name, and passwords in links are not supported.
+            if (auto colon = out.user.find(':'); colon != std::string::npos) {
+                out.user.resize(colon);
+                out.droppedPassword = true;
+            }
+            out.user = percentDecode(out.user);
+        }
     }
     if (!spec.empty() && spec.front() == '[') {
         auto close = spec.find(']');
@@ -145,6 +157,7 @@ HostSpec parseHostSpec(std::string spec) {
     }
     out.host = trim(out.host);
     if (out.host.empty()) throw std::invalid_argument("empty host name");
+    if (!isValidHostName(out.host)) throw std::invalid_argument("not a valid host name or IP address");
     return out;
 }
 
@@ -304,6 +317,7 @@ CliResult parseCommandLine(const std::vector<std::string>& args, const CliContex
     // Pass 1: -load / @session establish the base configuration (explicit options are applied on top later).
     std::optional<SessionConfig> loaded;
     bool loadRequested = false;
+    bool link = false;  // a scheme://... argument: what a clicked link starts the app with
     auto load = [&](const std::string& name) {
         loadRequested = true;
         loaded.reset();
@@ -325,6 +339,8 @@ CliResult parseCommandLine(const std::vector<std::string>& args, const CliContex
             load(args[++i]);
         } else if (takesValue(a)) {
             ++i;
+        } else if (!startsWith(a, "-") && a.find("://") != std::string::npos) {
+            link = true;
         }
     }
 
@@ -337,6 +353,13 @@ CliResult parseCommandLine(const std::vector<std::string>& args, const CliContex
         s.name.clear();
         s.folder.clear();
         s.createdAt = s.updatedAt = s.lastUsedAt = 0;
+        if (link) {
+            // A clicked link may come from anyone: it does not get Default Settings' forwarding or tunnels (-A, -X,
+            // -L / -R / -D on the same command line still add them).
+            s.ssh.auth.agentForwarding = false;
+            s.ssh.x11.enabled = false;
+            s.ssh.tunnels.clear();
+        }
     }
     const Protocol baseProtocol = s.protocol;
 
@@ -482,7 +505,9 @@ CliResult parseCommandLine(const std::vector<std::string>& args, const CliContex
             } else {
                 HostSpec h = parseHostSpec(*positional);
                 s.host = h.host;
-                if (!h.user.empty()) s.username = percentDecode(h.user);
+                if (!h.user.empty()) s.username = h.user;
+                if (h.droppedPassword)
+                    res.warnings.push_back("the password in the link was ignored (passwords in links are not supported)");
                 if (h.port && !explicitPort) explicitPort = h.port;
                 if (h.protocol && !protocol) protocol = h.protocol;
                 if (h.fileProtocol) {
@@ -530,6 +555,7 @@ CliResult parseCommandLine(const std::vector<std::string>& args, const CliContex
             req.remotePath = remotePath;
         }
         if (req.session.protocol == Protocol::Ssh) req.password = password;
+        req.fromLink = link && !loaded;
         res.request = std::move(req);
     } else if (loadRequested && loaded && !hasTarget) {
         res.warnings.push_back("saved session has no host name");

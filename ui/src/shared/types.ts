@@ -472,6 +472,8 @@ export interface AppSettings {
     wordSeparators: string;
     warnOnMultilinePaste: boolean;
     confirmCloseConnected: boolean;
+    /** Ask before a clicked link (ssh://, sftp://, telnet://, ...) connects. */
+    confirmLinks: boolean;
     restoreTabs: boolean;
     /** With restoreTabs: tab and pane names come back too (otherwise restored tabs get automatic titles). */
     restoreNames: boolean;
@@ -728,6 +730,8 @@ export interface TransferProgress {
   currentFile?: string;
   /** Files left alone because of the conflict policy. */
   skipped?: number;
+  /** Folder transfers: links to folders that were not followed (they lead back into the tree, or nowhere). */
+  skippedLinks?: number;
   /** What started the transfer. */
   origin?: 'transfer' | 'edit' | 'sync' | 'drag' | 'open';
   /** Folder transfers: the folder tree is still being listed (filesTotal / total: found so far, currentFile: the folder
@@ -1025,6 +1029,8 @@ export interface OpenRequest {
   view?: SessionView;
   /** Remote folder from an sftp:// / scp:// URL. */
   remotePath?: string;
+  /** Opened by a link (scheme://...): asked about first (settings.behavior.confirmLinks). */
+  fromLink?: boolean;
 }
 
 /** A shell installed on this computer (shells:list). */

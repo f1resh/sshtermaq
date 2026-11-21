@@ -7,6 +7,7 @@
 
 #include "platform/sys/Serial.h"
 
+#include "platform/detail/PosixSelect.h"
 #include "platform/detail/PosixSerial.h"
 #include "platform/sys/Errors.h"
 
@@ -29,50 +30,7 @@ namespace st::sys::serial {
 
 namespace {
 
-/** A descriptor set for select(2) as large as its highest descriptor needs. */
-class FdSet {
-public:
-    void add(int fd) {
-        const size_t word = static_cast<size_t>(fd) / NFDBITS;
-        if (bits_.size() <= word) bits_.resize(std::max(word + 1, sizeof(fd_set) / sizeof(fd_mask)), 0);
-        bits_[word] |= bit(fd);
-        maxFd_ = std::max(maxFd_, fd);
-    }
-    bool has(int fd) const {
-        const size_t word = static_cast<size_t>(fd) / NFDBITS;
-        return word < bits_.size() && (bits_[word] & bit(fd));
-    }
-    fd_set* get() { return bits_.empty() ? nullptr : reinterpret_cast<fd_set*>(bits_.data()); }
-    int count() const { return maxFd_ + 1; }
-
-private:
-    static fd_mask bit(int fd) {
-        return static_cast<fd_mask>(std::make_unsigned_t<fd_mask>{1} << (static_cast<unsigned>(fd) % NFDBITS));
-    }
-
-    std::vector<fd_mask> bits_;
-    int maxFd_ = -1;
-};
-
-/** Waits for `readA` / `readB` to be readable or `writeFd` writable (-1 = not watched); timeoutMs < 0 = no limit.
- *  The ready ones stay set; false on error (errno). */
-bool waitFds(int readA, int readB, int writeFd, int timeoutMs, bool& aReady, bool& bReady, bool& writable) {
-    FdSet reads, writes;
-    for (int fd : {readA, readB})
-        if (fd >= 0) reads.add(fd);
-    if (writeFd >= 0) writes.add(writeFd);
-    timeval tv{timeoutMs / 1000, (timeoutMs % 1000) * 1000};
-    int n;
-    do {
-        n = ::select(std::max(reads.count(), writes.count()), reads.get(), writes.get(), nullptr,
-                     timeoutMs < 0 ? nullptr : &tv);
-    } while (n < 0 && errno == EINTR);
-    if (n < 0) return false;
-    aReady = readA >= 0 && reads.has(readA);
-    bReady = readB >= 0 && reads.has(readB);
-    writable = writeFd >= 0 && writes.has(writeFd);
-    return true;
-}
+using st::sys::detail::waitFds;  // select(2) for descriptors above 1024 (platform/detail/PosixSelect.h)
 
 /** The B* constant of a standard speed (0 for others, which need detail::setCustomSpeed). */
 speed_t standardSpeed(int baud) {

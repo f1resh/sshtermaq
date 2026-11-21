@@ -172,6 +172,7 @@ Json toJson(const OpenRequest& r) {
     if (!r.password.empty()) j["password"] = r.password;
     if (!r.view.empty()) j["view"] = r.view;
     if (!r.remotePath.empty()) j["remotePath"] = r.remotePath;
+    if (r.fromLink) j["fromLink"] = true;
     return j;
 }
 

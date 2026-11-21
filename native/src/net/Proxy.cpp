@@ -4,6 +4,7 @@
 #include "net/Proxy.h"
 
 #include "core/Crypto.h"
+#include "core/HostName.h"
 #include "core/Strings.h"
 #include "net/Socket.h"
 #include "platform/sys/Errors.h"
@@ -415,14 +416,14 @@ int httpConnect(Channel& ch, const ProxyConfig& p, const std::string& host, int 
 /* Local proxy command                                                       */
 /* ------------------------------------------------------------------------ */
 
-sys::SocketHandle startLocalCommand(const TransportContext& ctx, const std::string& command, std::string& error) {
+sys::SocketHandle startLocalCommand(const TransportContext& ctx, const ProxyCommandLine& line, std::string& error) {
     TransportListener* listener = ctx.listener;
     return sys::startProxyCommand(
-        command,
-        [listener](const std::string& line) {
-            if (listener) listener->onLog(LogLevel::Warn, "proxy: " + line);
+        line.command,
+        [listener](const std::string& text) {
+            if (listener) listener->onLog(LogLevel::Warn, "proxy: " + text);
         },
-        error);
+        error, line.env);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -476,7 +477,11 @@ bool proxyExcludes(const ProxyConfig& proxy, const std::string& hostIn) {
     return false;
 }
 
-std::string expandProxyTemplate(const std::string& tmpl, const ProxyConfig& proxy, const std::string& host, int port) {
+namespace {
+
+/** The substitution itself; `value(name, text)` may replace each token's text (`text`: what the token stands for). */
+std::string expandTemplate(const std::string& tmpl, const ProxyConfig& proxy, const std::string& host, int port,
+                           const std::function<std::string(std::string_view name, std::string text)>& value) {
     std::string out;
     auto hexVal = [](char c) -> int {
         if (c >= '0' && c <= '9') return c - '0';
@@ -527,7 +532,7 @@ std::string expandProxyTemplate(const std::string& tmpl, const ProxyConfig& prox
             bool matched = false;
             for (const auto& t : tokens) {
                 if (startsWith(rest, t.name)) {
-                    out += t.value;
+                    out += value ? value(t.name, t.value) : t.value;
                     i += 1 + strlen(t.name);
                     matched = true;
                     break;
@@ -539,6 +544,44 @@ std::string expandProxyTemplate(const std::string& tmpl, const ProxyConfig& prox
         ++i;
     }
     return out;
+}
+
+bool isPlainUserName(std::string_view u) {
+    if (u.empty() || u.front() == '-') return false;
+    return std::all_of(u.begin(), u.end(), [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' ||
+               c == '-' || c == '@' || c == '+';
+    });
+}
+
+}  // namespace
+
+std::string expandProxyTemplate(const std::string& tmpl, const ProxyConfig& proxy, const std::string& host, int port) {
+    return expandTemplate(tmpl, proxy, host, port, nullptr);
+}
+
+bool expandProxyCommand(const std::string& tmpl, const ProxyConfig& proxy, const std::string& host, int port,
+                        ProxyCommandLine& out, std::string& error) {
+    out = {};
+    std::string bad;  // the first value that may not reach the shell
+    out.command = expandTemplate(tmpl, proxy, host, port, [&](std::string_view name, std::string text) -> std::string {
+        if (name == "host" || name == "proxyhost") {
+            if (bad.empty() && !isValidHostName(text))
+                bad = std::string(name == "host" ? "The host name" : "The proxy host name") + " \"" + text + "\"";
+        } else if (name == "user") {
+            if (bad.empty() && !text.empty() && !isPlainUserName(text)) bad = "The proxy user name \"" + text + "\"";
+        } else if (name == "pass") {
+            if (out.env.empty()) out.env.emplace_back(kProxyPassVariable, text);
+            return sys::shellVariableReference(kProxyPassVariable);
+        }
+        return text;
+    });
+    if (!bad.empty()) {
+        out = {};
+        error = bad + " has characters that cannot go into a local proxy command; nothing was run";
+        return false;
+    }
+    return true;
 }
 
 sys::SocketHandle openConnection(const TransportContext& ctx, const std::string& host, int port, std::string& error,
@@ -601,11 +644,11 @@ sys::SocketHandle openConnection(const TransportContext& ctx, const std::string&
             error = "No local proxy command configured";
             return sys::kInvalidSocket;
         }
-        const std::string cmd = expandProxyTemplate(proxy.localCommand, proxy, target, port);
-        ProxyConfig masked = proxy;
-        if (!masked.password.empty()) masked.password = "********";
-        logLine(ctx, LogLevel::Info, "Starting local proxy command: " + escapeForLog(expandProxyTemplate(proxy.localCommand, masked, target, port)));
-        sys::SocketHandle s = startLocalCommand(ctx, cmd, error);
+        ProxyCommandLine line;
+        if (!expandProxyCommand(proxy.localCommand, proxy, target, port, line, error)) return sys::kInvalidSocket;
+        // The password is not in the command line, only a reference to its environment variable.
+        logLine(ctx, LogLevel::Info, "Starting local proxy command: " + escapeForLog(line.command));
+        sys::SocketHandle s = startLocalCommand(ctx, line, error);
         if (s != sys::kInvalidSocket && options.connectedTo) *options.connectedTo = targetText + " (local proxy command)";
         return s;
     }

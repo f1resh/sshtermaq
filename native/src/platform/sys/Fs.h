@@ -43,6 +43,14 @@ struct FileInfo {
  */
 std::optional<FileInfo> fileInfo(const std::filesystem::path& p);
 
+/** The permission bits (mode & 0777) of a file, which an upload gives a new remote file; nullopt where the file
+ *  system has none (Windows: the upload then uses 0644). Follows links. */
+std::optional<std::uint32_t> permissionBits(const std::filesystem::path& p);
+/** Gives a downloaded file the executable bits of `remoteMode` (mode & 0111) on top of its own: nothing else, so no
+ *  setuid / setgid and no more than the remote file has. True when done or when the system has no such bits
+ *  (Windows); false with lastErrorMessage() when it failed. */
+bool addExecutableBits(const std::filesystem::path& p, std::uint32_t remoteMode);
+
 /** False while another program holds `p` open without allowing others to read it (e.g. an editor still saving). */
 bool isReadableNow(const std::filesystem::path& p);
 

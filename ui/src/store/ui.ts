@@ -19,9 +19,13 @@ export type DialogState =
       type: 'confirm';
       title: string;
       message: string;
+      /** Shown under the message as it is, in a monospace box (a command, a path). */
+      details?: string;
+      /** A checkbox under the message ("Don't ask again"); its state goes to onConfirm. */
+      option?: string;
       confirmLabel?: string;
       danger?: boolean;
-      onConfirm: () => void;
+      onConfirm: (option: boolean) => void;
       onCancel?: () => void;
     }
   | {
@@ -114,14 +118,27 @@ export const useUi = create<UiState>((set) => ({
     })
 }));
 
+interface ConfirmOptions {
+  title: string;
+  message: string;
+  details?: string;
+  confirmLabel?: string;
+  danger?: boolean;
+}
+
 /** Promise-based confirm helper built on the 'confirm' dialog. */
-export function confirmDialog(opts: { title: string; message: string; confirmLabel?: string; danger?: boolean }): Promise<boolean> {
+export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
+  return confirmWithOption(opts).then((r) => r.ok);
+}
+
+/** confirmDialog with a checkbox (`option` is its label); `checked` is its state when confirmed. */
+export function confirmWithOption(opts: ConfirmOptions & { option?: string }): Promise<{ ok: boolean; checked: boolean }> {
   return new Promise((resolve) => {
     useUi.getState().openDialog({
       type: 'confirm',
       ...opts,
-      onConfirm: () => resolve(true),
-      onCancel: () => resolve(false)
+      onConfirm: (checked) => resolve({ ok: true, checked }),
+      onCancel: () => resolve({ ok: false, checked: false })
     });
   });
 }

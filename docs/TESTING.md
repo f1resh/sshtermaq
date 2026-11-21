@@ -10,9 +10,9 @@ them depends on another.
 
 | Part | What it tests | Framework | Where | Automated | Size | Run time |
 |---|---|---|---|---|---|---|
-| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 246 test cases | about 1 minute |
-| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system; finished transfers' times; the font picker's lists; Credentials (which sessions and logins use a key or a login, how a login signs in, names; unlocking and retrying when they are locked; what an import did) | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 20 files, 171 tests | under 2 seconds |
-| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart, the SFTP panel, the two-pane file manager, import and export, the key generator, settings, Credentials (keys, logins, remembered passphrases, the master password, export and import) | Playwright Test | `ui/e2e/*.spec.ts` | yes | 19 files, 91 tests, each run twice (182, of which 2 macOS-only skip in the Windows layout) | about 5 minutes |
+| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 260 test cases | about 1 minute |
+| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system; finished transfers' times; the font picker's lists; Credentials (which sessions and logins use a key or a login, how a login signs in, names; unlocking and retrying when they are locked; what an import did); host names (the cases shared with the native check); the question before a link connects; imported sessions that run a command on this computer | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 23 files, 224 tests | under 2 seconds |
+| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart, the SFTP panel, the two-pane file manager, import and export, the key generator, settings, Credentials (keys, logins, remembered passphrases, the master password, export and import), links asking before they connect | Playwright Test | `ui/e2e/*.spec.ts` | yes | 20 files, 95 tests, each run twice (190, of which 2 macOS-only skip in the Windows layout) | about 5 minutes |
 | **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs`, `ui/scripts/checks/` | no, run by hand | `checks/local-terminal.mjs` | seconds |
 
 The browser tests cover the main screens and dialogs, not yet the host key and password prompts or the color scheme
@@ -208,13 +208,13 @@ TEST_CASE("ssh: password authentication, shell echo and exit code", "[ssh]") {
 
 ## 5. What is tested
 
-### Native tests (245 test cases)
+### Native tests (260 test cases)
 
 215 run by default; `putty: real registry smoke test` and `codepage (Windows): regenerate the tables` are hidden. The **Needs** column shows the tool without which a
 test case is skipped. On macOS every suite runs; its `platform_ui` has the macOS local files tests (listed after
 Windows' below). The other counts are Windows'.
 
-#### app — `st_test_app.exe` (29)
+#### app — `st_test_app.exe` (34)
 
 Command line (PuTTY-compatible options, `ssh://` / `sftp://` URLs, `-load`, `--version`), data-folder resolution (portable / installed / override), the version and build id (`BuildInfo`), the embedded web UI (index parsing, request paths, content types, loading the embedded test files), and the host window policy (`HostController` against a fake window: allowed pages and origins, window events (menu bar commands and title bar insets too), confirming close, saved placement). *Kind: unit.* Source: [native/tests/app](../native/tests/app).
 
@@ -224,6 +224,10 @@ Command line (PuTTY-compatible options, `ssh://` / `sftp://` URLs, `-load`, `--v
 | cli: [user@]host[:port] uses the default template | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: protocol flags set the default port unless -P is given | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: sftp:// and scp:// open the file manager | `[app][cli]` |  | `cli_tests.cpp` |
+| host names: the shared cases (the UI's isValidHost passes the same file) | `[app][cli][host]` | `native/tests/fixtures/host-names.json` | `cli_tests.cpp` |
+| cli: a host with shell characters is refused, in a link and as an argument | `[app][cli][host]` |  | `cli_tests.cpp` |
+| cli: user names in links are decoded; a password in a link is dropped | `[app][cli]` |  | `cli_tests.cpp` |
+| cli: a link is marked, and does not take forwarding or tunnels from Default Settings | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: -l, -pw, -i, flags | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: -load merges saved session, explicit options win regardless of order | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: port forwarding specs | `[app][cli]` |  | `cli_tests.cpp` |
@@ -242,6 +246,7 @@ Command line (PuTTY-compatible options, `ssh://` / `sftp://` URLs, `-load`, `--v
 | host: messages from other origins are ignored; a new page first gets the window state | `[app][host]` |  | `host_tests.cpp` |
 | host: closing asks the page while sessions are active | `[app][host]` |  | `host_tests.cpp` |
 | host: the window placement is kept in state.json | `[app][host]` |  | `host_tests.cpp` |
+| host: resizing does not hold up the shared worker pool (500 size changes, then a pool job starts within 100 ms; the newest one saved once quiet; a final one at once) | `[app][host]` |  | `host_tests.cpp` |
 | host: the bundled UI is served under its origin | `[app][host]` |  | `host_tests.cpp` |
 | host: menu bar commands and the title bar insets reach the page | `[app][host]` |  | `host_tests.cpp` |
 | host: the controller releases the window's hooks | `[app][host]` |  | `host_tests.cpp` |
@@ -250,7 +255,7 @@ Command line (PuTTY-compatible options, `ssh://` / `sftp://` URLs, `-load`, `--v
 | ui: content types by extension | `[app][ui]` |  | `ui_tests.cpp` |
 | ui: files embedded as resources are found by path | `[app][ui]` |  | `ui_tests.cpp` |
 
-#### core — `st_test_core.exe` (6)
+#### core — `st_test_core.exe` (8)
 
 Strings (UTF-8 paths, UTF-8 validation, UTF-16LE), crypto helpers, session defaults and lenient JSON parsing, bridge message routing, app log rotation. *Kind: unit.* Source: [native/tests/core](../native/tests/core).
 
@@ -262,8 +267,10 @@ Strings (UTF-8 paths, UTF-8 validation, UTF-16LE), crypto helpers, session defau
 | types: session defaults and lenient parsing | — |  | `core_tests.cpp` |
 | bridge: invoke, send and events | — |  | `core_tests.cpp` |
 | log: a full log is kept as `<name>.1.log` and a new one starts | — |  | `core_tests.cpp` |
+| threads: with every worker blocked a new job still runs; the extra workers end when idle | `[core][threads]` |  | `threading_tests.cpp` |
+| threads: the debouncer runs the newest call once things are quiet | `[core][threads]` |  | `threading_tests.cpp` |
 
-#### keys — `st_test_keys.exe` (8)
+#### keys — `st_test_keys.exe` (9)
 
 Key generation, PuTTY PPK v2/v3 read/write and encryption, OpenSSH <-> PPK conversion, cross-checks with `ssh-keygen` and `plink`. *Kind: unit + cross-check.* Source: [native/tests/keys](../native/tests/keys).
 
@@ -271,6 +278,7 @@ Key generation, PuTTY PPK v2/v3 read/write and encryption, OpenSSH <-> PPK conve
 |---|---|---|---|
 | keygen: ed25519 / rsa / ecdsa produce loadable OpenSSH and PPK files | `[keys]` |  | `keys_tests.cpp` |
 | ppk: encrypted v3 asks for the passphrase and rejects wrong ones | `[keys][ppk]` |  | `keys_tests.cpp` |
+| ppk: a v3 file may ask for at most 1 GiB and about a minute of work to unlock (refused while parsing, before the passphrase; a 64 MB key opens) | `[keys][ppk]` |  | `keys_tests.cpp` |
 | ppk: v2 writer round-trips and tampering is detected | `[keys][ppk]` |  | `keys_tests.cpp` |
 | convert: OpenSSH <-> PPK | `[keys]` |  | `keys_tests.cpp` |
 | OpenSSH keys made by ssh-keygen load (encrypted with bcrypt KDF) | `[keys][openssh]` | OpenSSH `ssh-keygen` | `keys_tests.cpp` |
@@ -278,7 +286,7 @@ Key generation, PuTTY PPK v2/v3 read/write and encryption, OpenSSH <-> PPK conve
 | detectKeyFormat | `[keys]` |  | `keys_tests.cpp` |
 | key text (pasted or stored in Credentials): inspect and load without a file | `[keys][vault]` | OpenSSH and PPK text; a public key and junk refused | `keys_tests.cpp` |
 
-#### net — `st_test_net.exe` (32)
+#### net — `st_test_net.exe` (35)
 
 Local echo / line editing, proxy rules, sockets, SOCKS5 handshake, Raw / Telnet / Rlogin against scripted servers, the local terminal transport with this computer's default shell (Windows: PowerShell; macOS: the login shell), and the socket semantics every OS must reproduce (`[edge]`: partial writes, idle CPU, FIN and RST, urgent data, many sockets, proxy commands). *Kind: unit + integration.* Source: [native/tests/net](../native/tests/net).
 
@@ -292,6 +300,7 @@ Local echo / line editing, proxy rules, sockets, SOCKS5 handshake, Raw / Telnet 
 | ldisc: echo without editing | `[net][ldisc]` |  | `net_tests.cpp` |
 | proxy: exclusions and localhost | `[net][proxy]` |  | `net_tests.cpp` |
 | proxy: telnet/command template expansion | `[net][proxy]` |  | `net_tests.cpp` |
+| proxy: a local proxy command takes only plain names; the password goes through the environment | `[net][proxy]` |  | `net_tests.cpp` |
 | sockets: connect refused, pair and listen | `[net]` |  | `net_tests.cpp` |
 | proxy: SOCKS5 handshake is byte-exact | `[net][proxy]` |  | `net_tests.cpp` |
 | raw: bytes pass through both ways | `[net][raw]` |  | `net_tests.cpp` |
@@ -311,6 +320,7 @@ Local echo / line editing, proxy rules, sockets, SOCKS5 handshake, Raw / Telnet 
 | edge: connections work while many other sockets are open | `[net][edge]` |  | `semantics_tests.cpp` |
 | edge: a proxy command's output reaches the session, its errors the event log | `[net][edge][proxy]` |  | `semantics_tests.cpp` |
 | edge: closing the session ends a running proxy command promptly | `[net][edge][proxy]` |  | `semantics_tests.cpp` |
+| edge: a proxy command gets any password unchanged, and a bad host name runs nothing | `[net][edge][proxy]` |  | `semantics_tests.cpp` |
 | edge: exiting with a proxy command running ends the command and does not crash (runs a copy of the test program: the hidden `[.][proxy-exit-child]` cases exit with the command running, or right after closing it) | `[net][edge][proxy]` |  | `semantics_tests.cpp` |
 | local: program names for labels | `[local]` |  | `local_transport_tests.cpp` |
 | local: there is a default shell | `[local]` |  | `local_transport_tests.cpp` |
@@ -352,7 +362,7 @@ The platform layer's tier 0 (`native/src/platform/sys`): what every OS's impleme
 | pty (Windows): the shell list has Command Prompt and one default | `[platform][pty]` |  | `pty_win_tests.cpp` |
 | pty (Windows): WSL distributions are named without quotes | `[platform][pty]` | wsl.exe keeps quotes as part of the name | `pty_win_tests.cpp` |
 
-On macOS, `pty_posix_tests.cpp` has the POSIX counterparts (7): output and exit code, command-line splitting, input / resize / environment / a non-ASCII folder, default signal handling for the program, kill hangs it up, readable errors, and the shell list starting with the login shell.
+On macOS, `pty_posix_tests.cpp` has the POSIX counterparts (8): output and exit code, command-line splitting, input / resize / environment / a non-ASCII folder, default signal handling for the program, kill hangs it up, readable errors, the shell list starting with the login shell, and a terminal whose descriptors are numbered above 1024.
 
 #### platform_ui — `st_test_platform_ui.exe` (9)
 
@@ -447,7 +457,7 @@ Charset decoding/encoding, session logging, the session manager (ordering, batch
 | session manager: closeAll tears everything down | `[manager]` |  | `sessionmanager_tests.cpp` |
 | session manager: bridge handlers | `[manager]` |  | `sessionmanager_tests.cpp` |
 
-#### sftp — `st_test_sftp.exe` (25)
+#### sftp — `st_test_sftp.exe` (29)
 
 File manager backend over SFTP and SCP: browsing, transfers, conflicts, resume, move, find, synchronize, edit. *Kind: integration (test SSH server).* Source: [native/tests/sftp](../native/tests/sftp).
 
@@ -471,7 +481,11 @@ File manager backend over SFTP and SCP: browsing, transfers, conflicts, resume, 
 | transfer: names that differ only in letter case | `[sftp][transfer]` |  | `transfer_tests.cpp` |
 | transfer: conflict decisions | `[sftp][transfer]` |  | `transfer_tests.cpp` |
 | transfer: download conflicts | `[sftp][transfer]` |  | `transfer_tests.cpp` |
-| transfer: resume | `[sftp][transfer]` |  | `transfer_tests.cpp` |
+| transfer: resume (a partial file continues only when its record matches the remote file; changed, another file, a broken or missing record: starts over; no record left after finishing or cancelling) | `[sftp][transfer]` |  | `transfer_tests.cpp` |
+| tree limits: endless nesting stops every walk with a message; a deep real tree still works | `[sftp][tree][limits]` |  | `tree_walk_tests.cpp` |
+| tree walks: links to folders are followed unless they lead back; links to files copy the file | `[sftp][tree][links]` |  | `tree_walk_tests.cpp` |
+| tree walks: the executable bit (the bits arrive on macOS, setuid never; uploads from Windows 0644) | `[sftp][tree][mode]` |  | `tree_walk_tests.cpp` |
+| tree walks: local links to folders are followed on upload unless they lead back (Windows: junctions) | `[sftp][tree][links]` |  | `tree_walk_tests.cpp` |
 | transfer: move | `[sftp][transfer]` |  | `transfer_tests.cpp` |
 | transfer: uploads merge into existing folders | `[sftp][transfer]` |  | `transfer_tests.cpp` |
 | transfer: folder transfers report the listing before copying | `[sftp][transfer]` |  | `transfer_tests.cpp` |
@@ -568,7 +582,7 @@ Self-tests of the fake servers, validated with independent clients (`plink`, `ps
 | TestSshServer serves SFTP to psftp | `[support][plink]` | PuTTY `psftp` | `support_tests.cpp` |
 | TestSshServer honours local forwarding from plink | `[support][plink]` | PuTTY `plink` | `support_tests.cpp` |
 
-### UI unit tests (171 tests)
+### UI unit tests (224 tests)
 
 #### `actions.test.ts` (7)
 
@@ -808,7 +822,19 @@ cancelled: the error stands, other errors never ask; what an import says ("Added
 [ui/src/components/dialogs/credentials/vaultModel.test.ts](../ui/src/components/dialogs/credentials/vaultModel.test.ts),
 [ui/src/store/vault.test.ts](../ui/src/store/vault.test.ts).
 
-### UI browser tests (91 tests, each run as `windows` and `macos`; the two marked macOS only skip in the Windows layout)
+#### `session/sessionModel.test.ts` (47), `linkQuestion.test.ts` (3), `import/importModel.test.ts` (3)
+
+Host names: every entry of [native/tests/fixtures/host-names.json](../native/tests/fixtures/host-names.json) through
+`isValidHost`, the same file the native `isValidHostName` is tested with (one test per entry). The question before a
+clicked link connects ("Open an SSH connection to deploy@host:22?", SFTP / SCP with the folder, the local proxy
+command it would run first). Imported sessions that run a command on this computer: a local proxy command or a local
+terminal's command line (not a remote command, not another proxy type), rows from a file start unticked, "1 of the 3
+selected sessions runs a command on this computer". Finished transfers also count links to folders that were not
+followed (in `transferTimes.test.ts`). Sources: [ui/src/components/dialogs/session/sessionModel.test.ts](../ui/src/components/dialogs/session/sessionModel.test.ts),
+[ui/src/components/dialogs/linkQuestion.test.ts](../ui/src/components/dialogs/linkQuestion.test.ts),
+[ui/src/components/dialogs/import/importModel.test.ts](../ui/src/components/dialogs/import/importModel.test.ts).
+
+### UI browser tests (95 tests, each run as `windows` and `macos`; the two marked macOS only skip in the Windows layout)
 
 Source: [ui/e2e](../ui/e2e).
 
@@ -876,7 +902,11 @@ Source: [ui/e2e](../ui/e2e).
 | `import.spec.ts` | existing sessions at the top level: marked, and replaced when chosen |
 | `import.spec.ts` | OpenSSH config into a folder of its own, with the notes of a host; "Import more" |
 | `import.spec.ts` | a .reg file and a JSON backup show their previews |
+| `import.spec.ts` | sessions that run a command on this computer: marked, the command shown, from a file unticked (from this computer's PuTTY ticked), counted above Import |
 | `import.spec.ts` | a session exports to a PuTTY .reg file and to JSON |
+| `links.spec.ts` | a link asks before it connects and shows the proxy command; cancelling opens nothing |
+| `links.spec.ts` | a plain command line connects without asking |
+| `links.spec.ts` | "Don't ask again" turns the question off, and the setting turns it back on |
 | `keygen.spec.ts` | generates an Ed25519 key: public key, fingerprint, and a warning without a passphrase |
 | `keygen.spec.ts` | RSA offers key sizes, ECDSA curves |
 | `keygen.spec.ts` | the passphrase must be confirmed and match |

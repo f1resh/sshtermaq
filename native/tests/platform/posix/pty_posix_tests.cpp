@@ -6,8 +6,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <fcntl.h>
+#include <sys/resource.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <chrono>
+#include <vector>
 
 using namespace st;
 using st::test::PtyRun;
@@ -114,4 +119,37 @@ TEST_CASE("pty (POSIX): the shell list starts with the login shell, the default"
     REQUIRE(shells.front().isDefault);
     REQUIRE(std::count_if(shells.begin(), shells.end(), [](const auto& s) { return s.isDefault; }) == 1);
     REQUIRE(shells.front().command.find(" -l") != std::string::npos);
+}
+
+TEST_CASE("pty (POSIX): works when its descriptors are numbered above 1024", "[platform][pty]") {
+    // NetInit raises the descriptor limit beyond FD_SETSIZE, so with many sockets and files open a new terminal can
+    // get such numbers; select(2) with a plain fd_set would then write past it (platform/detail/PosixSelect.h).
+    rlimit lim{};
+    REQUIRE(::getrlimit(RLIMIT_NOFILE, &lim) == 0);
+    const rlimit saved = lim;
+    if (lim.rlim_cur < 1200) {
+        lim.rlim_cur = std::min<rlim_t>(lim.rlim_max, 1200);
+        ::setrlimit(RLIMIT_NOFILE, &lim);
+        ::getrlimit(RLIMIT_NOFILE, &lim);
+    }
+    if (lim.rlim_cur < 1200) SKIP("the descriptor limit cannot be raised above 1200 here");
+    std::vector<int> held;
+    for (int fd = ::open("/dev/null", O_RDONLY); fd >= 0; fd = ::open("/dev/null", O_RDONLY)) {
+        held.push_back(fd);
+        if (fd >= 1100) break;
+    }
+    REQUIRE(!held.empty());
+    REQUIRE(held.back() >= 1100);
+
+    Scratch tmp;
+    {
+        PtyRun run;
+        REQUIRE(run.start(sh("--noediting", sys::fromPath(tmp.path()))));
+        run.pty().write("echo \"[$((40 + 2))]\"\n");
+        REQUIRE(run.waitFor("[42]"));
+        run.pty().write("exit 7\n");
+        REQUIRE(run.finish().code == 7);
+    }
+    for (int fd : held) ::close(fd);
+    ::setrlimit(RLIMIT_NOFILE, &saved);
 }

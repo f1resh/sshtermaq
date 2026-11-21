@@ -4,6 +4,8 @@
 
 #include <functional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace st::sys {
 
@@ -14,7 +16,13 @@ namespace st::sys {
  * or its other end stops reading. Only the command's own stdio is inherited. kInvalidSocket + `error` on failure.
  */
 SocketHandle startProxyCommand(const std::string& command, std::function<void(const std::string& line)> onStderrLine,
-                               std::string& error);
+                               std::string& error, const std::vector<std::pair<std::string, std::string>>& env = {});
+/**
+ * How a command line for startProxyCommand refers to environment variable `name` so that its value is never parsed
+ * by the shell: "!name!" for cmd.exe (startProxyCommand turns delayed expansion on when `env` is given; that
+ * expansion happens after cmd has parsed & | < > and quotes), "\"$name\"" for sh (not split, not globbed).
+ */
+std::string shellVariableReference(const std::string& name);
 /**
  * For a socket from startProxyCommand: no onStderrLine calls happen once this returns; `terminate` also ends the
  * command (and forgets the socket). No-op for any other socket.
