@@ -130,6 +130,9 @@ public:
 
     /** Releases protocol resources (blocking). Further calls fail. */
     virtual void close() = 0;
+
+    /** A time-limited link anyone can open (capabilities().presign); throws SftpError where there is none. */
+    virtual std::string presign(const std::string& path, int64_t seconds);
 };
 
 /** "'path'" for messages. */

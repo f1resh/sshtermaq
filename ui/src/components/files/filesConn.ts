@@ -10,6 +10,10 @@ import type { SessionConfig } from '@shared/types';
 /** The session as used for a files-only connection. */
 export function filesSession(s: SessionConfig): SessionConfig {
   const c = structuredClone(s);
+  if (c.protocol === 's3') {
+    if (c.logging.mode !== 'ssh-debug') c.logging.mode = 'off';
+    return c;  // no terminal, no forwarding: nothing to take out
+  }
   c.ssh.noShell = true;
   c.ssh.remoteCommand = '';
   c.ssh.tunnels = [];

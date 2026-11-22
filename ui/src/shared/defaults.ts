@@ -9,7 +9,8 @@ export const DEFAULT_PORTS: Record<Protocol, number> = {
   rlogin: 513,
   raw: 0,
   serial: 0,
-  local: 0
+  local: 0,
+  s3: 0
 };
 
 export function newId(): string {
@@ -107,6 +108,18 @@ export function createDefaultSession(overrides: Partial<SessionConfig> = {}): Se
     local: {
       command: '',
       startDir: ''
+    },
+    s3: {
+      preset: 'aws',
+      endpoint: '',
+      region: '',
+      addressing: 'auto',
+      bucket: '',
+      startPath: '',
+      auth: { method: 'keys', accessKeyId: '', loginId: '', profile: '' },
+      systemProxy: true,
+      partSizeMiB: 16,
+      parallelParts: 4
     },
     terminal: {
       autoWrap: true,

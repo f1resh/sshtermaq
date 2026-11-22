@@ -27,6 +27,7 @@ class Credentials;
 class Vault;
 class Prompter;
 class SshTransport;
+class S3Transport;
 
 struct CloseInfo {
     /** Clean = remote ended the session normally (exit status received / EOF) or user closed it. */
@@ -100,6 +101,8 @@ public:
     virtual LdiscModes defaultLdisc() const = 0;
     /** Non-null only for SSH transports (used by SFTP). */
     virtual SshTransport* asSsh() { return nullptr; }
+    /** Non-null only for S3 sessions (used by the file manager: sftp/S3Fs). */
+    virtual S3Transport* asS3() { return nullptr; }
 };
 
 }  // namespace st

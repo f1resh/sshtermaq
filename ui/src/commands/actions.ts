@@ -52,7 +52,8 @@ export function connectSession(
   opts: { view?: SessionView; remotePath?: string } = {}
 ): string {
   const saved = useSessions.getState().byId(session.id);
-  const view: SessionView = session.protocol === 'ssh' ? (opts.view ?? session.openAs ?? 'terminal') : 'terminal';
+  const view: SessionView =
+    session.protocol === 's3' ? 'files' : session.protocol === 'ssh' ? (opts.view ?? session.openAs ?? 'terminal') : 'terminal';
   const paneId = useWorkspace.getState().openSession(session, {
     target,
     sessionId: saved ? saved.id : null,

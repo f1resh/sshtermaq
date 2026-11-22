@@ -44,7 +44,8 @@ export async function rememberQuickConnect(text: string): Promise<void> {
 /** Opens a parsed target in a new tab and records it in the history. */
 export function quickConnectTo(target: QuickConnectTarget): void {
   const session = applyQuickConnect(createAdHocSession(), target);
-  connectSession(session, 'tab', undefined, target.files ? { view: 'files', remotePath: target.files.path } : { view: 'terminal' });
+  const files = target.files ? { view: 'files' as const, remotePath: target.files.path } : null;
+  connectSession(session, 'tab', undefined, files ?? { view: target.protocol === 's3' ? 'files' : 'terminal' });
   void rememberQuickConnect(formatQuickConnect(target));
 }
 
@@ -130,9 +131,10 @@ export function QuickConnectDialog({ initial, onClose }: QuickConnectDialogProps
     rlogin: 'user@host',
     raw: 'host:port',
     serial: `${osTerms.serialLine} or ${osTerms.serialExample}`,
-    local: 'shell (pwsh, bash, wsl…) or a command line; empty: the default shell'
+    local: 'shell (pwsh, bash, wsl…) or a command line; empty: the default shell',
+    s3: 'bucket/folder (AWS, the default ~/.aws profile)'
   };
-  const chips: Protocol[] = shells?.length ? [...PROTOCOLS, 'local'] : PROTOCOLS;
+  const chips: Protocol[] = shells?.length ? [...PROTOCOLS, 's3', 'local'] : [...PROTOCOLS, 's3'];
 
   return (
     <Modal

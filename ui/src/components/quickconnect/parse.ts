@@ -7,6 +7,7 @@
  *   proto://[user[:pw]@]host[:port][/...]   ssh://root@h:22  (password part is ignored, path ignored)
  *   sftp://[user@]host[:port][/path]   scp://...   open the file manager (SSH) in that folder
  *   serial://COM3[?baud=115200&data=8&parity=n&stop=1&flow=xonxoff]   also serial://COM3:9600, COM3
+ *   s3://bucket[/folder]         S3 (AWS, the default ~/.aws profile); with the S3 chip also "bucket/folder"
  *   proto host [port]            telnet router 2323, ssh deploy@web-01 2222
  *   CLI flags                    -ssh/-telnet/-rlogin/-raw/-serial, -P/-p <port>, -l <user>
  */
@@ -27,6 +28,24 @@ export interface QuickConnectTarget {
   serial?: Partial<SerialOptions>;
   /** sftp:// / scp:// URLs: open the file manager with this protocol. */
   files?: { protocol: FileProtocol; path?: string };
+  /** s3:// (protocol 's3'; `host` is the bucket): the folder inside it. */
+  s3?: { path?: string };
+}
+
+/** S3 bucket names: 3-63 characters of letters, digits, '.', '-' and '_' (older buckets may have capitals). */
+export function isValidBucketName(name: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{1,253}[A-Za-z0-9]$/.test(name);
+}
+
+/** "bucket[/folder]" -> target, or an error. */
+function parseS3(spec: string): QuickConnectTarget | string {
+  const clean = spec.replace(/[?#].*$/, '');
+  const slash = clean.indexOf('/');
+  const bucket = decodeSafe(slash < 0 ? clean : clean.slice(0, slash));
+  const path = slash < 0 ? '' : decodeSafe(clean.slice(slash + 1)).replace(/^\/+|\/+$/g, '');
+  if (!bucket) return 'Enter a bucket name, e.g. s3://my-bucket/folder';
+  if (!isValidBucketName(bucket)) return `"${bucket}" is not a valid bucket name`;
+  return { protocol: 's3', host: bucket, s3: path ? { path } : {} };
 }
 
 export type QuickConnectParse = { ok: true; target: QuickConnectTarget } | { ok: false; error: string };
@@ -149,7 +168,7 @@ export function parseQuickConnect(input: string, defaultProtocol: Protocol = 'ss
   const fail = (error: string): QuickConnectParse => ({ ok: false, error });
 
   // URL form
-  const url = /^([a-z]+):\/\/(.*)$/i.exec(text);
+  const url = /^([a-z][a-z0-9]*):\/\/(.*)$/i.exec(text);
   if (url) {
     const proto = url[1].toLowerCase();
     if (proto === 'sftp' || proto === 'scp') {
@@ -161,6 +180,10 @@ export function parseQuickConnect(input: string, defaultProtocol: Protocol = 'ss
       const path = rest.startsWith('/') && rest.length > 1 ? decodeSafe(rest) : undefined;
       return finish({ protocol: 'ssh', ...a, files: { protocol: proto, path } });
     }
+    if (proto === 's3') {
+      const r = parseS3(url[2]);
+      return typeof r === 'string' ? fail(r) : { ok: true, target: r };
+    }
     if (!isProtocol(proto)) return fail(`Unknown protocol "${url[1]}"`);
     if (proto === 'serial') {
       const r = parseSerial(url[2]);
@@ -170,6 +193,11 @@ export function parseQuickConnect(input: string, defaultProtocol: Protocol = 'ss
     const a = parseAuthority(authority);
     if (typeof a === 'string') return fail(a);
     return finish({ protocol: proto, ...a });
+  }
+
+  if (defaultProtocol === 's3') {
+    const r = parseS3(text);
+    return typeof r === 'string' ? fail(r) : { ok: true, target: r };
   }
 
   // Token form: [proto] target [port] with optional CLI flags.
@@ -238,6 +266,7 @@ function finish(t: QuickConnectTarget): QuickConnectParse {
   if (t.username === undefined) delete t.username;
   if (t.port === undefined) delete t.port;
   if (t.files === undefined) delete t.files;
+  if (t.s3 === undefined) delete t.s3;
   return { ok: true, target: t };
 }
 
@@ -245,6 +274,20 @@ function finish(t: QuickConnectTarget): QuickConnectParse {
 export function applyQuickConnect(base: SessionConfig, t: QuickConnectTarget): SessionConfig {
   const s = structuredClone(base);
   s.protocol = t.protocol;
+  if (t.protocol === 's3') {
+    s.host = '';
+    s.port = 0;
+    s.openAs = 'files';
+    s.s3 = {
+      ...s.s3,
+      preset: 'aws',
+      endpoint: '',
+      bucket: t.host,
+      startPath: t.s3?.path ?? '',
+      auth: { ...s.s3.auth, method: 'profile', profile: '', accessKeyId: '', loginId: '' }
+    };
+    return s;
+  }
   if (t.protocol === 'serial') {
     s.host = '';
     s.port = 0;
@@ -260,6 +303,7 @@ export function applyQuickConnect(base: SessionConfig, t: QuickConnectTarget): S
 
 /** Canonical text for a target (history entries, previews). */
 export function formatQuickConnect(t: QuickConnectTarget): string {
+  if (t.protocol === 's3') return `s3://${t.host}${t.s3?.path ? '/' + t.s3.path : ''}`;
   if (t.protocol === 'serial') {
     const q: string[] = [];
     if (t.serial?.baudRate) q.push(`baud=${t.serial.baudRate}`);

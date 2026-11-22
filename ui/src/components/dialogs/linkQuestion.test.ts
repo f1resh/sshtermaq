@@ -38,4 +38,14 @@ describe('linkQuestion', () => {
     // Another proxy type runs nothing here.
     expect(linkQuestion(req({ proxy: { ...s.proxy, type: 'socks5', localCommand: 'nc %host' } })).command).toBe('');
   });
+
+  it('describes s3:// links (no command runs)', () => {
+    const s = createDefaultSession();
+    const q = linkQuestion(
+      req({ protocol: 's3', host: '', port: 0, s3: { ...s.s3, bucket: 'logs', startPath: 'web/2026', auth: { ...s.s3.auth, method: 'profile' } } })
+    );
+    expect(q).toEqual({ title: 'Open a link?', message: 'Open the S3 storage s3://logs/web/2026 with the AWS profile "default"?', command: '' });
+    const e = linkQuestion(req({ protocol: 's3', host: '', s3: { ...s.s3, bucket: 'b', auth: { ...s.s3.auth, method: 'env' } } }));
+    expect(e.message).toBe('Open the S3 storage s3://b with the keys in AWS_ACCESS_KEY_ID?');
+  });
 });

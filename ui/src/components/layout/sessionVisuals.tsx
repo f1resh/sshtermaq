@@ -3,7 +3,7 @@
  * protocol icons, connection status dots/labels and the "user@host:port" subtitle.
  */
 import type { ReactNode } from 'react';
-import { Cable, Network, Plug, SquareTerminal, Terminal, Usb, type LucideIcon } from 'lucide-react';
+import { Cable, Cloud, Network, Plug, SquareTerminal, Terminal, Usb, type LucideIcon } from 'lucide-react';
 import { DEFAULT_PORTS, localProgramName } from '@shared/defaults';
 import type { Protocol, SessionConfig } from '@shared/types';
 import type { PaneStatus } from '@/store/workspace';
@@ -16,7 +16,8 @@ export const PROTOCOL_ICONS: Record<Protocol, LucideIcon> = {
   rlogin: Cable,
   raw: Plug,
   serial: Usb,
-  local: SquareTerminal
+  local: SquareTerminal,
+  s3: Cloud
 };
 
 export const PROTOCOL_LABELS: Record<Protocol, string> = {
@@ -25,7 +26,8 @@ export const PROTOCOL_LABELS: Record<Protocol, string> = {
   rlogin: 'Rlogin',
   raw: 'Raw',
   serial: 'Serial',
-  local: 'Local'
+  local: 'Local',
+  s3: 'S3'
 };
 
 export function ProtocolIcon({ protocol, size = 14, className }: { protocol: Protocol; size?: number; className?: string }) {
@@ -35,9 +37,13 @@ export function ProtocolIcon({ protocol, size = 14, className }: { protocol: Pro
 
 /** "user@host:port" (port only when non-default), the serial line + speed, or a local terminal's program + folder. */
 export function sessionSubtitle(
-  s: Pick<SessionConfig, 'protocol' | 'host' | 'port' | 'username' | 'serial'> & { local?: SessionConfig['local'] }
+  s: Pick<SessionConfig, 'protocol' | 'host' | 'port' | 'username' | 'serial'> & {
+    local?: SessionConfig['local'];
+    s3?: SessionConfig['s3'];
+  }
 ): string {
   if (s.protocol === 'serial') return `${s.serial.line || 'COM?'} · ${s.serial.baudRate} baud`;
+  if (s.protocol === 's3') return s3Subtitle(s.s3);
   if (s.protocol === 'local') {
     const dir = s.local?.startDir.trim();
     return `${localProgramName(s.local?.command ?? '')} · ${dir || '~'}`;
@@ -46,6 +52,14 @@ export function sessionSubtitle(
   const port = s.port && s.port !== DEFAULT_PORTS[s.protocol] ? `:${s.port}` : '';
   const host = s.host.includes(':') && !s.host.startsWith('[') ? `[${s.host}]` : s.host;
   return `${user}${host || '(no host)'}${port}`;
+}
+
+/** "s3://bucket/folder · R2" style: where an S3 session goes. */
+export function s3Subtitle(o: SessionConfig['s3'] | undefined): string {
+  if (!o) return 's3://';
+  const where = o.endpoint ? o.endpoint.replace(/^https?:\/\//, '').replace(/\/+$/, '') : 'AWS';
+  const path = o.bucket ? `s3://${o.bucket}${o.startPath ? '/' + o.startPath.replace(/^\/+/, '') : ''}` : 'all buckets';
+  return `${path} · ${where}`;
 }
 
 export const STATUS_LABELS: Record<PaneStatus, string> = {

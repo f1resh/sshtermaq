@@ -1,6 +1,6 @@
 /**
  * Renders the dialog selected in useUi().dialog plus the global prompt dialogs raised by the host
- * (usePrompts: 'hostkey' -> HostKeyDialog, 'confirm' -> PromptConfirmDialog). Authentication prompts
+ * (usePrompts: 'hostkey' -> HostKeyDialog, 'certificate' -> CertificateDialog, 'confirm' -> PromptConfirmDialog). Authentication prompts
  * (username / password / kbdint / passphrase) are rendered inside their panes by the terminal module.
  */
 import { useCallback } from 'react';
@@ -9,6 +9,7 @@ import { QuickConnectDialog } from '@/components/quickconnect/QuickConnectDialog
 import { usePrompts } from '@/store/data';
 import { useUi, type DialogState } from '@/store/ui';
 import { AboutDialog } from './AboutDialog';
+import { CertificateDialog, type CertificatePrompt } from './CertificateDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 import { HostKeyDialog, type HostKeyChoice, type HostKeyPrompt } from './HostKeyDialog';
 import { InputDialog } from './InputDialog';
@@ -39,12 +40,13 @@ function closeIfCurrent(d: DialogState): void {
 
 export function DialogHost() {
   const dialog = useUi((s) => s.dialog);
-  const prompt = usePrompts((s) => s.pending.find((p) => p.kind === 'hostkey' || p.kind === 'confirm'));
+  const prompt = usePrompts((s) => s.pending.find((p) => p.kind === 'hostkey' || p.kind === 'confirm' || p.kind === 'certificate'));
 
   return (
     <>
       {dialog && <DialogSwitch key={keyOf(dialog)} dialog={dialog} />}
       {prompt?.kind === 'hostkey' && <HostKeyPromptHost key={prompt.id} prompt={prompt} />}
+      {prompt?.kind === 'certificate' && <CertificatePromptHost key={prompt.id} prompt={prompt} />}
       {prompt?.kind === 'confirm' && <ConfirmPromptHost key={prompt.id} prompt={prompt} />}
     </>
   );
@@ -101,6 +103,12 @@ function HostKeyPromptHost({ prompt }: { prompt: HostKeyPrompt }) {
   const onChoice = (choice: HostKeyChoice) =>
     usePrompts.getState().respond(prompt.id, { cancelled: choice === 'reject', choice });
   return <HostKeyDialog prompt={prompt} onChoice={onChoice} />;
+}
+
+function CertificatePromptHost({ prompt }: { prompt: CertificatePrompt }) {
+  const onChoice = (choice: HostKeyChoice) =>
+    usePrompts.getState().respond(prompt.id, { cancelled: choice === 'reject', choice });
+  return <CertificateDialog prompt={prompt} onChoice={onChoice} />;
 }
 
 function ConfirmPromptHost({ prompt }: { prompt: ConfirmPrompt }) {

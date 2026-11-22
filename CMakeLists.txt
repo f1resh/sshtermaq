@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 # The version of SSHTermaq (x.y.z): the only place to change it. The 4th part of the file version, the build number,
 # and the commit come from git on every build (cmake/BuildInfo.cmake). See docs/BUILDING.md, "Versions".
-project(SSHTermaq VERSION 1.1.0 LANGUAGES C CXX)
+project(SSHTermaq VERSION 1.2.0 LANGUAGES C CXX)
 if(NOT PROJECT_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
   message(FATAL_ERROR "Give the version as x.y.z in project(SSHTermaq VERSION ...), not '${PROJECT_VERSION}'")
 endif()
@@ -110,12 +110,13 @@ endfunction()
 
 st_platform_glob(platform_sys_src sys)
 if(WIN32)
-  set(platform_sys_libs shell32 ole32 advapi32 ws2_32 crypt32 setupapi)
+  set(platform_sys_libs shell32 ole32 advapi32 ws2_32 crypt32 setupapi winhttp)
 endif()
 if(APPLE)
-  # OpenSSL: AES-GCM for secrets (mac/sys/SecretMac.cpp); CoreFoundation: code pages; Security: the Keychain;
-  # IOKit: serial ports.
-  set(platform_sys_libs OpenSSL::Crypto "-framework CoreFoundation" "-framework Security" "-framework IOKit")
+  # OpenSSL: AES-GCM for secrets (mac/sys/SecretMac.cpp) and certificate details (HttpMac.mm); CoreFoundation: code
+  # pages; Security: the Keychain, server trust; IOKit: serial ports; Foundation, CFNetwork: HTTP (NSURLSession).
+  set(platform_sys_libs OpenSSL::Crypto "-framework CoreFoundation" "-framework Security" "-framework IOKit"
+      "-framework Foundation" "-framework CFNetwork")
 endif()
 st_library(st_platform_sys SOURCES ${platform_sys_src} DEPS ${platform_sys_libs})
 
@@ -194,9 +195,13 @@ st_library(st_transport SOURCES ${transport_src} DEPS st_net)
 st_glob(ssh_src ${ST_SRC}/ssh/*.cpp)
 st_library(st_ssh SOURCES ${ssh_src} DEPS st_core st_net st_keys st_store ${ST_LIBSSH})
 
+# S3: signing, XML, the ~/.aws files, the HTTP client on top of platform/sys/Http.h, sign-in, S3Transport.
+st_glob(s3_src ${ST_SRC}/s3/*.cpp)
+st_library(st_s3 SOURCES ${s3_src} DEPS st_core st_store)
+
 st_glob(session_src ${ST_SRC}/session/*.cpp ${ST_SRC}/transport/TransportFactory.cpp)
 list(FILTER session_src EXCLUDE REGEX "LineDiscipline")
-st_library(st_session SOURCES ${session_src} DEPS st_transport st_ssh st_store st_bridge)
+st_library(st_session SOURCES ${session_src} DEPS st_transport st_ssh st_s3 st_store st_bridge)
 
 st_glob(localfs_src ${ST_SRC}/localfs/*.cpp)
 st_library(st_localfs SOURCES ${localfs_src} DEPS st_core st_bridge st_platform_ui)
@@ -220,7 +225,7 @@ if(ST_BUILD_TESTS)
     file(GLOB _os_support CONFIGURE_DEPENDS ${ST_TESTS}/platform/${_dir}/support/*.cpp)
     list(APPEND testsupport_src ${_os_support})
   endforeach()
-  st_library(st_testsupport SOURCES ${testsupport_src} DEPS st_core ${ST_LIBSSH} ${testsupport_libs})
+  st_library(st_testsupport SOURCES ${testsupport_src} DEPS st_core ${ST_LIBSSH} OpenSSL::SSL ${testsupport_libs})
   target_include_directories(st_testsupport PUBLIC ${ST_TESTS}/support)
   # TestSshServer.cpp tells a public-key probe from a signed request with libssh's deprecated
   # ssh_message_auth_publickey_state: the message API has no other way.
@@ -249,6 +254,7 @@ if(ST_BUILD_TESTS)
   st_test(ssh st_ssh)
   st_test(session st_session)
   st_test(sftp st_sftp)
+  st_test(s3 st_s3 st_sftp)
   st_platform_sys_tests()
 
   # Standalone test SSH server for manual / end-to-end testing (owner: testinfra).
@@ -258,6 +264,12 @@ if(ST_BUILD_TESTS)
     target_link_libraries(st_testserver PRIVATE st_testsupport)
     set_target_properties(st_testserver PROPERTIES FOLDER "tools")
   endif()
+
+  # Standalone fake S3 service for manual / end-to-end testing of S3 sessions (the s3 suite's TestS3Server).
+  add_executable(st_tests3server ${CMAKE_CURRENT_SOURCE_DIR}/native/tools/tests3server/main.cpp ${ST_TESTS}/s3/TestS3Server.cpp)
+  target_include_directories(st_tests3server PRIVATE ${ST_TESTS}/s3)
+  target_link_libraries(st_tests3server PRIVATE st_s3 st_testsupport)
+  set_target_properties(st_tests3server PROPERTIES FOLDER "tools")
 
   # OS-specific code only under native/src/platform (and native/tests/platform): cmake/CheckPlatformBoundaries.cmake.
   add_test(NAME platform_boundaries

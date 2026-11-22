@@ -9,7 +9,7 @@ macOS: see [BUILDING-macos.md](BUILDING-macos.md). For the architecture and modu
 | Tool | Version | Used for |
 |---|---|---|
 | Visual Studio 2022 | 17.14+, workload **Desktop development with C++** | MSVC v143 (C++20), Windows SDK, CMake 3.25+, vcpkg |
-| vcpkg (ships with VS) | **2025-11-19 or newer** | C++ dependencies (libssh, OpenSSL, zlib, nlohmann-json, WebView2, Catch2) |
+| vcpkg (ships with VS) | **2025-11-19 or newer** | C++ dependencies (libssh, OpenSSL, zlib, nlohmann-json, WebView2, Catch2). S3 adds none: it uses the OS's HTTP (WinHTTP, `winhttp.lib` from the Windows SDK; NSURLSession on macOS) and OpenSSL's libcrypto, which the app already links; only the tests' fake HTTPS server links OpenSSL's libssl |
 | Node.js | 22 LTS or newer (Vite needs ≥ 20.19 / ≥ 22.12) | the React UI in `ui/` |
 | Microsoft Edge WebView2 Runtime | any current | running the app (built into Windows 11) |
 | Git | any | cloning; vcpkg uses it; the build number and commit stamped into the app ([section 9](#9-versions-and-build-ids)) |

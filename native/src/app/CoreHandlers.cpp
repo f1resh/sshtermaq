@@ -13,6 +13,7 @@
 #include "platform/ui/Fonts.h"
 #include "platform/ui/HostWindow.h"
 #include "platform/ui/Shell.h"
+#include "s3/AwsConfig.h"
 #include "store/Store.h"
 #include "transport/LocalTransport.h"
 #include "transport/SerialTransport.h"
@@ -217,6 +218,11 @@ void registerCoreHandlers(const CoreHandlerContext& c) {
 
     /* ---- serial ---- */
     b.handleAsync("serial:listPorts", [](const Json&) { return Json(listSerialPorts()); });
+    b.handleAsync("s3:profiles", [](const Json&) {
+        const s3::AwsConfigFiles f = s3::loadAwsConfig();
+        return Json{{"profiles", f.profileNames()},
+                    {"files", Json::array({sys::fromPath(f.configPath), sys::fromPath(f.credentialsPath)})}};
+    });
 
     /* ---- local terminals ---- */
     b.handleAsync("shells:list", [](const Json&) { return Json(listLocalShells()); });

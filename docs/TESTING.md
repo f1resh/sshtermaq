@@ -10,9 +10,9 @@ them depends on another.
 
 | Part | What it tests | Framework | Where | Automated | Size | Run time |
 |---|---|---|---|---|---|---|
-| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 12 suites, 260 test cases | about 1 minute |
-| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system; finished transfers' times; the font picker's lists; Credentials (which sessions and logins use a key or a login, how a login signs in, names; unlocking and retrying when they are locked; what an import did); host names (the cases shared with the native check); the question before a link connects; imported sessions that run a command on this computer; the WebGL renderer's font check (DOM for fonts a canvas can't draw) | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 24 files, 229 tests | under 2 seconds |
-| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart, the SFTP panel, the two-pane file manager, import and export, the key generator, settings, Credentials (keys, logins, remembered passphrases, the master password, export and import), links asking before they connect | Playwright Test | `ui/e2e/*.spec.ts` | yes | 20 files, 95 tests, each run twice (190, of which 2 macOS-only skip in the Windows layout) | about 5 minutes |
+| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, S3 (signing, sign-in, the HTTP client, the S3 file system), proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 13 suites, 313 test cases | about 2 minutes |
+| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system; finished transfers' times; the font picker's lists; Credentials (which sessions and logins use a key or a login, how a login signs in, names; unlocking and retrying when they are locked; what an import did); host names (the cases shared with the native check); the question before a link connects; imported sessions that run a command on this computer; the WebGL renderer's font check (DOM for fonts a canvas can't draw) | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 25 files, 238 tests | under 2 seconds |
+| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart, the SFTP panel, the two-pane file manager, import and export, the key generator, settings, Credentials (keys, logins, remembered passphrases, the master password, export and import), links asking before they connect, S3 sessions | Playwright Test | `ui/e2e/*.spec.ts` | yes | 21 files, 99 tests, each run twice (198, of which 2 macOS-only skip in the Windows layout) | about 6 minutes |
 | **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs`, `ui/scripts/checks/` | no, run by hand | `checks/local-terminal.mjs`, `checks/terminal-fonts.mjs` | seconds |
 
 The browser tests cover the main screens and dialogs, not yet the host key and password prompts or the color scheme
@@ -71,6 +71,7 @@ skip those test cases (they don't fail) when a tool is missing:
 | `TestExecProcess.*` | runs real commands (through `posixShell()`) for the server's exec channels; the OS parts are in `native/tests/platform/<os>/support` |
 | `TestTransport.h` | a recording `TransportListener` and a scriptable `Prompter` |
 | `TestBridge.h` | a `Bridge` with an inline dispatcher: call a handler the way the UI would and collect the events it sends |
+| `TestHttpServer.*` | an HTTP / HTTPS server (a fresh self-signed certificate) with several connections, keep-alive and a fault per answer: closed without an answer, cut after N bytes, stalled after N body bytes, delayed |
 | `TestNet.*` | socket helpers shared by the test servers and the socket tests, on the platform layer; the raw ones (abortive close, urgent bytes, waiting on many sockets) are in `native/tests/platform/<os>/support` |
 | `support_tests.cpp` | self-tests of all of the above |
 
@@ -208,9 +209,9 @@ TEST_CASE("ssh: password authentication, shell echo and exit code", "[ssh]") {
 
 ## 5. What is tested
 
-### Native tests (260 test cases)
+### Native tests (313 test cases)
 
-215 run by default; `putty: real registry smoke test` and `codepage (Windows): regenerate the tables` are hidden. The **Needs** column shows the tool without which a
+268 run by default; `putty: real registry smoke test` and `codepage (Windows): regenerate the tables` are hidden. The **Needs** column shows the tool without which a
 test case is skipped. On macOS every suite runs; its `platform_ui` has the macOS local files tests (listed after
 Windows' below). The other counts are Windows'.
 
@@ -420,6 +421,38 @@ PuTTY import/export (registry names, settings mapping, `.reg` files, host keys, 
 | ssh config: macOS's Keychain options and IgnoreUnknown give no warnings | `[importers][sshconfig]` |  | `putty_tests.cpp` |
 | known_hosts: plain, bracketed and hashed entries | `[importers][knownhosts]` |  | `putty_tests.cpp` |
 | putty: real registry smoke test (read-only, counts only) | `[.registry]` | hidden: runs only when its tag is given | `putty_tests.cpp` |
+
+#### s3 — `st_test_s3.exe` (52)
+
+S3 storage, against [native/tests/s3/TestS3Server.h](../native/tests/s3/TestS3Server.h), a fake S3 service on
+`TestHttpServer`. The fake checks every request's signature against what the client really sent, can inject a fault on
+any request, and counts open multipart uploads and the most requests served at once. *Kind: unit + integration (fake
+S3 server).* Source: [native/tests/s3](../native/tests/s3).
+
+It covers:
+- AWS Signature Version 4 against the worked examples of the S3 documentation and the cases of AWS's SigV4 test suite
+  that apply to S3;
+- the XML reader and the `~/.aws` files;
+- every sign-in method;
+- the HTTP client (WinHTTP / NSURLSession): streaming, cancel, timeouts, and certificate pinning with nothing sent to a
+  refused server;
+- the S3 client and `S3Fs`;
+- S3 sessions end to end, through `SessionManager` and `SftpService`.
+
+| Test case | File |
+|---|---|
+| crypto: HMAC-SHA-256 and HMAC-SHA-1 (RFC 4231 / RFC 2202 test case 2) | `sigv4_tests.cpp` |
+| sigv4: dates and encoding; GET object, PUT object with a signed payload, GET bucket lifecycle and list objects, presigned URL (the documentation's examples); session tokens, anonymous requests, other services | `sigv4_tests.cpp` |
+| sigv4: AWS's SigV4 test suite (from awslabs/aws-c-auth), 30 cases signed both with an Authorization header and as a presigned query: canonical request, string to sign and signature of each. Header keys, values, order, duplicates, trimming and folded lines; unreserved and UTF-8 paths and queries; query order; unnormalised paths (`//`, `/./`, `..`); POST with form bodies; session tokens. Left out: the path normalisation cases (S3 signs the path as sent) and a token added after signing | `sigv4_suite_tests.cpp` |
+| xml: an S3 ListObjectsV2 answer; namespaces, empty elements, CDATA, BOM; an error document; malformed documents are refused (depth, size, entities); escaping | `xml_tests.cpp` |
+| aws config: sections, comments, nested settings, warnings; the credentials file wins over config, key by key | `awsconfig_tests.cpp` |
+| http: URLs; requests, headers, bodies, keep-alive; redirects are not followed; errors; a dropped connection, a short body and a stalled answer fail, cancel is quick; parallel requests; close aborts running requests; certificates (untrusted refused, probed, pinned; a wrong pin refuses before the request is written) | `http_tests.cpp` |
+| s3 client: buckets, objects, metadata, listings (pages; keys with spaces, `+`, `&`, `<`, non-ASCII); If-Match and ranges past the end; readable errors; multipart (list parts, abort); copies keep metadata and storage class; part copies; batch delete in 1000s with per-key errors; a bucket in another region is followed; retries on throttling, server errors and dropped connections (none on client errors, at most 5); expired credentials refreshed once; presigned links; anonymous access; https with a pinned certificate | `s3client_tests.cpp` |
+| credentials: the environment; static profiles, and errors for what is missing or unsupported; assume role through `source_profile` chains (loops caught), external id, MFA, `credential_source = Environment`; refreshed 5 minutes before they expire; `credential_process` (a real shell, a timeout, nothing printed); IAM Identity Center with the token cache (expired, revoked, a missing `sso-session`) | `credentials_tests.cpp` |
+| s3fs: buckets at the root, folders, stat, capabilities; a session bucket is the root and the start folder home; rename and move of files and folders, inside and between buckets; removing a tree in batches | `s3fs_tests.cpp` |
+| s3fs: downloads in parallel 8 MB ranges, in order, resumed from an offset; a dropped range is continued; a file changed meanwhile fails (If-Match) | `s3fs_tests.cpp` |
+| s3fs: small uploads are one PUT with the file's time, big ones multipart in parallel; a failed multipart upload continues on the next try (only the missing parts); a cancelled one is aborted and the old object kept; memory stays within the parts in flight (96 MB down and up, 8 MB parts, 4 at once); presigned links | `s3fs_tests.cpp` |
+| s3 session: the secret is asked, saved, and the file manager works through the transfer engine; a wrong secret is asked again; a session bucket is checked; an untrusted certificate is asked about first (only an unsigned probe went out), then remembered in Known hosts, or rejected; sign-in errors are readable | `s3service_tests.cpp` |
 
 #### session — `st_test_session.exe` (29)
 
@@ -846,7 +879,20 @@ followed (in `transferTimes.test.ts`). Sources: [ui/src/components/dialogs/sessi
 [ui/src/components/dialogs/linkQuestion.test.ts](../ui/src/components/dialogs/linkQuestion.test.ts),
 [ui/src/components/dialogs/import/importModel.test.ts](../ui/src/components/dialogs/import/importModel.test.ts).
 
-### UI browser tests (95 tests, each run as `windows` and `macos`; the two marked macOS only skip in the Windows layout)
+#### `session/s3Model.test.ts` (6), and the S3 cases of `parse.test.ts` and `linkQuestion.test.ts`
+
+What they check:
+- **The session editor:** an S3 session shows only the Session and S3 sections. The endpoint, bucket, region, part
+  size and proxy are checked, and plain HTTP gets a warning. Also bucket names, the names of unnamed sessions, and
+  service presets that fill in the endpoint and region only while those are untouched.
+- **"Copy link…":** the expiry must be between 1 minute and 7 days.
+- **Quick connect:** `s3://bucket/folder`, and `bucket/folder` with the S3 chip, both become an AWS session that signs
+  in with the default profile.
+- **Links:** the question before an `s3://` link opens.
+
+Source: [ui/src/components/dialogs/session/s3Model.test.ts](../ui/src/components/dialogs/session/s3Model.test.ts).
+
+### UI browser tests (99 tests, each run as `windows` and `macos`; the two marked macOS only skip in the Windows layout)
 
 Source: [ui/e2e](../ui/e2e).
 
@@ -947,6 +993,10 @@ Source: [ui/e2e](../ui/e2e).
 | `credentials-export.spec.ts` | export (a short password, the two differ), the file written owner-only; a deleted login comes back from the file (a wrong password is refused), what was still here is left as it is; a second import adds nothing |
 | `credentials-export.spec.ts` | a cancelled save exports nothing; exported without secrets, a login that stored its password asks for it after import |
 | `credentials-export.spec.ts` | locked Credentials are unlocked first, then exported |
+| `s3.spec.ts` | a saved S3 session opens the buckets in a file manager tab (the S3 badge; no Permissions column or terminal button; the bucket list cannot be changed; folders inside a bucket work) |
+| `s3.spec.ts` | Copy link… makes a time-limited link (1 hour preselected, "Other…" up to 7 days, copied; folders have none) |
+| `s3.spec.ts` | the session editor has the S3 type with service presets (MinIO: plain HTTP warned), bucket checks and sign-in methods |
+| `s3.spec.ts` | Quick connect opens s3://bucket/folder |
 
 ## 6. How to run the tests
 
@@ -1031,6 +1081,30 @@ build\vs\Debug\st_testserver.exe --port 2222 --sftp off --exec-shell sh   # SCP-
 | `--host-key-type ed25519\|rsa\|ecdsa` | host key type |
 | `--sftp on\|off` | `off` refuses SFTP, so clients fall back to SCP |
 | `--exec-shell sh\|PATH` | run commands through a real shell; `sh` is Git for Windows' `sh.exe` (`git` works too) or `/bin/sh` on macOS |
+
+### Fake S3 server for manual testing
+
+The fake S3 service of the `s3` tests also runs on its own, for trying S3 sessions without an account:
+
+```powershell
+build\vs\Debug\st_tests3server.exe --port 9555 --demo           # http://127.0.0.1:9555, key AKIDTEST / test-secret
+build\vs\Debug\st_tests3server.exe --port 9556 --tls --bucket a --bucket b   # https, a fresh self-signed certificate
+```
+
+It prints `LISTENING <endpoint> <certificate SHA-256 or ->` and runs until its input closes. Typing `keys` lists the
+objects; `stats` shows the requests with a bad signature and the open multipart uploads.
+
+| Option | Meaning |
+|---|---|
+| `--port N` | listen port |
+| `--tls` | HTTPS, with a fresh self-signed certificate |
+| `--key ID`, `--secret S` | the access key it accepts (default `AKIDTEST` / `test-secret`) |
+| `--anonymous` | also accept unsigned requests |
+| `--region R` | its region |
+| `--bucket NAME` | a bucket; repeatable, default `demo` |
+| `--demo` | fills the first bucket: `readme.txt`, `docs/guide.md`, `photos/a.jpg` and a 40 MB `big.bin` |
+
+In an S3 session use the service "MinIO", the endpoint above, access key `AKIDTEST` and secret `test-secret`.
 
 ## 7. End-to-end and visual checks
 

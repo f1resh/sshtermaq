@@ -144,3 +144,27 @@ describe('file manager URLs', () => {
     for (const s of ['sftp://deploy@web-01:2222/srv', 'scp://router']) expect(formatQuickConnect(ok(s))).toBe(s);
   });
 });
+
+describe('s3:// targets', () => {
+  it('parse buckets and folders, with the URL or the S3 chip', () => {
+    expect(ok('s3://my-bucket/photos/2026%20trip/')).toEqual({ protocol: 's3', host: 'my-bucket', s3: { path: 'photos/2026 trip' } });
+    expect(ok('S3://logs')).toEqual({ protocol: 's3', host: 'logs', s3: {} });
+    expect(ok('logs/web', 's3')).toEqual({ protocol: 's3', host: 'logs', s3: { path: 'web' } });
+    expect(err('s3://')).toMatch(/bucket name/);
+    expect(err('s3://x&calc.exe&')).toMatch(/not a valid bucket name/);
+  });
+
+  it('become an AWS session signed in with the default profile, opened as files', () => {
+    const t = ok('s3://data/in');
+    const s = applyQuickConnect(createDefaultSession({ host: 'old' }), t);
+    expect(s.protocol).toBe('s3');
+    expect(s.host).toBe('');
+    expect(s.openAs).toBe('files');
+    expect(s.s3.bucket).toBe('data');
+    expect(s.s3.startPath).toBe('in');
+    expect(s.s3.endpoint).toBe('');
+    expect(s.s3.auth.method).toBe('profile');
+    expect(formatQuickConnect(t)).toBe('s3://data/in');
+    expect(formatQuickConnect(ok('s3://data'))).toBe('s3://data');
+  });
+});

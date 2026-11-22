@@ -23,6 +23,7 @@ export type SectionId =
   | 'telnet'
   | 'rlogin'
   | 'serial'
+  | 's3'
   | 'terminal'
   | 'keyboard'
   | 'appearance'
@@ -39,6 +40,8 @@ export interface SectionDef {
 }
 
 const NETWORK: readonly Protocol[] = ['ssh', 'telnet', 'rlogin', 'raw'];
+/** Everything with a terminal (all but S3, which opens a file manager). */
+const TERMINALS: readonly Protocol[] = ['ssh', 'telnet', 'rlogin', 'raw', 'serial', 'local'];
 
 export const SESSION_SECTIONS: readonly SectionDef[] = [
   { id: 'session', label: 'Session', group: 'General', depth: 0 },
@@ -52,11 +55,12 @@ export const SESSION_SECTIONS: readonly SectionDef[] = [
   { id: 'telnet', label: 'Telnet', group: 'Protocol', depth: 0, protocols: ['telnet'] },
   { id: 'rlogin', label: 'Rlogin', group: 'Protocol', depth: 0, protocols: ['rlogin'] },
   { id: 'serial', label: 'Serial', group: 'Protocol', depth: 0, protocols: ['serial'] },
-  { id: 'terminal', label: 'Terminal', group: 'Terminal', depth: 0 },
-  { id: 'keyboard', label: 'Keyboard', group: 'Terminal', depth: 0 },
-  { id: 'appearance', label: 'Appearance', group: 'Terminal', depth: 0 },
-  { id: 'translation', label: 'Translation', group: 'Terminal', depth: 0 },
-  { id: 'logging', label: 'Logging', group: 'Terminal', depth: 0 }
+  { id: 's3', label: 'S3', group: 'Protocol', depth: 0, protocols: ['s3'] },
+  { id: 'terminal', label: 'Terminal', group: 'Terminal', depth: 0, protocols: TERMINALS },
+  { id: 'keyboard', label: 'Keyboard', group: 'Terminal', depth: 0, protocols: TERMINALS },
+  { id: 'appearance', label: 'Appearance', group: 'Terminal', depth: 0, protocols: TERMINALS },
+  { id: 'translation', label: 'Translation', group: 'Terminal', depth: 0, protocols: TERMINALS },
+  { id: 'logging', label: 'Logging', group: 'Terminal', depth: 0, protocols: TERMINALS }
 ];
 
 /** Sections shown for a protocol. The "Default Settings" template shows everything (it applies to all protocols). */
@@ -101,6 +105,23 @@ export function isValidHost(s: string): boolean {
 }
 
 /** Bind address: '' (default), '*', host name or IP literal. */
+/** An S3 endpoint: http(s)://host[:port] with nothing after it but an optional '/'. */
+export function s3EndpointError(url: string): string | null {
+  const v = url.trim();
+  if (!v) return null;
+  const m = /^(https?):\/\/(\[[^\]]+\]|[^/:?#]+)(?::(\d{1,5}))?\/?$/i.exec(v);
+  if (!m) return 'Enter an address like https://s3.example.com or http://localhost:9000';
+  const host = m[2].replace(/^\[|\]$/g, '');
+  if (!isValidHost(host)) return 'Not a valid host name or IP address';
+  if (m[3] !== undefined && !isValidPort(Number(m[3]))) return 'Port must be 1–65535';
+  return null;
+}
+
+/** S3 bucket names (3-63 characters of lower-case letters, digits, '.', '-'; older buckets may use capitals and '_'). */
+export function isValidBucketName(name: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{1,253}[A-Za-z0-9]$/.test(name);
+}
+
 export function isValidBindAddress(s: string): boolean {
   const v = s.trim();
   return v === '' || v === '*' || isValidHost(v);
@@ -224,6 +245,18 @@ export function validateSession(s: SessionConfig, ctx: ValidationContext): Valid
 
   if (s.protocol === 'local') {
     // Nothing required: an empty command line is the default shell, an empty folder the home folder.
+  } else if (s.protocol === 's3') {
+    const o = s.s3;
+    const endpoint = s3EndpointError(o.endpoint);
+    if (endpoint) errors['s3.endpoint'] = endpoint;
+    else if (/^http:/i.test(o.endpoint.trim())) warnings['s3.endpoint'] = 'Plain HTTP: files and requests travel unencrypted';
+    if (o.bucket.trim() && !isValidBucketName(o.bucket.trim())) errors['s3.bucket'] = 'Not a valid bucket name';
+    if (o.region.trim() && !/^[a-z0-9-]{2,32}$/i.test(o.region.trim())) errors['s3.region'] = 'Not a region name (e.g. eu-west-1, auto)';
+    if (o.auth.method === 'anonymous' && !o.bucket.trim() && !isDefault) errors['s3.bucket'] = 'Anonymous access needs the bucket’s name';
+    if (o.auth.method === 'keys' && o.auth.accessKeyId.trim() && /\s/.test(o.auth.accessKeyId.trim()))
+      errors['s3.auth.accessKeyId'] = 'An access key ID has no spaces';
+    if (!Number.isInteger(o.partSizeMiB) || o.partSizeMiB < 8 || o.partSizeMiB > 64) errors['s3.partSizeMiB'] = 'Between 8 and 64 MiB';
+    if (!Number.isInteger(o.parallelParts) || o.parallelParts < 1 || o.parallelParts > 16) errors['s3.parallelParts'] = 'Between 1 and 16';
   } else if (s.protocol === 'serial') {
     if (!s.serial.line.trim()) errors['serial.line'] = `Serial line is required (e.g. ${osTerms.serialLine})`;
     if (!Number.isInteger(s.serial.baudRate) || s.serial.baudRate <= 0) errors['serial.baudRate'] = 'Speed must be a positive number';
@@ -250,8 +283,10 @@ export function validateSession(s: SessionConfig, ctx: ValidationContext): Valid
     });
 
     const p = s.proxy;
-    if (s.protocol === 'local') {
-      // No network, no proxy.
+    if (s.protocol === 'local' || (s.protocol === 's3' && s.s3.systemProxy)) {
+      // No network (local), or the system's proxy (S3).
+    } else if (s.protocol === 's3' && p.type !== 'none' && p.type !== 'http') {
+      errors['proxy.type'] = 'S3 sessions use no proxy, the system’s, or an HTTP proxy';
     } else if (PROXY_NEEDS_ENDPOINT.has(p.type)) {
       if (!p.host.trim()) errors['proxy.host'] = 'Proxy host is required';
       else if (!isValidHost(p.host)) errors['proxy.host'] = 'Not a valid host name or IP address';
@@ -299,10 +334,12 @@ export function validateSession(s: SessionConfig, ctx: ValidationContext): Valid
 export function sectionOfField(path: string, protocol: Protocol): SectionId {
   if (path.startsWith('tunnel:')) return 'ssh.tunnels';
   if (path.startsWith('env:') || path.startsWith('connection.')) return 'connection';
-  if (path.startsWith('proxy.')) return 'proxy';
+  if (path.startsWith('proxy.')) return protocol === 's3' ? 's3' : 'proxy';
   if (path.startsWith('ssh.x11')) return 'ssh.x11';
   if (path.startsWith('ssh.')) return 'ssh';
   if (path.startsWith('serial.')) return protocol === 'serial' ? 'session' : 'serial';
+  if (path.startsWith('s3.endpoint') || path.startsWith('s3.bucket') || path.startsWith('s3.region')) return 'session';
+  if (path.startsWith('s3.')) return 's3';
   if (path.startsWith('terminal.')) return 'terminal';
   if (path.startsWith('logging.')) return 'logging';
   return 'session';
@@ -322,6 +359,7 @@ export function switchProtocol(s: SessionConfig, protocol: Protocol): SessionCon
   const oldDefault = DEFAULT_PORTS[s.protocol];
   const keepPort = s.port && s.port !== oldDefault;
   const next = { ...s, protocol, port: keepPort ? s.port : DEFAULT_PORTS[protocol] };
+  if (protocol === 's3') next.openAs = 'files';
   if (protocol === 'local') {
     // A pseudo-terminal speaks UTF-8, and a shell's tab closes when it exits cleanly, as in terminal apps.
     next.translation = { ...s.translation, charset: 'UTF-8' };
@@ -348,6 +386,10 @@ export function sessionFromTemplate(template: SessionConfig, overrides: Partial<
 export function fallbackSessionName(s: SessionConfig): string {
   if (s.protocol === 'serial') return s.serial.line || 'Serial';
   if (s.protocol === 'local') return localProgramName(s.local.command);
+  if (s.protocol === 's3') {
+    const where = s.s3.endpoint.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    return s.s3.bucket ? `s3://${s.s3.bucket}` : where || 'S3';
+  }
   const user = s.username ? `${s.username}@` : '';
   const port = s.port && s.port !== DEFAULT_PORTS[s.protocol] ? `:${s.port}` : '';
   return `${user}${s.host}${port}` || 'New session';

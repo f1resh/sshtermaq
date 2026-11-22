@@ -505,6 +505,8 @@ private:
             target += session_.serial.line;
         } else if (session_.protocol == Protocol::Local) {
             target += localProgramName(session_.local.command);
+        } else if (session_.protocol == Protocol::S3) {
+            target += session_.s3.endpoint.empty() ? std::string("AWS") : session_.s3.endpoint;
         } else {
             const bool ipv6 = session_.host.find(':') != std::string::npos;
             target += (ipv6 ? "[" + session_.host + "]" : session_.host) + ":" + std::to_string(session_.port);
@@ -771,6 +773,8 @@ void SessionManager::open(const ConnOpenRequest& reqIn) {
         if (trim(s.serial.line).empty()) throw std::invalid_argument("Serial line is required");
     } else if (s.protocol == Protocol::Local) {
         s.translation.charset = "UTF-8";  // a pseudo-terminal speaks UTF-8 (ConPTY always; macOS with LANG set)
+    } else if (s.protocol == Protocol::S3) {
+        // Checked by S3Transport (endpoint, bucket); S3 sessions have no host and no terminal.
     } else {
         s.host = trim(s.host);
         if (s.host.empty()) throw std::invalid_argument("Host name is required");

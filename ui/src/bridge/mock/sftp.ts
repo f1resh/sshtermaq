@@ -14,6 +14,7 @@ import type {
   TransferOptions,
   TransferProgress
 } from '@shared/types';
+import { mockConnProtocol } from './conn';
 import type { MockContext } from './index';
 import { mockLocal, mockLocalFs, touchLocalDir } from './local';
 
@@ -143,8 +144,27 @@ function err(message: string): Error {
   return new Error(message);
 }
 
+/** The buckets of the mock S3 session (photos with folders, an empty bucket, backups). */
+function buildBuckets(): FsNode {
+  const plain = (n: FsNode): FsNode => ({ ...n, mode: (n.mode & ~0o7777) | (n.type === 'dir' ? 0o755 : 0o644) });
+  return plain(
+    dir('', 0o755, 30, [
+      dir('photos-2026', 0o755, 40, [
+        dir('january', 0o755, 30, [file('IMG_0001.jpg', 3_481_002, 30), file('IMG_0002.jpg', 2_904_118, 30)]),
+        dir('february', 0o755, 10, [file('IMG_0100.jpg', 4_002_331, 10)]),
+        file('index.html', 2_331, 2)
+      ]),
+      dir('backups', 0o755, 90, [file('db-2026-11-20.sql.gz', 812_440_120, 1), file('db-2026-11-21.sql.gz', 814_002_993, 0.1)]),
+      dir('empty-bucket', 0o755, 5, [])
+    ])
+  );
+}
+
 export class MockFs {
-  root = buildTree();
+  root: FsNode;
+  constructor(root: FsNode = buildTree()) {
+    this.root = root;
+  }
 
   lookup(path: string, follow = true, depth = 0): FsNode | undefined {
     let node: FsNode | undefined = this.root;
@@ -262,7 +282,11 @@ interface MockTransfer {
 }
 
 export function registerSftpMocks(ctx: MockContext): void {
-  const fs = new MockFs();
+  const sftpFs = new MockFs();
+  const s3Fs = new MockFs(buildBuckets());
+  const s3Ids = new Set<string>();
+  /** The file system of a file session: the bucket tree for S3 sessions. */
+  const fsOf = (id: string) => (s3Ids.has(id) ? s3Fs : sftpFs);
   const lfs = mockLocalFs;
   const sessions = new Map<string, string>(); // sftpId -> connId
   const transfers = new Map<string, MockTransfer>();
@@ -305,7 +329,7 @@ export function registerSftpMocks(ctx: MockContext): void {
   const complete = (t: MockTransfer) => {
     try {
       if (t.p.direction === 'upload') {
-        fs.add(t.p.remotePath, t.dir
+        fsOf(t.p.sftpId).add(t.p.remotePath, t.dir
           ? { type: 'dir', size: 4096, mtime: Date.now(), mode: S_IFDIR | 0o755, children: new Map() }
           : { type: 'file', size: t.p.total, mtime: Date.now(), mode: S_IFREG | 0o644 });
         if (t.opts.move && lfs.exists(t.p.localPath)) lfs.remove(t.p.localPath);
@@ -315,9 +339,9 @@ export function registerSftpMocks(ctx: MockContext): void {
           lfs.add(t.p.localPath, t.p.total, !!t.dir);
           touchLocalDir(ctx, localParent(t.p.localPath));
         }
-        if (t.opts.move) fs.remove(t.p.remotePath, true);
+        if (t.opts.move) fsOf(t.p.sftpId).remove(t.p.remotePath, true);
       } else {
-        if (t.p.remotePath && fs.lookup(t.p.remotePath, false)) fs.remove(t.p.remotePath, true);
+        if (t.p.remotePath && fsOf(t.p.sftpId).lookup(t.p.remotePath, false)) fsOf(t.p.sftpId).remove(t.p.remotePath, true);
         if (t.p.localPath && lfs.exists(t.p.localPath)) lfs.remove(t.p.localPath);
       }
       finish(t, 'done');
@@ -403,28 +427,52 @@ export function registerSftpMocks(ctx: MockContext): void {
   ctx.handle('sftp:open', (connId: string) => {
     const sftpId = `mock-sftp-${nextId++}`;
     sessions.set(sftpId, connId);
+    if (mockConnProtocol(connId) === 's3') {
+      s3Ids.add(sftpId);
+      const capabilities = {
+        resume: true,
+        preciseTimes: false,
+        resumeUploads: false,
+        atomicWrites: true,
+        chmod: false,
+        symlinks: false,
+        presign: true,
+        rootIsBuckets: true
+      };
+      return { sftpId, home: '/', protocol: 's3', capabilities };
+    }
     return { sftpId, home: HOME, protocol: 'sftp', capabilities: { resume: true, preciseTimes: true } };
   });
+  ctx.handle('sftp:presign', (id: string, path: string, seconds: number) => {
+    session(id);
+    if (!s3Ids.has(id)) throw err('Links to files are only available on S3');
+    const n = fsOf(id).lookup(path);
+    if (!n || n.type === 'dir') throw err('Links can only be made to files');
+    const key = path.split('/').slice(2).map(encodeURIComponent).join('/');
+    const bucket = path.split('/')[1];
+    return `https://${bucket}.s3.us-east-1.amazonaws.com/${key}?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=${seconds}&X-Amz-Signature=mock`;
+  });
+  ctx.handle('s3:profiles', () => ({ profiles: ['default', 'dev', 'prod-admin'], files: ['~/.aws/config', '~/.aws/credentials'] }));
   ctx.handle('sftp:list', async (id: string, path: string) => {
     session(id);
     await new Promise((r) => setTimeout(r, 60 + Math.random() * 90)); // network latency
-    return fs.list(path);
+    return fsOf(id).list(path);
   });
   ctx.handle('sftp:stat', (id: string, path: string) => {
     session(id);
-    const n = fs.lookup(path);
-    return n ? fs.entry(parentOf(normalize(path)), n) : null;
+    const n = fsOf(id).lookup(path);
+    return n ? fsOf(id).entry(parentOf(normalize(path)), n) : null;
   });
-  ctx.handle('sftp:realpath', (id: string, path: string) => fs.realpath(session(id) && path));
-  ctx.handle('sftp:mkdir', (id: string, path: string) => void fs.mkdir(session(id) && path));
-  ctx.handle('sftp:rename', (id: string, from: string, to: string) => void fs.rename(session(id) && from, to));
-  ctx.handle('sftp:remove', (id: string, path: string, recursive: boolean) => void fs.remove(session(id) && path, !!recursive));
-  ctx.handle('sftp:chmod', (id: string, path: string, mode: number) => void fs.chmod(session(id) && path, mode));
+  ctx.handle('sftp:realpath', (id: string, path: string) => fsOf(id).realpath(session(id) && path));
+  ctx.handle('sftp:mkdir', (id: string, path: string) => void fsOf(id).mkdir(session(id) && path));
+  ctx.handle('sftp:rename', (id: string, from: string, to: string) => void fsOf(id).rename(session(id) && from, to));
+  ctx.handle('sftp:remove', (id: string, path: string, recursive: boolean) => void fsOf(id).remove(session(id) && path, !!recursive));
+  ctx.handle('sftp:chmod', (id: string, path: string, mode: number) => void fsOf(id).chmod(session(id) && path, mode));
   ctx.handle('sftp:download', (id: string, remotePaths: string[], localDir?: string, opts?: TransferOptions) => {
     session(id);
     const dirPath = localDir ?? mockLocal.join(mockLocal.home, 'Downloads');
     return remotePaths.map((rp) => {
-      const node = fs.lookup(rp);
+      const node = fsOf(id).lookup(rp);
       const name = opts?.targetName?.trim() || baseName(rp);
       const localPath = mockLocal.join(dirPath, name);
       const existing = lfs.stat(localPath);
@@ -435,7 +483,7 @@ export function registerSftpMocks(ctx: MockContext): void {
           name,
           localPath,
           remotePath: rp,
-          total: fs.sizeOf(rp),
+          total: fsOf(id).sizeOf(rp),
           filesTotal: node?.type === 'dir' ? 12 : 1,
           filesDone: 0
         },
@@ -451,7 +499,7 @@ export function registerSftpMocks(ctx: MockContext): void {
       const name = opts?.targetName?.trim() || lp.split(/[\\/]/).pop() || 'upload.bin';
       const remotePath = join(normalize(remoteDir), name);
       const local = lfs.stat(lp);
-      const existing = fs.lookup(remotePath);
+      const existing = fsOf(id).lookup(remotePath);
       return enqueue(
         {
           sftpId: id,
@@ -502,7 +550,7 @@ export function registerSftpMocks(ctx: MockContext): void {
   });
   ctx.handle('sftp:openRemote', (id: string, remotePath: string) => {
     session(id);
-    const node = fs.lookup(remotePath);
+    const node = fsOf(id).lookup(remotePath);
     if (!node || node.type === 'dir') throw err(`Not a file: ${remotePath}`);
     return new Promise<void>((resolve, reject) => {
       enqueue(
@@ -541,7 +589,7 @@ export function registerSftpMocks(ctx: MockContext): void {
       const dir = dirs.shift()!;
       const results: SftpEntry[] = [];
       try {
-        for (const e of fs.list(dir)) {
+        for (const e of fsOf(id).list(dir)) {
           if (!req.includeHidden && e.name.startsWith('.')) continue;
           if (masks.some((m) => m.test(e.name))) results.push(e);
           if (e.type === 'dir') dirs.push(e.path);
@@ -570,7 +618,7 @@ export function registerSftpMocks(ctx: MockContext): void {
     } catch {
       throw err(`Cannot read folder '${req.localDir}'`);
     }
-    const remote = fs.list(req.remoteDir).filter((e) => req.includeHidden || !e.name.startsWith('.'));
+    const remote = fsOf(id).list(req.remoteDir).filter((e) => req.includeHidden || !e.name.startsWith('.'));
     for (const l of local) {
       const r = remote.find((x) => x.name === l.name);
       const isDir = l.type === 'dir';

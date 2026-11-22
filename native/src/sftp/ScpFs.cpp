@@ -351,7 +351,12 @@ public:
     /* ---- RemoteFs */
 
     std::string protocol() const override { return "scp"; }
-    RemoteCapabilities capabilities() const override { return RemoteCapabilities{false, preciseTimes_}; }
+    RemoteCapabilities capabilities() const override {
+        RemoteCapabilities c;
+        c.resume = false;
+        c.preciseTimes = preciseTimes_;
+        return c;
+    }
     bool lost() const override { return lost_; }
     std::string home() override { return home_; }
 

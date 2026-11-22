@@ -16,6 +16,7 @@ import { useWorkspace } from '@/store/workspace';
 import { PANE_PROMPT_KINDS } from '@/terminal/connEvents';
 import { PromptOverlay } from '@/terminal/PromptOverlay';
 import { isMac, osTerms } from '@shared/platform';
+import { s3Subtitle } from '@/components/layout/sessionVisuals';
 import type { ConflictPolicy, SftpOpenResult, TransferOptions } from '@shared/types';
 import { ChmodDialog } from './ChmodDialog';
 import { ConflictDialog } from './ConflictDialog';
@@ -23,6 +24,7 @@ import { connOfFilesPane } from './filesConn';
 import { isFinal, useFiles } from './filesStore';
 import { FilePane, type FilePaneHandle, type PaneOps } from './FilePane';
 import { FindDialog } from './FindDialog';
+import { LinkDialog } from './LinkDialog';
 import { local, nameError, remote, type Crumb, type FileItem, type Side } from './paths';
 import { listShortcut } from './listKeys';
 import { localSource, remoteSource } from './sources';
@@ -70,13 +72,22 @@ export function FileManager({ paneId, visible }: { paneId: string; visible: bool
   const [remotePath, setRemotePathState] = useState<string | null>(pane?.files?.remotePath ?? null);
   const [bookmarks, setBookmarks] = useState<Bookmarks>({ local: [], remote: {} });
   const [split, setSplit] = useState(0.5);
-  const [dialog, setDialog] = useState<null | { type: 'sync' } | { type: 'find' } | { type: 'chmod'; item: FileItem }>(null);
+  const [dialog, setDialog] = useState<
+    null | { type: 'sync' } | { type: 'find' } | { type: 'chmod'; item: FileItem } | { type: 'link'; item: FileItem }
+  >(null);
   const [dragging, setDragging] = useState<Side | null>(null);
   const serverDrag = useRef<FileItem[] | null>(null);  // server items being dragged in the page
 
   const session = pane?.session;
-  const host = session?.host ?? '';
-  const serverKey = session ? `${session.username}@${session.host}:${session.port}` : '';
+  const isS3 = session?.protocol === 's3';
+  const host = isS3 ? s3Subtitle(session?.s3) : (session?.host ?? '');
+  const serverKey = !session
+    ? ''
+    : isS3
+      ? `s3:${session.s3.endpoint || 'aws'}/${session.s3.bucket}`
+      : `${session.username}@${session.host}:${session.port}`;
+  const caps = sftp?.capabilities;
+  const canChmod = caps?.chmod !== false;
   const connected = conn.status === 'connected' && !!conn.connId;
   const sftpId = sftp?.sftpId ?? null;
 
@@ -142,7 +153,7 @@ export function FileManager({ paneId, visible }: { paneId: string; visible: bool
 
   useEffect(() => {
     if (!sftp || remotePath !== null) return;
-    setRemotePath(session?.ssh.sftpStartPath || sftp.home);
+    setRemotePath((session?.protocol !== 's3' && session?.ssh.sftpStartPath) || sftp.home);
   }, [sftp, remotePath, session, setRemotePath]);
 
   /* ---- local folder watching ---- */
@@ -399,7 +410,14 @@ export function FileManager({ paneId, visible }: { paneId: string; visible: bool
     transferAs: (item, move) => void transferAs(side, item, move),
     edit: side === 'remote' ? (item) => void edit(item.path) : undefined,
     remove: (items) => remove(side, items),
-    chmod: side === 'remote' ? (item) => setDialog({ type: 'chmod', item }) : undefined,
+    chmod: side === 'remote' && canChmod ? (item) => setDialog({ type: 'chmod', item }) : undefined,
+    menuExtras:
+      side === 'remote' && caps?.presign
+        ? (items) => {
+            const one = items.length === 1 && !items[0].isDir ? items[0] : undefined;
+            return [{ label: 'Copy link…', disabled: !one, onClick: () => one && setDialog({ type: 'link', item: one }) }];
+          }
+        : undefined,
     dropPaths: (paths, targetDir) => {
       if (side === 'remote') void upload(paths, targetDir);
       else void api.local.copy(paths, targetDir, false).then(() => localRef.current?.refresh(), (e) => toast.error('Copy failed', errorText(e)));
@@ -461,12 +479,21 @@ export function FileManager({ paneId, visible }: { paneId: string; visible: bool
   const status = conn.status;
   const connecting = status === 'idle' || status === 'connecting' || status === 'authenticating';
   const ended = status === 'disconnected' || status === 'error';
-  const title = `${session.username ? session.username + '@' : ''}${session.host}${session.port && session.port !== 22 ? ':' + session.port : ''}`;
+  const title = isS3
+    ? session.name || s3Subtitle(session.s3)
+    : `${session.username ? session.username + '@' : ''}${session.host}${session.port && session.port !== 22 ? ':' + session.port : ''}`;
+  const badgeTitle: Record<string, string> = {
+    scp: 'This server has no SFTP: using SCP and shell commands',
+    sftp: 'SFTP',
+    s3: 'S3: folders are key prefixes; no permissions or links'
+  };
   const protocolBadge = sftp ? (
-    <span className={cx('fm-badge', `fm-badge--${sftp.protocol}`)} title={sftp.protocol === 'scp' ? 'This server has no SFTP: using SCP and shell commands' : 'SFTP'}>
+    <span className={cx('fm-badge', `fm-badge--${sftp.protocol}`)} title={badgeTitle[sftp.protocol] ?? sftp.protocol}>
       {sftp.protocol.toUpperCase()}
     </span>
   ) : null;
+  // S3 without a bucket in the session: "/" lists the buckets, which are not created, renamed or deleted here.
+  const remoteReadOnly = !!caps?.rootIsBuckets && remotePath === '/';
 
   const remotePlaceholder = sftpError ? (
     <div className="fm-placeholder fm-placeholder--error">
@@ -573,9 +600,11 @@ export function FileManager({ paneId, visible }: { paneId: string; visible: bool
         >
           {fs.showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
         </IconButton>
-        <IconButton size="sm" label="Open a terminal to this server" onClick={openTerminal}>
-          <SquareTerminal size={14} />
-        </IconButton>
+        {!isS3 && (
+          <IconButton size="sm" label="Open a terminal to this server" onClick={openTerminal}>
+            <SquareTerminal size={14} />
+          </IconButton>
+        )}
       </div>
 
       <div className="fm-panes" style={{ gridTemplateColumns: `${split}fr 6px ${1 - split}fr` }}>
@@ -604,8 +633,10 @@ export function FileManager({ paneId, visible }: { paneId: string; visible: bool
           ref={remoteRef}
           side="remote"
           source={remotePath === null ? null : remoteSrc}
-          title="Server"
+          title={isS3 ? 'Storage' : 'Server'}
           path={remotePath ?? '/'}
+          readOnly={remoteReadOnly}
+          noPermissions={!canChmod}
           onNavigate={setRemotePath}
           active={activeSide === 'remote'}
           onActivate={() => setActiveSide('remote')}
@@ -653,6 +684,9 @@ export function FileManager({ paneId, visible }: { paneId: string; visible: bool
           onDownload={(paths) => void download(paths, localPath ?? '')}
           onEdit={(p) => void edit(p)}
         />
+      )}
+      {visible && dialog?.type === 'link' && sftpId && session && (
+        <LinkDialog sftpId={sftpId} path={dialog.item.path} authMethod={session.s3.auth.method} onClose={() => setDialog(null)} />
       )}
       {visible && dialog?.type === 'chmod' && sftpId && (
         <ChmodDialog

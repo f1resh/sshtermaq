@@ -2,7 +2,7 @@
  * Session editor: Session, Connection and Proxy sections.
  */
 import { useMemo } from 'react';
-import { Cable, Lock, LogIn, Network, Plus, SquareTerminal, Trash2, Usb } from 'lucide-react';
+import { Cable, Cloud, Lock, LogIn, Network, Plus, SquareTerminal, Trash2, Usb } from 'lucide-react';
 import { Button, IconButton, NumberInput, Select, TextArea, TextInput } from '@/components/ui';
 import { DEFAULT_PORTS, normalizeFolder, sessionLabel } from '@shared/defaults';
 import { osTerms } from '@shared/platform';
@@ -23,6 +23,7 @@ import { useVaultLogins } from '@/store/vault';
 import { useEditor } from '../editorContext';
 import { fallbackSessionName, splitHostInput, switchProtocol } from '../sessionModel';
 import { LocalFields } from './localFields';
+import { S3ConnectionFields } from './S3Sections';
 import { BaudRateInput, SerialLineInput } from './serialInputs';
 
 const OPEN_AS_OPTIONS: readonly SegmentOption<SessionView>[] = [
@@ -36,7 +37,8 @@ export const PROTOCOL_OPTIONS: readonly SegmentOption<Protocol>[] = [
   { value: 'rlogin', label: 'Rlogin', icon: <LogIn size={14} /> },
   { value: 'raw', label: 'Raw', icon: <Cable size={14} /> },
   { value: 'serial', label: 'Serial', icon: <Usb size={14} /> },
-  { value: 'local', label: 'Local', icon: <SquareTerminal size={14} />, title: 'A shell on this computer (cmd, PowerShell, bash, zsh, …)' }
+  { value: 'local', label: 'Local', icon: <SquareTerminal size={14} />, title: 'A shell on this computer (cmd, PowerShell, bash, zsh, …)' },
+  { value: 's3', label: 'S3', icon: <Cloud size={14} />, title: 'S3-compatible storage (AWS, R2, MinIO, …) in a file manager tab' }
 ];
 
 const TRISTATE_OPTIONS: readonly SegmentOption<TriState>[] = [
@@ -57,7 +59,7 @@ export function SessionSection() {
   const { draft, update, fieldError, warning, isDefault, folders } = useEditor();
   const logins = useVaultLogins();
   const loginUser = draft.ssh.auth.loginId ? logins.find((l) => l.id === draft.ssh.auth.loginId)?.username : undefined;
-  const network = draft.protocol !== 'serial' && draft.protocol !== 'local';
+  const network = draft.protocol !== 'serial' && draft.protocol !== 'local' && draft.protocol !== 's3';
   const folderOptions = useMemo<ComboOption[]>(
     () => [{ value: '', label: '(root)' }, ...folders.map((f) => ({ value: f }))],
     [folders]
@@ -161,6 +163,8 @@ export function SessionSection() {
           </FieldGrid>
         ) : draft.protocol === 'local' ? (
           <LocalFields />
+        ) : draft.protocol === 's3' ? (
+          <S3ConnectionFields />
         ) : (
           <FieldGrid cols={2}>
             <FormField label="Serial line" error={fieldError('serial.line')} htmlFor="se-line">

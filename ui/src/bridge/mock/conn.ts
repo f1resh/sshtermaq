@@ -21,6 +21,11 @@ interface MockConn {
 }
 
 const conns = new Map<string, MockConn>();
+
+/** The protocol of an open mock connection (sftp:open serves S3 connections from a bucket tree). */
+export function mockConnProtocol(connId: string): string | undefined {
+  return conns.get(connId)?.req.session.protocol;
+}
 const pendingPrompts = new Map<string, (r: PromptResponse) => void>();
 
 export function registerConnMocks(ctx: MockContext): void {
@@ -41,6 +46,20 @@ export function registerConnMocks(ctx: MockContext): void {
     conns.set(req.connId, c);
     const s = req.session;
     ctx.emit('conn:onStatus', { connId: req.connId, status: 'connecting', message: `Connecting to ${sessionLabel(s)}` });
+    if (s.protocol === 's3') {
+      // No terminal: sign in and stay connected for the file manager.
+      log(c, `S3: endpoint ${s.s3.endpoint || 'AWS'} (mock)`);
+      setTimeout(() => {
+        if (c.closed) return;
+        ctx.emit('conn:onStatus', { connId: req.connId, status: 'authenticating', message: 'Signing in' });
+        setTimeout(() => {
+          if (c.closed) return;
+          ctx.emit('conn:onStatus', { connId: req.connId, status: 'connected', serverInfo: 'S3 | mock storage' });
+          log(c, 'S3: signed in (mock)');
+        }, 120);
+      }, 100);
+      return;
+    }
     log(c, `Looking up host "${s.host}" (mock)`);
     const connected = () => {
       if (c.closed) return;

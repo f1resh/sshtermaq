@@ -1,5 +1,5 @@
 /**
- * The question before a clicked link (ssh://, sftp://, scp://, telnet://, rlogin://) connects: what it opens, and
+ * The question before a clicked link (ssh://, sftp://, scp://, telnet://, rlogin://, s3://) connects: what it opens, and
  * the command it would run on this computer first (a local proxy command from Default Settings).
  */
 import type { OpenRequest } from '@shared/types';
@@ -21,6 +21,12 @@ function target(req: OpenRequest): string {
 
 export function linkQuestion(req: OpenRequest): LinkQuestion {
   const s = req.session;
+  if (s.protocol === 's3') {
+    // s3:// runs no command; it signs in with the default AWS profile or the environment's keys.
+    const where = `s3://${s.s3.bucket}${s.s3.startPath ? '/' + s.s3.startPath.replace(/^\/+/, '') : ''}`;
+    const how = s.s3.auth.method === 'env' ? 'the keys in AWS_ACCESS_KEY_ID' : `the AWS profile "${s.s3.auth.profile || 'default'}"`;
+    return { title: 'Open a link?', message: `Open the S3 storage ${where} with ${how}?`, command: '' };
+  }
   const files = req.view === 'files';
   const name = files ? (s.ssh.fileProtocol === 'scp' ? 'SCP' : 'SFTP') : (PROTOCOL_NAMES[s.protocol] ?? s.protocol);
   const article = name === 'Telnet' || name === 'Raw' ? 'a' : 'an';  // "an SSH", "an SFTP", "an Rlogin", "a Telnet"

@@ -16,13 +16,14 @@ namespace st {
 /* Enums                                                                     */
 /* ------------------------------------------------------------------------ */
 
-enum class Protocol { Ssh, Telnet, Rlogin, Raw, Serial, Local };
+enum class Protocol { Ssh, Telnet, Rlogin, Raw, Serial, Local, S3 };
 NLOHMANN_JSON_SERIALIZE_ENUM(Protocol, {{Protocol::Ssh, "ssh"},
                                         {Protocol::Telnet, "telnet"},
                                         {Protocol::Rlogin, "rlogin"},
                                         {Protocol::Raw, "raw"},
                                         {Protocol::Serial, "serial"},
-                                        {Protocol::Local, "local"}})
+                                        {Protocol::Local, "local"},
+                                        {Protocol::S3, "s3"}})
 
 enum class TriState { Auto, On, Off };
 NLOHMANN_JSON_SERIALIZE_ENUM(TriState, {{TriState::Auto, "auto"}, {TriState::On, "on"}, {TriState::Off, "off"}})
@@ -227,6 +228,44 @@ struct LocalOptions {
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(LocalOptions, command, startDir)
 
+/** How an S3 session signs in (native/src/s3/Credentials.h). */
+struct S3AuthOptions {
+    /** 'keys' (an access key: the session's, or a login from Credentials) | 'env' (AWS_ACCESS_KEY_ID, ...) |
+     *  'profile' (~/.aws) | 'anonymous' (public buckets). */
+    std::string method = "keys";
+    /** 'keys': the access key ID; its secret is the session's saved password (Credentials::passwordKey) or asked. */
+    std::string accessKeyId;
+    /** 'keys': a login from Credentials (user name = access key ID, password = secret) instead; "" = none. */
+    std::string loginId;
+    /** 'profile': the profile name; "" = AWS_PROFILE, else "default". */
+    std::string profile;
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(S3AuthOptions, method, accessKeyId, loginId, profile)
+
+/** S3-compatible storage, opened in a file manager tab (no terminal). */
+struct S3Options {
+    /** Which service the editor's presets filled in: 'aws' | 'r2' | 'wasabi' | 'b2' | 'spaces' | 'minio' | 'custom'. */
+    std::string preset = "aws";
+    /** "https://host[:port]"; "" = AWS (or AWS_ENDPOINT_URL[_S3] / the profile's endpoint_url). */
+    std::string endpoint;
+    /** "" = the profile's or the environment's region, else us-east-1; AWS buckets report their own. */
+    std::string region;
+    /** 'auto' (path-style for custom endpoints, virtual-hosted for AWS) | 'virtual' | 'path'. */
+    std::string addressing = "auto";
+    /** "" = the root lists the buckets. */
+    std::string bucket;
+    /** A folder inside the bucket to start in ("photos/2026"); "" = the bucket's top. */
+    std::string startPath;
+    S3AuthOptions auth;
+    /** true: the system's proxy settings; false: the session's proxy (none or HTTP). */
+    bool systemProxy = true;
+    /** Multipart: part size in MiB (8 .. 64) and parts sent or fetched at once per file (1 .. 16). */
+    int partSizeMiB = 16;
+    int parallelParts = 4;
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(S3Options, preset, endpoint, region, addressing, bucket, startPath, auth,
+                                                systemProxy, partSizeMiB, parallelParts)
+
 struct TerminalOptions {
     bool autoWrap = true;
     TriState localEcho = TriState::Auto;
@@ -321,6 +360,7 @@ struct SessionConfig {
     RloginOptions rlogin;
     SerialOptions serial;
     LocalOptions local;
+    S3Options s3;
     TerminalOptions terminal;
     KeyboardOptions keyboard;
     /** AppearanceOverrides — UI-owned, passed through untouched (may contain customScheme, fontFamily, ...). */
@@ -330,7 +370,7 @@ struct SessionConfig {
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(SessionConfig, id, name, folder, color, notes, protocol, host, port, username,
                                                 openAs, createdAt, updatedAt, lastUsedAt, connection, proxy, ssh, telnet, rlogin, serial,
-                                                local, terminal, keyboard, appearance, translation, logging)
+                                                local, s3, terminal, keyboard, appearance, translation, logging)
 
 /** Default port for a protocol (ssh 22, telnet 23, rlogin 513, raw/serial 0). */
 int defaultPort(Protocol p);
@@ -428,6 +468,17 @@ PromptInput hostkey(const std::string& host, int port, const std::string& keyTyp
                     const std::string& fingerprintMd5, bool mismatch, const std::vector<std::string>& previous);
 PromptInput confirm(const std::string& title, const std::string& message, const std::vector<std::string>& buttons,
                     bool danger = false);
+/** A TLS certificate the system does not trust (S3 endpoints): choices "accept-save", "accept-once", "reject". */
+struct CertificateInfo {
+    std::string sha256;  // lower-case hex
+    std::string subject;
+    std::string issuer;
+    std::string validFrom;
+    std::string validTo;
+    std::string problem;
+};
+PromptInput certificate(const std::string& host, int port, const CertificateInfo& cert, bool mismatch,
+                        const std::vector<std::string>& previous);
 }  // namespace prompts
 
 /* ------------------------------------------------------------------------ */
@@ -493,10 +544,25 @@ struct SftpEntry {
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(SftpEntry, name, path, type, size, mtime, mode, permissions, uid, gid, linkTargetIsDir)
 
 struct RemoteCapabilities {
+    /** Downloads continue a partial file; uploads continue a shorter file on the server (see resumeUploads). */
     bool resume = true;
     bool preciseTimes = true;
+    /** An upload can append to a shorter copy on the server (SFTP; not S3, whose objects are written whole: an
+     *  interrupted S3 upload continues through its multipart upload instead, without asking). */
+    bool resumeUploads = true;
+    /** A file is replaced only when its upload completes (S3): a cancelled upload leaves the old copy alone. */
+    bool atomicWrites = false;
+    /** Permissions can be set (SFTP, SCP; not S3). */
+    bool chmod = true;
+    /** Symbolic links exist (SFTP, SCP; not S3). */
+    bool symlinks = true;
+    /** "Copy link…": time-limited links to files (S3). */
+    bool presign = false;
+    /** The root ("/") lists buckets, which cannot be created, renamed or deleted here (S3 without a bucket). */
+    bool rootIsBuckets = false;
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RemoteCapabilities, resume, preciseTimes)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RemoteCapabilities, resume, preciseTimes, resumeUploads, atomicWrites, chmod,
+                                                symlinks, presign, rootIsBuckets)
 
 struct SftpOpenOptions {
     FileProtocol fileProtocol = FileProtocol::Auto;

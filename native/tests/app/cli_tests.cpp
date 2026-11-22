@@ -142,6 +142,38 @@ TEST_CASE("cli: sftp:// and scp:// open the file manager", "[app][cli]") {
     CHECK_FALSE(j.contains("remotePath"));
 }
 
+TEST_CASE("cli: s3://bucket/folder opens an S3 file manager", "[app][cli][s3]") {
+    test::ScopedEnv noKey("AWS_ACCESS_KEY_ID", "");
+    auto r = parse({"s3://my-bucket/photos/2026%20trip/"});
+    REQUIRE(r.errors.empty());
+    REQUIRE(r.request);
+    const auto& s = r.request->session;
+    CHECK(s.protocol == Protocol::S3);
+    CHECK(s.s3.bucket == "my-bucket");
+    CHECK(s.s3.startPath == "photos/2026 trip/");
+    CHECK(s.s3.auth.method == "profile");
+    CHECK(s.s3.endpoint.empty());
+    CHECK(s.host.empty());
+    CHECK(r.request->view == "files");
+    CHECK(r.request->fromLink);
+
+    {
+        test::ScopedEnv a("AWS_ACCESS_KEY_ID", "AKIDENV");
+        test::ScopedEnv b("AWS_SECRET_ACCESS_KEY", "secret");
+        r = parse({"S3://bucket"});
+        REQUIRE(r.request);
+        CHECK(r.request->session.s3.auth.method == "env");
+        CHECK(r.request->session.s3.startPath.empty());
+    }
+
+    // Shell characters and empty names are refused before anything starts.
+    for (const std::string bad : {"s3://x&calc.exe&/", "s3://", "s3:///folder", "s3://a b/"}) {
+        r = parse({bad});
+        CHECK_FALSE(r.request);
+        CHECK_FALSE(r.errors.empty());
+    }
+}
+
 TEST_CASE("host names: the shared cases (the UI's isValidHost passes the same file)", "[app][cli][host]") {
     std::ifstream in(fs::path(ST_FIXTURES_DIR) / "host-names.json");
     REQUIRE(in);

@@ -37,7 +37,15 @@ function seed(): MockDb {
       mk({ name: 'staging', folder: 'Staging', host: 'staging.example.com', username: 'ubuntu', color: '#3fb950' }),
       mk({ name: 'router', protocol: 'telnet', port: 23, host: '192.168.1.1' }),
       mk({ name: 'Console COM3', protocol: 'serial', port: 0, host: '', serial: { line: 'COM3', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' } }),
-      mk({ name: 'raspberrypi', host: 'raspberrypi.local', username: 'pi' })
+      mk({ name: 'raspberrypi', host: 'raspberrypi.local', username: 'pi' }),
+      mk({
+        name: 'media (S3)',
+        protocol: 's3',
+        port: 0,
+        host: '',
+        openAs: 'files',
+        s3: { ...createDefaultSession().s3, auth: { method: 'keys', accessKeyId: 'AKIAMOCKEXAMPLE0001', loginId: '', profile: '' } }
+      })
     ],
     folders: ['Production', 'Production/Web', 'Staging'],
     settings: createDefaultSettings(),

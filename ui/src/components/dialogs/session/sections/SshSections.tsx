@@ -198,8 +198,10 @@ function KeyInfoCard({ path }: { path: string }) {
   );
 }
 
-function SavedPasswordSection() {
+/** The session's saved password (S3: its secret access key, `noun` = "secret access key"). */
+export function SavedPasswordSection({ noun = 'password', usedWhen = 'when the server asks for a password' }: { noun?: string; usedWhen?: string } = {}) {
   const { draft, isNew, passwordChange, setPasswordChange } = useEditor();
+  const Noun = noun.charAt(0).toUpperCase() + noun.slice(1);
   const [stored, setStored] = useState<boolean | null>(isNew ? false : null);
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState('');
@@ -218,19 +220,19 @@ function SavedPasswordSection() {
   const effective = passwordChange ? passwordChange.action === 'set' : stored;
   const status =
     passwordChange?.action === 'set'
-      ? 'A new password will be saved'
+      ? `A new ${noun} will be saved`
       : passwordChange?.action === 'clear'
-        ? 'The saved password will be removed'
+        ? `The saved ${noun} will be removed`
         : stored === null
           ? 'Checking…'
           : stored
-            ? 'A password is saved for this session'
-            : 'No password saved';
+            ? `A ${noun} is saved for this session`
+            : `No ${noun} saved`;
 
   return (
     <Section
-      title="Saved password"
-      description={`Encrypted with ${osTerms.encryptedWith} and used automatically when the server asks for a password.`}
+      title={`Saved ${noun}`}
+      description={`Encrypted with ${osTerms.encryptedWith} and used automatically ${usedWhen}.`}
     >
       <div className="dlg-rows">
         <SettingRow
@@ -248,7 +250,7 @@ function SavedPasswordSection() {
           )}
           {!editing && (
             <Button size="sm" onClick={() => setEditing(true)}>
-              {effective ? 'Change…' : 'Set password…'}
+              {effective ? 'Change…' : `Set ${noun}…`}
             </Button>
           )}
           {effective && !editing && (
@@ -263,9 +265,9 @@ function SavedPasswordSection() {
               type="password"
               autoComplete="new-password"
               value={value}
-              placeholder="Password"
+              placeholder={Noun}
               onChange={setValue}
-              aria-label="Password to save"
+              aria-label={`${Noun} to save`}
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && value) {
@@ -289,7 +291,7 @@ function SavedPasswordSection() {
                 setEditing(false);
               }}
             >
-              Use password
+              Use {noun}
             </Button>
           </div>
         )}

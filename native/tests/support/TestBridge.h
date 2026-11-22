@@ -15,12 +15,16 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <optional>
+#include <thread>
 
 namespace st::test {
 
 struct InlineDispatcher : Dispatcher {
     void post(std::function<void()> fn) override { fn(); }
-    bool isUiThread() const override { return true; }
+    /** Every thread counts as the UI thread, unless a test names one (then transports may prompt from theirs). */
+    bool isUiThread() const override { return !uiThread || std::this_thread::get_id() == *uiThread; }
+    std::optional<std::thread::id> uiThread;
 };
 
 struct BridgeHarness {

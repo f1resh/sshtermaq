@@ -68,7 +68,7 @@ public:
     /* ---- RemoteFs */
 
     std::string protocol() const override { return "sftp"; }
-    RemoteCapabilities capabilities() const override { return RemoteCapabilities{true, true}; }
+    RemoteCapabilities capabilities() const override { return RemoteCapabilities{}; }
     bool lost() const override { return lost_; }
     std::string home() override { return home_; }
 

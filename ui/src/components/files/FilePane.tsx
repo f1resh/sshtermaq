@@ -119,7 +119,13 @@ export interface FilePaneProps {
   placeholder?: ReactNode;
   /** The pane a drag of ours started from (the other pane is highlighted as its target), null for none. */
   dragFrom?: Side | null;
+  /** This folder's items cannot be created, renamed or deleted (S3: the list of buckets). */
+  readOnly?: boolean;
+  /** No Permissions column (S3). */
+  noPermissions?: boolean;
 }
+
+const READ_ONLY_TEXT = 'Buckets are created, renamed and deleted in the provider’s console';
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -145,6 +151,7 @@ function ItemIcon({ item }: { item: FileItem }) {
 export const FilePane = forwardRef<FilePaneHandle, FilePaneProps>(function FilePane(props, ref) {
   const { side, source, title, badge, path, onNavigate, active, onActivate, showHidden, bookmarks, onToggleBookmark, ops, placeholder, dragFrom } =
     props;
+  const locked = !!props.readOnly;
   const P = pathsOf(side);
   const [entries, setEntries] = useState<FileItem[]>([]);
   const [shownPath, setShownPath] = useState<string | null>(null);
@@ -299,7 +306,18 @@ export const FilePane = forwardRef<FilePaneHandle, FilePaneProps>(function FileP
   const targets = (item?: FileItem) => (item && !selected.has(item.path) ? [item] : selectedItems.length ? selectedItems : item ? [item] : []);
 
   /* ---- operations ---- */
+  const removeItems = (list: FileItem[]) => {
+    if (locked) {
+      toast.info(READ_ONLY_TEXT);
+      return Promise.resolve();
+    }
+    return ops.remove(list);
+  };
   const mkdir = async () => {
+    if (locked) {
+      toast.info(READ_ONLY_TEXT);
+      return;
+    }
     if (!source || shownPath === null || (side === 'local' && path === '')) return;
     const name = await inputDialog({ title: 'New folder', label: 'Folder name', confirmLabel: 'Create', validate: (v) => nameError(v, side) });
     if (!name) return;
@@ -315,6 +333,10 @@ export const FilePane = forwardRef<FilePaneHandle, FilePaneProps>(function FileP
   };
   const beginRename = (item: FileItem) => {
     if (item.type === 'drive' || item.type === 'place') return;
+    if (locked) {
+      toast.info(READ_ONLY_TEXT);
+      return;
+    }
     setRenaming(item.path);
     setRenameText(item.name);
   };
@@ -360,15 +382,15 @@ export const FilePane = forwardRef<FilePaneHandle, FilePaneProps>(function FileP
           },
           ...(ops.menuExtras?.(list) ?? []),
           { type: 'separator' },
-          { label: 'Rename…', shortcut: 'F2', disabled: !one || special, onClick: () => one && beginRename(one) },
+          { label: 'Rename…', shortcut: 'F2', disabled: !one || special || locked, onClick: () => one && beginRename(one) },
           ...(ops.chmod && one ? [{ label: 'Permissions…', onClick: () => ops.chmod?.(one) }] : []),
           { label: list.length > 1 ? 'Copy paths' : 'Copy path', onClick: () => copyPath(list) },
           ...(side === 'local' && one && !special ? [{ label: `Show in ${osTerms.fileBrowser}`, onClick: () => void api.local.reveal(one.path) }] : []),
           { type: 'separator' },
-          { label: 'Delete', shortcut: listShortcut('delete', 'Del'), danger: true, disabled: special, onClick: () => void ops.remove(list) }
+          { label: 'Delete', shortcut: listShortcut('delete', 'Del'), danger: true, disabled: special || locked, onClick: () => void removeItems(list) }
         ]
       : [
-          { label: 'New folder…', shortcut: listShortcut('newFolder', 'F7'), disabled: side === 'local' && path === '', onClick: () => void mkdir() },
+          { label: 'New folder…', shortcut: listShortcut('newFolder', 'F7'), disabled: (side === 'local' && path === '') || locked, onClick: () => void mkdir() },
           { label: 'Refresh', shortcut: listShortcut('refresh'), onClick: refresh },
           { label: 'Select all', shortcut: listShortcut('selectAll'), onClick: () => setSelected(new Set(visiblePaths)) },
           { type: 'separator' },
@@ -432,7 +454,7 @@ export const FilePane = forwardRef<FilePaneHandle, FilePaneProps>(function FileP
       case 'delete': {
         handled();
         const list = targets(current);
-        if (list.length) void ops.remove(list);
+        if (list.length) void removeItems(list);
         return;
       }
       case null:
@@ -484,7 +506,7 @@ export const FilePane = forwardRef<FilePaneHandle, FilePaneProps>(function FileP
     } else if ((key === 'Delete' || key === 'F8') && !ev.ctrlKey && !ev.altKey) {
       handled();
       const list = targets(current);
-      if (list.length) void ops.remove(list);
+      if (list.length) void removeItems(list);
     } else if (key === 'Escape') {
       if (filter || filterOpen) {
         handled();
@@ -546,6 +568,10 @@ export const FilePane = forwardRef<FilePaneHandle, FilePaneProps>(function FileP
       return;
     }
     if (!e.dataTransfer.files.length) return;
+    if (locked && !target.onFolder) {
+      toast.info('Drop the files on a bucket', READ_ONLY_TEXT);
+      return;
+    }
     const paths = await api.files.pathsForFiles(e.dataTransfer.files);
     if (paths.length) ops.dropPaths(paths, target.dir);
   };
@@ -579,12 +605,18 @@ export const FilePane = forwardRef<FilePaneHandle, FilePaneProps>(function FileP
     { key: 'name', label: 'Name' },
     { key: 'size', label: path === '' && side === 'local' ? 'Total' : 'Size' },
     { key: 'mtime', label: 'Modified' },
-    { key: 'permissions', label: side === 'remote' ? 'Permissions' : 'Attr' }
+    ...(props.noPermissions ? [] : [{ key: 'permissions' as SortKey, label: side === 'remote' ? 'Permissions' : 'Attr' }])
   ];
 
   return (
     <section
-      className={cx('fm-pane', `fm-pane--${side}`, active && 'fm-pane--active', dragFrom && dragFrom !== side && 'fm-pane--drophint')}
+      className={cx(
+        'fm-pane',
+        `fm-pane--${side}`,
+        active && 'fm-pane--active',
+        dragFrom && dragFrom !== side && 'fm-pane--drophint',
+        props.noPermissions && 'fm-pane--no-perms'
+      )}
       data-pane-side={side}
       data-pane-path={path}
       onMouseDownCapture={onActivate}
@@ -627,7 +659,7 @@ export const FilePane = forwardRef<FilePaneHandle, FilePaneProps>(function FileP
         >
           <Star size={14} className={cx(bookmarked && 'fm-star--on')} />
         </IconButton>
-        <IconButton size="sm" label={`New folder (${listShortcut('newFolder', 'F7')})`} onClick={() => void mkdir()} disabled={!source || (side === 'local' && path === '')}>
+        <IconButton size="sm" label={`New folder (${listShortcut('newFolder', 'F7')})`} onClick={() => void mkdir()} disabled={!source || (side === 'local' && path === '') || locked}>
           <FolderPlus size={14} />
         </IconButton>
         <IconButton size="sm" label="Filter" pressed={filterOpen || !!filter} onClick={() => setFilterOpen((v) => !v)} disabled={!source}>
@@ -825,7 +857,7 @@ export const FilePane = forwardRef<FilePaneHandle, FilePaneProps>(function FileP
                   )}
                 </span>
                 <span className="fm-col fm-col--mtime">{e.type === 'drive' ? (e.freeBytes !== undefined ? `${fmtSize(e.freeBytes)} free` : '') : fmtDate(e.mtime)}</span>
-                <span className="fm-col fm-col--permissions mono">{e.permissions}</span>
+                {!props.noPermissions && <span className="fm-col fm-col--permissions mono">{e.permissions}</span>}
               </div>
             ))}
         </div>

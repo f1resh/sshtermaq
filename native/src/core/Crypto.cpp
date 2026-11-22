@@ -125,6 +125,18 @@ std::string sha256(std::string_view data) { return digest(EVP_sha256(), data); }
 std::string sha1(std::string_view data) { return digest(EVP_sha1(), data); }
 std::string md5(std::string_view data) { return digest(EVP_md5(), data); }
 
+static std::string hmacOf(const char* digestName, std::string_view key, std::string_view data) {
+    unsigned char out[EVP_MAX_MD_SIZE];
+    size_t len = 0;
+    if (!EVP_Q_mac(nullptr, "HMAC", nullptr, digestName, nullptr, key.data(), key.size(),
+                   reinterpret_cast<const unsigned char*>(data.data()), data.size(), out, sizeof out, &len))
+        throw std::runtime_error("HMAC failed");
+    return std::string(reinterpret_cast<char*>(out), len);
+}
+
+std::string hmacSha256(std::string_view key, std::string_view data) { return hmacOf("SHA256", key, data); }
+std::string hmacSha1(std::string_view key, std::string_view data) { return hmacOf("SHA1", key, data); }
+
 std::string randomBytes(size_t n) {
     std::string out(n, '\0');
     if (n && RAND_bytes(reinterpret_cast<unsigned char*>(out.data()), static_cast<int>(n)) != 1)

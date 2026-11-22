@@ -7,8 +7,10 @@
 #include "core/Uuid.h"
 #include "platform/sys/Fs.h"
 #include "platform/ui/Dialogs.h"
+#include "s3/S3Transport.h"
 #include "session/SessionManager.h"
 #include "sftp/FindSync.h"
+#include "sftp/S3Fs.h"
 #include "sftp/LocalOpen.h"
 #include "sftp/ScpFs.h"
 #include "sftp/SftpFs.h"
@@ -187,13 +189,20 @@ struct SftpCore : std::enable_shared_from_this<SftpCore> {
         checkRunning();
         std::shared_ptr<Transport> t = sessions.transport(connId);
         if (!t) throw SftpError("Not connected");
+        std::shared_ptr<RemoteFs> rfs;
+        if (S3Transport* s3t = t->asS3()) {
+            std::shared_ptr<S3Connection> c = s3t->connection();
+            if (!c) throw SftpError("Not connected");
+            t.reset();
+            rfs = openS3Fs(std::move(c));
+            return registerSession(connId, rfs, opts.parallelTransfers);
+        }
         SshTransport* ssh = t->asSsh();
-        if (!ssh) throw SftpError("File transfer is only available on SSH connections");
+        if (!ssh) throw SftpError("File transfer is only available on SSH and S3 connections");
         if (!ssh->isConnected()) throw SftpError("Not connected");
         std::weak_ptr<Transport> weak = t;
         t.reset();  // never keep the connection alive from here
 
-        std::shared_ptr<RemoteFs> rfs;
         std::string sftpError;
         if (opts.fileProtocol != FileProtocol::Scp) {
             try {
@@ -216,12 +225,15 @@ struct SftpCore : std::enable_shared_from_this<SftpCore> {
             }
             if (!sftpError.empty()) applog::info("sftp: " + sftpError + "; using SCP on " + connId);
         }
+        return registerSession(connId, rfs, opts.parallelTransfers);
+    }
 
+    Json registerSession(const std::string& connId, const std::shared_ptr<RemoteFs>& rfs, int parallelTransfers) {
         auto s = std::make_shared<SftpSession>();
         s->id = newUuid();
         s->connId = connId;
         s->fs = rfs;
-        engine->addQueue(s->id, rfs, opts.parallelTransfers);
+        engine->addQueue(s->id, rfs, parallelTransfers);
         {
             std::lock_guard lk(m);
             byId[s->id] = s;
@@ -306,6 +318,11 @@ struct SftpCore : std::enable_shared_from_this<SftpCore> {
         checkRunning();
         session(id)->fs->rename(from, to);
         return nullptr;
+    }
+
+    Json presign(const std::string& id, const std::string& path, int64_t seconds) {
+        checkRunning();
+        return session(id)->fs->presign(path, seconds);
     }
 
     Json chmod(const std::string& id, const std::string& path, uint32_t mode) {
@@ -725,6 +742,10 @@ void SftpService::registerHandlers() {
                   }));
     bridge.handle("sftp:remove", async([core](const Json& a) {
                       return core->remove(argString(a, 0), argString(a, 1), argBool(a, 2, false));
+                  }));
+    bridge.handle("sftp:presign", async([core](const Json& a) {
+                      if (!jsonArg(a, 2).is_number()) throw std::invalid_argument("seconds must be a number");
+                      return core->presign(argString(a, 0), argString(a, 1), a[2].get<int64_t>());
                   }));
     bridge.handle("sftp:chmod", async([core](const Json& a) {
                       if (!jsonArg(a, 2).is_number()) throw std::invalid_argument("mode must be a number");

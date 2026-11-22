@@ -154,6 +154,8 @@ export interface Api {
     rename(sftpId: string, from: string, to: string): Promise<void>;
     remove(sftpId: string, path: string, recursive: boolean): Promise<void>;
     chmod(sftpId: string, path: string, mode: number): Promise<void>;
+    /** A link to a file that anyone can open for `seconds` (S3: capabilities.presign). */
+    presign(sftpId: string, path: string, seconds: number): Promise<string>;
     /** localDir omitted => folder picker. Returns transfer ids ([] when cancelled). */
     download(sftpId: string, remotePaths: string[], localDir?: string, opts?: TransferOptions): Promise<string[]>;
     /** localPaths omitted => file picker. Directories upload recursively. */
@@ -254,6 +256,11 @@ export interface Api {
   };
   serial: {
     listPorts(): Promise<SerialPortInfo[]>;
+  };
+  s3: {
+    /** The profiles of ~/.aws/config and ~/.aws/credentials (AWS_CONFIG_FILE / AWS_SHARED_CREDENTIALS_FILE), sorted;
+     *  `files` says where they were looked for. */
+    profiles(): Promise<{ profiles: string[]; files: string[] }>;
   };
   shells: {
     /** The shells installed here, for local terminals; empty where the OS cannot host them. */
@@ -425,6 +432,7 @@ export const API_SCHEMA = {
     rename: 'invoke',
     remove: 'invoke',
     chmod: 'invoke',
+    presign: 'invoke',
     download: 'invoke',
     upload: 'invoke',
     cancelTransfer: 'send',
@@ -488,6 +496,9 @@ export const API_SCHEMA = {
   },
   serial: {
     listPorts: 'invoke'
+  },
+  s3: {
+    profiles: 'invoke'
   },
   shells: {
     list: 'invoke'

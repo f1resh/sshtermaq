@@ -25,6 +25,10 @@ void cleanse(std::string& s);
 std::string sha256(std::string_view data);
 std::string sha1(std::string_view data);
 std::string md5(std::string_view data);
+/** HMAC-SHA-256 (32 raw bytes). */
+std::string hmacSha256(std::string_view key, std::string_view data);
+/** HMAC-SHA-1 (20 raw bytes). */
+std::string hmacSha1(std::string_view key, std::string_view data);
 std::string randomBytes(size_t n);
 
 std::string base64Encode(std::string_view data, bool pad = true);

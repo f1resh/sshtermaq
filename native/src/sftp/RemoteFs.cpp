@@ -68,4 +68,8 @@ void RemoteFs::removeTree(const std::string& path, const std::atomic<bool>* canc
     removeTreeAt(*this, path, cancel, 0, entries);
 }
 
+std::string RemoteFs::presign(const std::string&, int64_t) {
+    throw SftpError("Links to files are only available on S3");
+}
+
 }  // namespace st::sftpimpl

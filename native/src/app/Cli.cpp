@@ -3,6 +3,7 @@
 #include "core/HostName.h"
 #include "core/Strings.h"
 #include "core/Uuid.h"
+#include "s3/Credentials.h"
 #include "platform/sys/Fs.h"
 #include "store/Store.h"
 
@@ -370,6 +371,7 @@ CliResult parseCommandLine(const std::vector<std::string>& args, const CliContex
     std::string password;
     bool verbose = false;
     bool fileView = false;   // sftp:// / scp:// URL
+    bool s3Url = false;      // s3://bucket/folder
     bool localRequested = false;  // -local
     std::string localCommand;
     std::string remotePath;  // its path part
@@ -502,6 +504,27 @@ CliResult parseCommandLine(const std::vector<std::string>& args, const CliContex
             if (finalProtocol == Protocol::Serial) {
                 s.serial.line = normalizeSerialLine(*positional);
                 if (s.serial.line.empty()) throw std::invalid_argument("empty serial line");
+            } else if (iequals(std::string_view(*positional).substr(0, 5), "s3://")) {
+                // s3://bucket[/folder]: AWS, signed in with the environment's keys when set, else the default profile.
+                const std::string rest = positional->substr(5);
+                const size_t slash = rest.find('/');
+                const std::string bucket = percentDecode(rest.substr(0, slash));
+                bool okName = !bucket.empty() && bucket.size() <= 255;
+                for (char c : bucket)
+                    if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' && c != '-' && c != '_') okName = false;
+                if (!okName) throw std::invalid_argument("not a valid bucket name");
+                const SessionConfig base = s;
+                s.protocol = Protocol::S3;
+                s.host.clear();
+                s.port = 0;
+                s.openAs = "files";
+                s.s3 = S3Options{};
+                s.s3.bucket = bucket;
+                if (slash != std::string::npos) s.s3.startPath = trim(percentDecode(rest.substr(slash + 1)));
+                s.s3.auth.method = s3::credentialsFromEnvironment() ? "env" : "profile";
+                s.proxy = base.proxy;
+                protocol = Protocol::S3;
+                s3Url = true;
             } else {
                 HostSpec h = parseHostSpec(*positional);
                 s.host = h.host;
@@ -543,8 +566,12 @@ CliResult parseCommandLine(const std::vector<std::string>& args, const CliContex
         s.host.clear();
         s.port = 0;
     }
+    if (s.protocol == Protocol::S3 && !s3Url && !loaded) {
+        res.errors.push_back("an S3 session is opened with s3://bucket/folder or a saved session");
+    }
     const bool hasTarget = s.protocol == Protocol::Local    ? localRequested
                            : s.protocol == Protocol::Serial ? !s.serial.line.empty()
+                           : s.protocol == Protocol::S3     ? s3Url || loaded.has_value()
                                                             : !s.host.empty();
     if ((positional || loaded || localRequested) && hasTarget) {
         OpenRequest req;
@@ -554,6 +581,7 @@ CliResult parseCommandLine(const std::vector<std::string>& args, const CliContex
             req.view = "files";
             req.remotePath = remotePath;
         }
+        if (req.session.protocol == Protocol::S3) req.view = "files";
         if (req.session.protocol == Protocol::Ssh) req.password = password;
         req.fromLink = link && !loaded;
         res.request = std::move(req);

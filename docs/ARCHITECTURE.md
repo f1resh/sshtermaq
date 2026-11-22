@@ -192,6 +192,7 @@ breaks existing installs. Change one only with a migration that reads the old va
 | `keys-import` | `native/src/keys/**`, `native/src/putty/**`, `native/src/importers/**`, `native/tests/{keys,putty}/**`, `native/tests/fixtures/**` |
 | `host` | `native/src/app/**`, `native/src/store/**`, `native/src/core/Types.*` (additions), `native/res/**`, `native/tests/{store,app}/**`, `CMakeLists.txt` (additions only) |
 | `session` | `native/src/session/{SessionManager,Charset,SessionLog}.*`, `native/src/transport/TransportFactory.*`, `native/tests/session/**` |
+| `s3` | `native/src/s3/**`, `native/src/sftp/S3Fs.*`, `native/tests/s3/**`, `native/tools/tests3server/**`, `ui/src/components/dialogs/session/sections/S3Sections.tsx`, `ui/src/components/files/LinkDialog.tsx` |
 | `sftp` | `native/src/sftp/**`, `native/src/localfs/**`, `native/tests/sftp/**`, `ui/src/components/files/**`, `ui/src/bridge/mock/{sftp,local}.ts` |
 | `platform` | `native/src/platform/**`, `native/tests/platform/**`, `cmake/CheckPlatformBoundaries.cmake`, `cmake/platform_allowlist.txt`, `triplets/**` |
 | `testinfra` | `native/tests/support/**`, `scripts/**` |
@@ -200,7 +201,7 @@ breaks existing installs. Change one only with a migration that reads the old va
 | `ui-dialogs` | `ui/src/components/dialogs/**`, `ui/src/shared/types.ts` + `defaults.ts` (additions), `ui/src/bridge/mock/{importer,keys}.ts` |
 
 Bridge handler ownership: `conn:*`, `prompts:*` → session · `importer:*`, `keys:*`, `knownHosts:importOpenSsh` →
-keys-import · `sftp:*`, `local:*` → sftp · everything else (`sessions`, `credentials`, `settings`, `knownHosts` list/remove,
+keys-import · `sftp:*`, `local:*` → sftp · `s3:*` → host (`s3:profiles` in CoreHandlers) · everything else (`sessions`, `credentials`, `settings`, `knownHosts` list/remove,
 `serial`, `dialog`, `app`, `window`) → host. The host's composition root calls `registerConnHandlers`,
 `registerImportHandlers`, `SftpService::registerHandlers`, `LocalFsService::registerHandlers` and its own core
 handlers, and calls `ui::dialogs::init` and `ui::dnd::init` once the main window exists (`ui::UiThread` sets up
@@ -242,6 +243,43 @@ Native layering (`native/src/sftp`):
 Tests: `native/tests/sftp` (transfers, conflicts, resume, move, find, sync, edit, SCP against real GNU `ls` and
 OpenSSH `scp` run through Git for Windows' `sh.exe` by the test server), `native/tests/platform/win/ui` (local
 files, drag & drop of local files). `st_testserver --sftp off --exec-shell git` serves an SCP-only server.
+
+## S3 storage
+
+An S3 session (`Protocol::S3`, `SessionConfig.s3`) has no terminal: opening it opens a file manager tab, and the UI
+drives it like any files pane (`conn:open` → status → `sftp:open`).
+
+- `native/src/s3` (`st_s3`, linked by `st_session`):
+  - `SigV4`: AWS Signature Version 4, headers and presigned URLs. Over HTTPS bodies are `UNSIGNED-PAYLOAD`; over
+    plain HTTP they are hashed.
+  - `Xml`: a small reader for S3 / STS answers.
+  - `AwsConfig`: the `~/.aws` files (`AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`).
+  - `Credentials`: one `CredentialProvider` for keys, the environment, profiles (static keys, `credential_process`,
+    assume role through `source_profile` chains / `credential_source = Environment` with MFA, IAM Identity Center
+    from `~/.aws/sso/cache`) and anonymous. Temporary credentials are fetched again 5 minutes before they expire.
+  - `S3Client`: the REST calls. It retries throttling, 5xx and dropped connections, follows a bucket's region, fixes
+    clock skew and refreshes expired credentials once.
+  - `S3Transport`: a `Transport` (`asS3()`) that does the sign-in and the certificate question at connect time. It
+    holds an `S3Connection` (HTTP session, client, bucket, part size) for the file manager.
+- `platform/sys/Http.h`: WinHTTP (Windows) / NSURLSession (macOS). The OS does TLS, the system's root certificates and
+  the system proxy; a session can also use no proxy or an HTTP proxy. A certificate the system does not trust is
+  accepted only when pinned: its SHA-256 is saved in Known hosts with key type `x509-sha256`. The check runs after
+  the handshake and before anything is sent.
+- `native/src/sftp/S3Fs`: the third `RemoteFs`, so transfers, conflicts, find, synchronize and edit work unchanged.
+  - Paths: `/bucket/key` (or `/key` when the session names a bucket). Folders are `/`-separated prefixes; an empty
+    `folder/` object marks a new folder.
+  - Downloads: 8 MB ranges, `parallelParts` at a time, handed on in file order, each with `If-Match: <ETag>`.
+  - Uploads: one PUT, or a multipart upload. A failed one stays open and continues on the next upload of the same
+    file in the session; a cancelled one is aborted.
+  - Rename / move: a server-side copy, then a delete (`UploadPartCopy` above 5 GB).
+  - All requests run on a pool of at most 16 threads per session.
+  - Capabilities tell the engine and the UI what differs: `resumeUploads` false, `atomicWrites` true, no `chmod` or
+    `symlinks`, `presign` (`sftp:presign`, "Copy link…"), `rootIsBuckets`.
+- UI:
+  - session editor: `sections/S3Sections.tsx`, with service presets and `s3:profiles` for the profile picker;
+  - Quick connect `s3://bucket/folder`, also on the command line;
+  - the certificate prompt (`CertificateDialog`);
+  - the file manager: no Permissions column, the bucket list read-only, `LinkDialog`.
 
 ## Building & testing
 

@@ -63,6 +63,10 @@
   background: color-mix(in srgb, var(--warning) 18%, transparent);
   color: var(--warning);
 }
+.fm-badge--s3 {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
 .fm-badge--link {
   background: var(--surface-hover);
   color: var(--text-muted);
@@ -221,6 +225,33 @@
   cursor: default;
   user-select: none;
   white-space: nowrap;
+}
+.fm-pane--no-perms .fm-row {
+  grid-template-columns: minmax(140px, 1fr) 76px 124px;
+}
+.fm-link {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fm-link__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fm-link__amount {
+  width: 72px;
+}
+.fm-link__url {
+  width: 100%;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  word-break: break-all;
+  resize: none;
+}
+.fm-link__error {
+  color: var(--danger, #e5534b);
+  margin: 0;
 }
 .fm-row:not(.fm-row--head):hover {
   background: var(--surface-hover);

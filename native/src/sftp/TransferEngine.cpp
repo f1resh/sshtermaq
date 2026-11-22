@@ -894,7 +894,7 @@ struct TransferEngine::Impl : std::enable_shared_from_this<TransferEngine::Impl>
             c.source = FileStat{u8(item.local), static_cast<double>(item.size), item.mtime * 1000};
             c.target = FileStat{target, st->size, st->mtime};
             const uint64_t tsize = static_cast<uint64_t>(st->size);
-            c.canResume = caps.resume && !changed && tsize > 0 && tsize < item.size;
+            c.canResume = caps.resume && caps.resumeUploads && !changed && tsize > 0 && tsize < item.size;
             std::string newName;
             const ConflictDecision d = resolve(t, c, caps.preciseTimes, newName);
             if (d == ConflictDecision::Skip) return false;
@@ -943,7 +943,7 @@ struct TransferEngine::Impl : std::enable_shared_from_this<TransferEngine::Impl>
             w.reset();
         } catch (const Cancelled&) {
             if (w) w->abort();
-            if (offset == 0) {
+            if (offset == 0 && !caps.atomicWrites) {
                 try {
                     rfs.unlink(target);  // remove the incomplete copy (best effort)
                 } catch (const std::exception&) {

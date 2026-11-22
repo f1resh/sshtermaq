@@ -39,6 +39,11 @@ std::string sessionLabel(const SessionConfig& s) {
     if (!s.name.empty()) return s.name;
     if (s.protocol == Protocol::Serial) return s.serial.line;
     if (s.protocol == Protocol::Local) return localProgramName(s.local.command);
+    if (s.protocol == Protocol::S3) {
+        std::string where = s.s3.endpoint.empty() ? std::string("AWS") : s.s3.endpoint;
+        if (const size_t p = where.find("://"); p != std::string::npos) where = where.substr(p + 3);
+        return "s3://" + (s.s3.bucket.empty() ? where : s.s3.bucket + (s.s3.startPath.empty() ? "" : "/" + s.s3.startPath));
+    }
     std::string out;
     if (!s.username.empty()) out += s.username + "@";
     out += s.host;
@@ -134,6 +139,16 @@ PromptInput hostkey(const std::string& host, int port, const std::string& keyTyp
 PromptInput confirm(const std::string& title, const std::string& message, const std::vector<std::string>& buttons, bool danger) {
     PromptInput p;
     p.json = {{"kind", "confirm"}, {"title", title}, {"message", message}, {"buttons", buttons}, {"danger", danger}};
+    return p;
+}
+
+PromptInput certificate(const std::string& host, int port, const CertificateInfo& c, bool mismatch,
+                        const std::vector<std::string>& previous) {
+    PromptInput p;
+    p.json = {{"kind", "certificate"}, {"host", host},           {"port", port},
+              {"sha256", c.sha256},    {"subject", c.subject},   {"issuer", c.issuer},
+              {"validFrom", c.validFrom}, {"validTo", c.validTo}, {"problem", c.problem},
+              {"status", mismatch ? "mismatch" : "unknown"}, {"previous", previous}};
     return p;
 }
 

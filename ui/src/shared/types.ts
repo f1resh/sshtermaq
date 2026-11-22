@@ -4,7 +4,7 @@
  * dependencies (types + tiny constants only).
  */
 
-export type Protocol = 'ssh' | 'telnet' | 'rlogin' | 'raw' | 'serial' | 'local';
+export type Protocol = 'ssh' | 'telnet' | 'rlogin' | 'raw' | 'serial' | 'local' | 's3';
 export type TriState = 'auto' | 'on' | 'off';
 export type AddressFamily = 'auto' | 'ipv4' | 'ipv6';
 
@@ -158,6 +158,44 @@ export interface LocalOptions {
   startDir: string;
 }
 
+/** How an S3 session signs in. */
+export type S3AuthMethod = 'keys' | 'env' | 'profile' | 'anonymous';
+
+export interface S3AuthOptions {
+  /** 'keys': an access key (the session's, or a login from Credentials); 'env': AWS_ACCESS_KEY_ID ...; 'profile':
+   *  ~/.aws; 'anonymous': public buckets, nothing signed. */
+  method: S3AuthMethod;
+  /** 'keys': the access key ID. Its secret is the session's saved password (or asked when connecting). */
+  accessKeyId: string;
+  /** 'keys': a login from Credentials (user name = access key ID, password = secret) instead; '' = none. */
+  loginId: string;
+  /** 'profile': the profile's name; '' = AWS_PROFILE, else "default". */
+  profile: string;
+}
+
+export type S3Preset = 'aws' | 'r2' | 'wasabi' | 'b2' | 'spaces' | 'minio' | 'custom';
+
+/** S3-compatible storage, opened in a file manager tab. */
+export interface S3Options {
+  preset: S3Preset;
+  /** 'https://host[:port]'; '' = AWS (or AWS_ENDPOINT_URL / the profile's endpoint_url). */
+  endpoint: string;
+  /** '' = the profile's or the environment's, else us-east-1 (AWS buckets report their own). */
+  region: string;
+  /** 'auto': path-style for custom endpoints, virtual-hosted for AWS. */
+  addressing: 'auto' | 'virtual' | 'path';
+  /** '' = the root lists the buckets. */
+  bucket: string;
+  /** A folder inside the bucket to start in. */
+  startPath: string;
+  auth: S3AuthOptions;
+  /** true: the system's proxy; false: the session's proxy (none or HTTP). */
+  systemProxy: boolean;
+  /** Multipart part size in MiB (8-64) and parts at once per file (1-16). */
+  partSizeMiB: number;
+  parallelParts: number;
+}
+
 /* ------------------------------------------------------------------------ */
 /* Terminal behaviour                                                        */
 /* ------------------------------------------------------------------------ */
@@ -281,6 +319,7 @@ export interface SessionConfig {
   rlogin: RloginOptions;
   serial: SerialOptions;
   local: LocalOptions;
+  s3: S3Options;
   terminal: TerminalOptions;
   keyboard: KeyboardOptions;
   appearance: AppearanceOverrides;
@@ -604,7 +643,25 @@ export type PromptInput =
       /** Fingerprints of the previously stored keys for this host (mismatch only). */
       previous: string[];
     }
-  | { kind: 'confirm'; title: string; message: string; buttons: string[]; danger?: boolean };
+  | { kind: 'confirm'; title: string; message: string; buttons: string[]; danger?: boolean }
+  /** A TLS certificate the system does not trust (S3 endpoints). Answer with choice 'accept-save' | 'accept-once' |
+   *  'reject'. */
+  | {
+      kind: 'certificate';
+      host: string;
+      port: number;
+      /** Lower-case hex SHA-256 of the certificate. */
+      sha256: string;
+      subject: string;
+      issuer: string;
+      validFrom: string;
+      validTo: string;
+      /** Why the system does not trust it. */
+      problem: string;
+      status: 'unknown' | 'mismatch';
+      /** SHA-256 of the certificates accepted before for this host (mismatch only). */
+      previous: string[];
+    };
 
 export type PromptRequest = PromptInput & { id: string; connId: string };
 
@@ -685,13 +742,25 @@ export interface SftpEntry {
   linkTargetIsDir?: boolean;
 }
 
-export type RemoteProtocol = 'sftp' | 'scp';
+export type RemoteProtocol = 'sftp' | 'scp' | 's3';
 
 export interface RemoteCapabilities {
   /** Interrupted transfers can continue where they stopped. */
   resume: boolean;
   /** Times are precise to the second (SCP over plain `ls` may only know minutes). */
   preciseTimes: boolean;
+  /** An upload can append to a shorter copy on the server (not S3). */
+  resumeUploads?: boolean;
+  /** A file is replaced only when its upload completes (S3). */
+  atomicWrites?: boolean;
+  /** Permissions can be changed (SFTP, SCP; not S3). Missing = true. */
+  chmod?: boolean;
+  /** Symbolic links exist (SFTP, SCP; not S3). Missing = true. */
+  symlinks?: boolean;
+  /** "Copy link…": time-limited links to files (S3). */
+  presign?: boolean;
+  /** "/" lists buckets, which cannot be created, renamed or deleted here (S3 without a bucket in the session). */
+  rootIsBuckets?: boolean;
 }
 
 export interface SftpOpenOptions {

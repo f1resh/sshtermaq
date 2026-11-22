@@ -3,25 +3,8 @@
  * the right, protocol-aware (irrelevant categories are hidden). Edits a local draft; nothing is stored until
  * Save. Opening with sessionId 'default' edits the "Default Settings" template (settings.defaultSession).
  */
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import {
-  Cable,
-  Fingerprint,
-  Globe,
-  Keyboard,
-  Languages,
-  Lock,
-  MonitorCog,
-  Network,
-  Palette,
-  Plug,
-  ScrollText,
-  Settings2,
-  Shield,
-  SquareTerminal,
-  Usb,
-  Waypoints
-} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { Cable, Cloud, Fingerprint, Globe, Keyboard, Languages, Lock, MonitorCog, Network, Palette, Plug, ScrollText, Settings2, Shield, SquareTerminal, Usb, Waypoints } from 'lucide-react';
 import { api } from '@/bridge/api';
 import { connectSession } from '@/commands/actions';
 import { Button, Modal, toast } from '@/components/ui';
@@ -47,6 +30,7 @@ import {
 } from './sessionModel';
 import { ConnectionSection, ProxySection, SessionSection } from './sections/GeneralSections';
 import { RloginSection, SerialSection, TelnetSection } from './sections/ProtocolSections';
+import { S3Section } from './sections/S3Sections';
 import { AlgorithmsSection, AuthSection, SshSection, TunnelsSection, X11Section } from './sections/SshSections';
 import { AppearanceSection, KeyboardSection, LoggingSection, TerminalSection, TranslationSection } from './sections/TerminalSections';
 
@@ -64,6 +48,7 @@ const SECTION_ICONS: Record<SectionId, ReactNode> = {
   telnet: <Network size={15} />,
   rlogin: <Cable size={15} />,
   serial: <Usb size={15} />,
+  s3: <Cloud size={15} />,
   terminal: <SquareTerminal size={15} />,
   keyboard: <Keyboard size={15} />,
   appearance: <Palette size={15} />,
@@ -83,6 +68,7 @@ const SECTION_DESCRIPTIONS: Record<SectionId, string> = {
   telnet: 'Telnet option negotiation and keyboard behaviour',
   rlogin: 'Rlogin login options',
   serial: 'Serial line parameters',
+  s3: 'Sign-in, bucket addressing, proxy and transfers',
   terminal: 'Line discipline, bell, scrollback and window behaviour',
   keyboard: 'Codes sent by Backspace, Home/End, function and cursor keys',
   appearance: 'Font, cursor and colours for this session',
@@ -120,6 +106,8 @@ function SectionBody({ id }: { id: SectionId }) {
       return <RloginSection />;
     case 'serial':
       return <SerialSection />;
+    case 's3':
+      return <S3Section />;
     case 'terminal':
       return <TerminalSection />;
     case 'keyboard':
@@ -203,13 +191,18 @@ export function SessionEditor({ dialog, onClose }: { dialog: SessionEditorState;
   });
 
   // Errors for untouched fields stay hidden until the first save attempt; list rows (tunnels, env) always show.
-  const fieldError = useStableCallback((path: string): string | undefined => {
-    const msg = validation.errors[path];
-    if (!msg) return undefined;
-    if (attempted || path.startsWith('tunnel:') || path.startsWith('env:')) return msg;
-    return stableStringify(getPath(draft, path)) !== stableStringify(getPath(initial, path)) ? msg : undefined;
-  });
-  const warning = useStableCallback((path: string) => validation.warnings[path]);
+  // Plain callbacks (not useStableCallback): the sections call these while rendering, so they must see this render's
+  // validation, not the previous one (which showed a field's error one change late, or never after one change).
+  const fieldError = useCallback(
+    (path: string): string | undefined => {
+      const msg = validation.errors[path];
+      if (!msg) return undefined;
+      if (attempted || path.startsWith('tunnel:') || path.startsWith('env:')) return msg;
+      return stableStringify(getPath(draft, path)) !== stableStringify(getPath(initial, path)) ? msg : undefined;
+    },
+    [validation, attempted, draft, initial]
+  );
+  const warning = useCallback((path: string) => validation.warnings[path], [validation]);
 
   const ctx: EditorContextValue = {
     draft,
