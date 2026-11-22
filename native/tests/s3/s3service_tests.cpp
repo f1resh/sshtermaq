@@ -5,6 +5,7 @@
 #include "TestS3Server.h"
 #include "TestServers.h"
 
+#include "platform/Platform.h"
 #include "platform/sys/Fs.h"
 #include "session/SessionManager.h"
 #include "sftp/SftpService.h"
@@ -13,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <string>
 #include <thread>
 
 using namespace st;
@@ -190,7 +192,12 @@ TEST_CASE("s3 session: an untrusted certificate is asked about, then remembered 
     CHECK(p["sha256"] == f.server->http().certificateSha256());
     CHECK(p["subject"] == "st-test");
     CHECK(p["status"] == "unknown");
-    CHECK(f.server->http().log() == std::vector<std::string>{"HEAD /"});  // only the unsigned probe before the answer
+    // Before the answer only the certificate probe, which sends nothing signed: a HEAD without headers on Windows,
+    // nothing at all on macOS (it stops after the TLS handshake; HttpSession::probeCertificate).
+    if (std::string(sys::osName()) == "win32")
+        CHECK(f.server->http().log() == std::vector<std::string>{"HEAD /"});
+    else
+        CHECK(f.server->http().log().empty());
     f.answer(p, {{"choice", "accept-save"}});
     REQUIRE(f.waitEnd(conn) == "connected");
     bool saved = false;

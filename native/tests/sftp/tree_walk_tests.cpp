@@ -37,12 +37,12 @@ public:
         uint32_t mode = 0644;
         std::string target;  // links: absolute
     };
-    std::map<std::string, Node> nodes{{"/", Node{"dir"}}};
+    std::map<std::string, Node> nodes{{"/", Node{"dir", "", 0644, ""}}};
     std::map<std::string, uint32_t> createdModes;  // openWrite: the mode a new file got
     mutable std::mutex mu;
 
-    void dir(const std::string& p) { nodes[p] = Node{"dir", "", 0755}; }
-    void file(const std::string& p, const std::string& content, uint32_t mode = 0644) { nodes[p] = Node{"file", content, mode}; }
+    void dir(const std::string& p) { nodes[p] = Node{"dir", "", 0755, ""}; }
+    void file(const std::string& p, const std::string& content, uint32_t mode = 0644) { nodes[p] = Node{"file", content, mode, ""}; }
     void link(const std::string& p, const std::string& target) { nodes[p] = Node{"link", "", 0777, target}; }
 
     std::string protocol() const override { return "sftp"; }
@@ -99,7 +99,7 @@ public:
 
     void mkdir(const std::string& path, uint32_t) override {
         std::lock_guard l(mu);
-        nodes[path] = Node{"dir", "", 0755};
+        nodes[path] = Node{"dir", "", 0755, ""};
     }
     void rename(const std::string&, const std::string&) override {}
     void unlink(const std::string& path) override {
@@ -155,7 +155,7 @@ private:
         }
         void finish(int64_t, const ProgressFn&) override {
             std::lock_guard l(fs.mu);
-            fs.nodes[path] = Node{"file", data, mode};
+            fs.nodes[path] = Node{"file", data, mode, ""};
         }
         void abort() noexcept override {}
     };

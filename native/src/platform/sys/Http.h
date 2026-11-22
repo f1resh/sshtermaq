@@ -102,7 +102,8 @@ public:
     virtual ~HttpSession() = default;
     /** Blocking. Does not follow redirects (the caller sees 301 / 307). */
     virtual HttpResponse send(const HttpRequest& request) = 0;
-    /** The certificate a TLS server at `url` presents (nothing is sent but the TLS handshake). */
+    /** The certificate a TLS server at `url` presents. Nothing signed is sent: macOS stops after the TLS handshake;
+     *  WinHTTP shows the certificate only with a response, so Windows sends a HEAD without headers. */
     virtual HttpCertificate probeCertificate(const std::string& url) = 0;
     /** Replaces the pinned certificates for later connections. */
     virtual void setPinnedCertificates(std::vector<std::string> sha256) = 0;

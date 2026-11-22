@@ -195,7 +195,7 @@ TEST_CASE("host names: the shared cases (the UI's isValidHost passes the same fi
 TEST_CASE("cli: a host with shell characters is refused, in a link and as an argument", "[app][cli][host]") {
     for (const std::string host : {"x&calc.exe&", "a|b", "a;b", "$(id)", "`id`", "\"q\"", "'q'", "a b", "-oProxyCommand=x",
                                    "h>f", "fe80::1%&calc"}) {
-        for (const std::string arg : {"ssh://" + host, "ssh://user@" + host + ":22/", "sftp://" + host + "/tmp",
+        for (const std::string& arg : {"ssh://" + host, "ssh://user@" + host + ":22/", "sftp://" + host + "/tmp",
                                       "telnet://" + host, "user@" + host}) {
             INFO("argument: " << arg);
             const auto r = parse({arg});
@@ -205,7 +205,7 @@ TEST_CASE("cli: a host with shell characters is refused, in a link and as an arg
         }
     }
     // Normal names, IPv4, IPv6 with a zone, punycode.
-    for (const std::string arg : {"ssh://host.example", "sftp://u@10.0.0.1/", "ssh://[fe80::1%eth0]:2222", "xn--bcher-kva.example",
+    for (const std::string& arg : {"ssh://host.example", "sftp://u@10.0.0.1/", "ssh://[fe80::1%eth0]:2222", "xn--bcher-kva.example",
                                   "my_host", "[2001:db8::1]:22"}) {
         INFO("argument: " << arg);
         const auto r = parse({arg});

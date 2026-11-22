@@ -1,5 +1,6 @@
 // platform/sys/Http.h against the test HTTP(S) server: bodies, streaming, keep-alive, cancel, timeouts, faults and
 // the certificate rules (untrusted refused, pinned accepted, nothing sent to a server whose certificate is refused).
+#include "platform/Platform.h"
 #include "platform/sys/Http.h"
 
 #include "TestHttpServer.h"
@@ -8,6 +9,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -255,14 +257,20 @@ TEST_CASE("http: certificates - untrusted refused, probed, pinned") {
     CHECK(cert.subject == "st-test");
     CHECK(cert.issuer == "st-test");
     CHECK(cert.validTo.size() == 10);
-    CHECK(server.log() == std::vector<std::string>{"HEAD /"});  // the probe sends nothing signed
+    // The probe sends nothing signed. macOS stops after the TLS handshake, so the server sees no request; WinHTTP shows
+    // the certificate only with a response, so Windows sends a HEAD without headers.
+    const std::vector<std::string> probed = server.log();
+    if (std::string(sys::osName()) == "win32")
+        CHECK(probed == std::vector<std::string>{"HEAD /"});
+    else
+        CHECK(probed.empty());
 
     // A wrong pin: refused before the request is written.
     http->setPinnedCertificates({std::string(64, 'a')});
     r = http->send(req);
     CHECK(r.status == 0);
     CHECK(r.certificateError);
-    CHECK(server.requests() == 1);
+    CHECK(server.requests() == static_cast<int>(probed.size()));  // nothing more than the probe
 
     // The right pin: accepted.
     http->setPinnedCertificates({server.certificateSha256()});

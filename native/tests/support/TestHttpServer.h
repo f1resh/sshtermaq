@@ -53,6 +53,13 @@ struct TestHttpResponse {
     bool close = false;
 };
 
+/** A response with only a status (no headers or body); `TestHttpResponse{404}` would leave fields out (-Wextra). */
+inline TestHttpResponse httpStatus(int status) {
+    TestHttpResponse r;
+    r.status = status;
+    return r;
+}
+
 using TestHttpHandler = std::function<TestHttpResponse(const TestHttpRequest&)>;
 
 struct TestHttpServerOptions {

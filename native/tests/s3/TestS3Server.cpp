@@ -261,7 +261,7 @@ struct TestS3Server::Impl {
         }
         auto b = buckets.find(bucket);
         if (b == buckets.end()) {
-            if (op == "HeadBucket") return TestHttpResponse{404};
+            if (op == "HeadBucket") return httpStatus(404);
             return error(404, "NoSuchBucket", "The specified bucket does not exist");
         }
         auto& objects = b->second;
@@ -291,7 +291,7 @@ struct TestS3Server::Impl {
         }
         if (op == "HeadObject" || op == "GetObject") {
             auto o = objects.find(key);
-            if (o == objects.end()) return op == "HeadObject" ? TestHttpResponse{404} : error(404, "NoSuchKey", "The specified key does not exist.");
+            if (o == objects.end()) return op == "HeadObject" ? httpStatus(404) : error(404, "NoSuchKey", "The specified key does not exist.");
             return getObject(r, o->second, op == "HeadObject");
         }
         if (op == "PutObject") {
@@ -376,7 +376,7 @@ struct TestS3Server::Impl {
         }
         if (op == "AbortMultipartUpload") {
             uploads.erase(u);
-            return TestHttpResponse{204};
+            return httpStatus(204);
         }
         if (op == "CompleteMultipartUpload") {
             TestS3Object o = u->second.proto;
@@ -418,7 +418,7 @@ struct TestS3Server::Impl {
         }
         if (op == "DeleteObject") {
             objects.erase(key);
-            return TestHttpResponse{204};
+            return httpStatus(204);
         }
         return error(501, "NotImplemented", op + " is not implemented by the test server");
     }
@@ -537,7 +537,7 @@ TestS3Server::TestS3Server(TestS3Options options) : impl_(std::make_shared<Impl>
     http_ = std::make_unique<TestHttpServer>(
         [weak](const TestHttpRequest& r) {
             auto i = weak.lock();
-            return i ? i->handle(r) : TestHttpResponse{503};
+            return i ? i->handle(r) : httpStatus(503);
         },
         h);
     impl_->host = "127.0.0.1:" + std::to_string(http_->port());

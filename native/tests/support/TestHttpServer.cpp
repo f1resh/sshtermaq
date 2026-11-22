@@ -244,7 +244,7 @@ struct TestHttpServer::Impl {
                 h = handler;
                 log.push_back(req.method + " " + req.target);
             }
-            TestHttpResponse r = h ? h(req) : TestHttpResponse{404};
+            TestHttpResponse r = h ? h(req) : httpStatus(404);
             {
                 std::lock_guard lk(mu);
                 ++requests;
