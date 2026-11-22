@@ -53,6 +53,7 @@ import type {
   KnownHost,
   LocalEntry,
   OpenRequest,
+  PageReloadInfo,
   PromptRequest,
   PromptResponse,
   SerialPortInfo,
@@ -290,6 +291,11 @@ export interface Api {
     setUiScale(factor: number): void;
     /** Drains open requests queued from CLI args / second instances. */
     takeOpenRequests(): Promise<OpenRequest[]>;
+    /** Keeps the workspace in the host's memory (never on disk), for the page that replaces this one after a reload. */
+    setReloadSnapshot(snapshot: unknown): void;
+    /** Once per page: whether it replaced a reloaded page, how many of that page's connections the host closed, and
+     *  that page's last workspace. */
+    takeReloadInfo(): Promise<PageReloadInfo>;
     onOpenRequest(cb: (req: OpenRequest) => void): Unsubscribe;
     getState<T = unknown>(key: string): Promise<T | undefined>;
     setState(key: string, value: unknown): Promise<void>;
@@ -523,6 +529,8 @@ export const API_SCHEMA = {
     onFullscreenChanged: 'event',
     setUiScale: 'send',
     takeOpenRequests: 'invoke',
+    setReloadSnapshot: 'send',
+    takeReloadInfo: 'invoke',
     onOpenRequest: 'event',
     getState: 'invoke',
     setState: 'invoke',

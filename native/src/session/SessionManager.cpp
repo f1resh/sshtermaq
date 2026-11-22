@@ -254,6 +254,9 @@ public:
     /** Shutdown fallback for a transport that never reported onClose: make all callbacks no-ops. */
     void detach() { detached_ = true; }
 
+    /** The page that opened it is gone: nothing more is sent to the UI (the close itself runs as usual). */
+    void silence() { silenced_ = true; }
+
     /** Flusher thread: emit the pending batch whose 8 ms window ended. */
     void flushScheduled() {
         std::lock_guard lock(outMutex_);
@@ -297,7 +300,7 @@ public:
             std::lock_guard lock(stateMutex_);
             events_.push_back(e);
             while (events_.size() > kMaxEventLog) events_.pop_front();
-            mgr_.bridge.emit("conn:onEventLog", Json::array({connId_, e}));
+            if (!silenced_) mgr_.bridge.emit("conn:onEventLog", Json::array({connId_, e}));
         }
         log_.event(message);
     }
@@ -349,7 +352,7 @@ public:
     PromptResponse prompt(const PromptInput& input) override {
         PromptResponse cancelled;
         cancelled.cancelled = true;
-        if (detached_) return cancelled;
+        if (detached_ || silenced_) return cancelled;
         if (mgr_.bridge.dispatcher().isUiThread()) {
             applog::error("Prompter::prompt called on the UI thread; refusing to block it");
             return cancelled;
@@ -385,7 +388,7 @@ public:
             mgr_.prompts.erase(pp->id);
         }
         if (!answered) {
-            mgr_.bridge.emit("prompts:onCancel", Json::array({pp->id}));
+            if (!silenced_) mgr_.bridge.emit("prompts:onCancel", Json::array({pp->id}));
             result = cancelled;
         }
         return result;
@@ -494,6 +497,7 @@ private:
         if (pending_.empty()) return;
         std::string data;
         data.swap(pending_);
+        if (silenced_) return;
         mgr_.bridge.emit("conn:onData", Json::array({connId_, std::move(data)}));
         lastFlush_ = Clock::now();
     }
@@ -555,7 +559,7 @@ private:
         std::lock_guard lock(outMutex_);
         if (finalEmitted_) return;
         emitDataLocked();
-        mgr_.bridge.emit("conn:onStatus", Json::array({std::move(ev)}));
+        if (!silenced_) mgr_.bridge.emit("conn:onStatus", Json::array({std::move(ev)}));
         if (close) finalEmitted_ = true;
     }
 
@@ -563,6 +567,7 @@ private:
     const std::string connId_;
     const SessionConfig session_;
     std::atomic<bool> detached_{false};
+    std::atomic<bool> silenced_{false};  // its page was reloaded: no more events
     std::atomic<bool> closing_{false};  // close requested or closed: no new prompts, input dropped
     bool reaped_ = false;               // guarded by ManagerCore::mutex
 
@@ -892,6 +897,20 @@ int SessionManager::activeCount() const {
     for (const auto& [id, c] : impl_->conns)
         if (!c->closed()) ++n;
     return n;
+}
+
+int SessionManager::closeForPageReset() {
+    std::vector<std::shared_ptr<Connection>> live;
+    {
+        std::lock_guard lock(impl_->mutex);
+        for (const auto& [id, c] : impl_->conns)
+            if (!c->closed()) live.push_back(c);
+    }
+    for (auto& c : live) {
+        c->silence();
+        c->requestClose();  // also withdraws its prompts
+    }
+    return static_cast<int>(live.size());
 }
 
 void SessionManager::closeAll() {

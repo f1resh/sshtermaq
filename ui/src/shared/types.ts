@@ -1070,6 +1070,15 @@ export interface InstalledFont {
   monospace: boolean;
 }
 
+/** app:takeReloadInfo: set when this page replaced one that was reloaded (its renderer process died, or a reload). */
+export interface PageReloadInfo {
+  reloaded: boolean;
+  /** The old page's connections, closed by the host when this page started loading. */
+  closedConnections: number;
+  /** The old page's last workspace (a WorkspaceSnapshot), when it sent one. */
+  workspace?: unknown;
+}
+
 export interface AppInfo {
   name: string;
   /** x.y.z, set in CMakeLists.txt. */

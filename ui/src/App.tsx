@@ -24,7 +24,8 @@ import { confirmDialog, confirmWithOption, useUi } from '@/store/ui';
 import { tabTitle, useWorkspace } from '@/store/workspace';
 import { pickDefaultShell, useShells } from '@/store/shells';
 import { resolveLocalTarget, shellToOpen } from '@/components/quickconnect/local';
-import { restoreWorkspace, startWorkspaceAutosave } from '@/store/workspacePersist';
+import { restoreAtStart } from '@/store/restoreAtStart';
+import { startWorkspaceAutosave } from '@/store/workspacePersist';
 import { initConnEvents } from '@/terminal/connEvents';
 import { ThemeController } from '@/theme/ThemeController';
 import { UnlockHost } from '@/components/dialogs/credentials/MasterPassword';
@@ -107,10 +108,7 @@ function useHostWiring(ready: boolean) {
   // Workspace restore + autosave.
   useEffect(() => {
     if (!ready) return;
-    const settings = useSettings.getState().settings;
-    if (settings.behavior.restoreTabs && useWorkspace.getState().tabs.length === 0) {
-      void restoreWorkspace((id) => useSessions.getState().byId(id), settings.defaultSession, settings.behavior.restoreNames).catch(() => 0);
-    }
+    void restoreAtStart();
     return startWorkspaceAutosave(
       () => useSettings.getState().settings.behavior.restoreTabs,
       (id) => !!useSessions.getState().byId(id)

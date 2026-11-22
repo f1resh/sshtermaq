@@ -23,6 +23,8 @@
 #include <libssh/server.h>  // ssh_send_keepalive
 
 #include <algorithm>
+#include <atomic>
+#include <cctype>
 #include <chrono>
 #include <deque>
 #include <list>
@@ -52,6 +54,8 @@ const std::vector<SpecialCommandDef> kSpecials = {
     {"signal:USR1", "SIGUSR1 (User 1)", "Signals"},
     {"signal:USR2", "SIGUSR2 (User 2)", "Signals"},
 };
+/** Listed only while the tunnels are held after a changed host key. */
+constexpr char kOpenTunnels[] = "tunnels:open";
 
 std::string forwardBind(const PortForward& f, bool acceptAll) {
     if (!f.bindAddress.empty()) return f.bindAddress;
@@ -75,6 +79,8 @@ class SshTransportImpl;
 /** Bytes a relay holds per direction; beyond it the source waits (the socket is not read, the SSH window stays shut). */
 constexpr size_t kRelayBuffer = 512 * 1024;
 
+std::atomic<int> g_socksTimeoutMs{0};  // tests (setSocksHandshakeTimeoutForTests); 0 = kSocksHandshakeTimeoutMs
+
 /** One forwarded TCP connection: channel <-> socket. */
 struct Relay {
     SshTransportImpl* owner = nullptr;
@@ -85,6 +91,7 @@ struct Relay {
     std::string toChan;   // socket data waiting for channel window
     std::string socksBuf; // dynamic forwarding negotiation buffer
     enum class State { Socks, Open } state = State::Open;
+    std::chrono::steady_clock::time_point socksDeadline{};  // State::Socks: the request must be complete by then
     bool sockEof = false;
     bool chanEof = false;
     bool chanClosed = false;  // the server closed the channel: deliver what is left, then end
@@ -137,7 +144,12 @@ public:
         wake_.signal();
     }
 
-    std::vector<SpecialCommandDef> specials() const override { return kSpecials; }
+    std::vector<SpecialCommandDef> specials() const override {
+        std::vector<SpecialCommandDef> out = kSpecials;
+        // After a changed host key the session's tunnels wait for the user (see hostKeyChanged_).
+        if (tunnelsHeld_) out.insert(out.begin(), {kOpenTunnels, "Open this session's tunnels", "Host key changed"});
+        return out;
+    }
 
     void sendSpecial(const std::string& id) override {
         {
@@ -212,7 +224,10 @@ private:
     }
     void finish(CloseInfo info);
     bool openMainChannel(std::string& error);
-    void setupForwards();
+    /** The session's enabled tunnels: remote ones asked of the server, local / dynamic listeners opened. */
+    void openTunnels();
+    /** The special command kOpenTunnels (I/O thread). */
+    void openHeldTunnels();
     void processQueues();
     void flushMainWrites();
     void pumpRelays();
@@ -231,6 +246,10 @@ private:
     std::atomic<bool> closing_{false};
     std::atomic<bool> cancel_{false};
     std::atomic<bool> connected_{false};
+    /** The server's host key changed and the user accepted it: no agent or X11 forwarding on this connection (also
+     *  refused when the server asks), and the tunnels are held until the user opens them (kOpenTunnels). */
+    bool hostKeyChanged_ = false;
+    std::atomic<bool> tunnelsHeld_{false};
 
     std::mutex sockMutex_;
     sys::SocketHandle sock_ = sys::kInvalidSocket;  // for cancellation only (owned by libssh after connect)
@@ -355,6 +374,7 @@ void SshTransportImpl::run() {
         return;
     }
     session_ = std::move(cr.session);
+    hostKeyChanged_ = cr.hostKeyChanged;
     if (ctx_.listener) ctx_.listener->onServerInfo(connector.serverInfo());
 
     ssh_callbacks_init(&sessionCb_);
@@ -369,7 +389,30 @@ void SshTransportImpl::run() {
         finish({closing_.load(), false, 0, "", closing_ ? "Connection closed by user" : error, !closing_});
         return;
     }
-    setupForwards();
+    if (cfg.ssh.noShell) log(LogLevel::Info, "Started a session with no shell (port forwarding only)");
+    const bool anyTunnel = std::any_of(cfg.ssh.tunnels.begin(), cfg.ssh.tunnels.end(),
+                                       [](const PortForward& f) { return f.enabled && f.sourcePort >= 0; });
+    if (!hostKeyChanged_) {
+        openTunnels();
+    } else {
+        std::string off;
+        if (cfg.ssh.auth.agentForwarding) off += "agent forwarding, ";
+        if (cfg.ssh.x11.enabled) off += "X11 forwarding, ";
+        if (anyTunnel) off += "tunnels, ";
+        if (!off.empty()) {
+            off.resize(off.size() - 2);
+            off[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(off[0])));
+            std::string text = "\r\nThe server's host key changed. " + off + " stay off on this connection.";
+            if (anyTunnel) text += " To open the tunnels, choose Special Commands > Open this session's tunnels.";
+            if (cfg.ssh.auth.agentForwarding || cfg.ssh.x11.enabled)
+                text += " Forwarding is back at the next connection once the new key is saved.";
+            if (ctx_.listener) ctx_.listener->onLocalOutput(text + "\r\n");
+        }
+        if (anyTunnel) {
+            tunnelsHeld_ = true;
+            log(LogLevel::Warn, "Tunnels are held: the host key changed (Special Commands > Open this session's tunnels)");
+        }
+    }
 
     event_ = ssh_event_new();
     ssh_event_add_session(event_, session_.get());
@@ -440,13 +483,15 @@ bool SshTransportImpl::openMainChannel(std::string& error) {
     mainCb_.channel_exit_signal_function = cbExitSignal;
     ssh_set_channel_callbacks(main_, &mainCb_);
 
-    if (cfg.ssh.auth.agentForwarding) {
+    if (hostKeyChanged_ && cfg.ssh.auth.agentForwarding) log(LogLevel::Warn, "Agent forwarding is off: the host key changed");
+    if (hostKeyChanged_ && cfg.ssh.x11.enabled) log(LogLevel::Warn, "X11 forwarding is off: the host key changed");
+    if (cfg.ssh.auth.agentForwarding && !hostKeyChanged_) {
         if (ssh_channel_request_auth_agent(main_) == SSH_OK)
             log(LogLevel::Info, "Agent forwarding enabled");
         else
             log(LogLevel::Warn, "Server refused agent forwarding");
     }
-    if (cfg.ssh.x11.enabled) {
+    if (cfg.ssh.x11.enabled && !hostKeyChanged_) {
         std::string err;
         std::string display = trim(cfg.ssh.x11.display);
         if (display.empty()) display = sys::getEnv("DISPLAY").value_or(":0");  // automatic
@@ -504,9 +549,21 @@ bool SshTransportImpl::openMainChannel(std::string& error) {
     return true;
 }
 
-void SshTransportImpl::setupForwards() {
+void SshTransportImpl::openHeldTunnels() {
+    if (!tunnelsHeld_.exchange(false)) return;
+    log(LogLevel::Info, "Opening the tunnels (asked for after the host key changed)");
+    ssh_set_blocking(session_.get(), 1);
+    openTunnels();
+    ssh_set_blocking(session_.get(), 0);
+    for (auto& l : listeners_) {
+        if (l->inEvent) continue;
+        ssh_event_add_fd(event_, static_cast<socket_t>(l->sock), sys::kPollIn, cbListener, l.get());
+        l->inEvent = true;
+    }
+}
+
+void SshTransportImpl::openTunnels() {
     const SessionConfig& cfg = ctx_.session;
-    if (cfg.ssh.noShell) log(LogLevel::Info, "Started a session with no shell (port forwarding only)");
     for (const auto& f : cfg.ssh.tunnels) {
         if (!f.enabled || f.sourcePort < 0) continue;
         if (f.type == ForwardType::Remote) {
@@ -561,6 +618,10 @@ void SshTransportImpl::processQueues() {
     ssh_session s = session_.get();
     if (resize && main_ && ctx_.session.ssh.allocatePty) ssh_channel_change_pty_size(main_, std::max(1, sz.cols), std::max(1, sz.rows));
     for (const auto& id : specials) {
+        if (id == kOpenTunnels) {
+            openHeldTunnels();
+            continue;
+        }
         if (!main_ && id != "ignore") continue;
         if (id == "break") {
             ssh_channel_request_send_break(main_, 500);
@@ -677,6 +738,8 @@ void SshTransportImpl::onListener(Listener* l) {
     if (l->fwd.type == ForwardType::Dynamic) {
         Relay* r = addRelay(nullptr, c, "SOCKS connection from " + from);
         r->state = Relay::State::Socks;
+        const int ms = g_socksTimeoutMs.load();
+        r->socksDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms > 0 ? ms : kSocksHandshakeTimeoutMs);
         registerRelaySocket(r);
         return;
     }
@@ -806,6 +869,11 @@ void SshTransportImpl::onRelaySocket(Relay* r) {
         if (r->state == Relay::State::Socks) {
             r->socksBuf.append(buf, static_cast<size_t>(n));
             handleSocks(r);
+            // Still no complete request (what follows a complete one is data, handed on by handleSocks).
+            if (!r->dead && r->state == Relay::State::Socks && r->socksBuf.size() > kSocksMaxHandshake) {
+                log(LogLevel::Warn, r->desc + " closed: its SOCKS request is longer than " + std::to_string(kSocksMaxHandshake) + " bytes");
+                r->dead = true;
+            }
         } else {
             r->toChan.append(buf, static_cast<size_t>(n));
         }
@@ -858,8 +926,13 @@ void SshTransportImpl::onRelayClose(Relay* r) {
 }
 
 void SshTransportImpl::pumpRelays() {
+    const auto now = std::chrono::steady_clock::now();
     for (auto it = relays_.begin(); it != relays_.end();) {
         Relay* r = it->get();
+        if (!r->dead && r->state == Relay::State::Socks && now >= r->socksDeadline) {
+            log(LogLevel::Warn, r->desc + " closed: no complete SOCKS request in time");
+            r->dead = true;
+        }
         // Channel data libssh still holds, as far as there is room (it is in libssh's buffer: no packets are read).
         if (!r->dead && r->channel && r->chanPending > 0 && r->toSock.size() < kRelayBuffer) {
             std::string buf(std::min(r->chanPending, kRelayBuffer - r->toSock.size()), '\0');
@@ -988,7 +1061,8 @@ std::string SshTransportImpl::x11RealCookie() {
 }
 
 ssh_channel SshTransportImpl::openAgent() {
-    if (!ctx_.session.ssh.auth.agentForwarding) return nullptr;
+    // Never asked for after a changed host key: a server that opens one anyway gets nothing.
+    if (!ctx_.session.ssh.auth.agentForwarding || hostKeyChanged_) return nullptr;
     ssh_channel ch = ssh_channel_new(session_.get());
     if (!ch) return nullptr;
     Relay* r = addRelay(ch, sys::kInvalidSocket, "Agent forwarding channel");
@@ -1052,5 +1126,7 @@ std::unique_ptr<Transport> makeSshTransport(TransportContext ctx) {
     if (ctx.session.host.empty()) throw std::invalid_argument("No host name specified");
     return std::make_unique<SshTransportImpl>(std::move(ctx));
 }
+
+void setSocksHandshakeTimeoutForTests(int ms) { g_socksTimeoutMs = ms; }
 
 }  // namespace st

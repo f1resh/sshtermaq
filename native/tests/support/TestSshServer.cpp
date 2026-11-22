@@ -823,6 +823,13 @@ bool TestSshServer::waitForEvent(const std::string& prefix, int timeoutMs) const
     });
 }
 
+bool TestSshServer::hasEvent(const std::string& prefix) const {
+    std::lock_guard lock(impl_->evMutex);
+    for (const auto& e : impl_->events)
+        if (startsWith(e, prefix)) return true;
+    return false;
+}
+
 void TestSshServer::stop() {
     Impl& s = *impl_;
     if (s.stopping.exchange(true)) return;

@@ -10,10 +10,10 @@ them depends on another.
 
 | Part | What it tests | Framework | Where | Automated | Size | Run time |
 |---|---|---|---|---|---|---|
-| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, S3 (signing, sign-in, the HTTP client, the S3 file system), proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 13 suites, 313 test cases | about 2 minutes |
-| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system; finished transfers' times; the font picker's lists; Credentials (which sessions and logins use a key or a login, how a login signs in, names; unlocking and retrying when they are locked; what an import did); host names (the cases shared with the native check); the question before a link connects; imported sessions that run a command on this computer; the WebGL renderer's font check (DOM for fonts a canvas can't draw) | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 25 files, 238 tests | under 2 seconds |
-| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart, the SFTP panel, the two-pane file manager, import and export, the key generator, settings, Credentials (keys, logins, remembered passphrases, the master password, export and import), links asking before they connect, S3 sessions | Playwright Test | `ui/e2e/*.spec.ts` | yes | 21 files, 99 tests, each run twice (198, of which 2 macOS-only skip in the Windows layout) | about 6 minutes |
-| **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs`, `ui/scripts/checks/` | no, run by hand | `checks/local-terminal.mjs`, `checks/terminal-fonts.mjs` | seconds |
+| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, S3 (signing, sign-in, the HTTP client, the S3 file system), proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 13 suites, 330 test cases | about 2 minutes |
+| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system; finished transfers' times; the font picker's lists; Credentials (which sessions and logins use a key or a login, how a login signs in, names; unlocking and retrying when they are locked; what an import did); the tabs a reloaded window gets back; host names (the cases shared with the native check); the question before a link connects; imported sessions that run a command on this computer; the WebGL renderer's font check (DOM for fonts a canvas can't draw) | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 26 files, 247 tests | under 2 seconds |
+| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart, the SFTP panel, the two-pane file manager, import and export, the key generator, settings, Credentials (keys, logins, remembered passphrases, the master password, export and import), links asking before they connect, S3 sessions, a changed host key | Playwright Test | `ui/e2e/*.spec.ts` | yes | 22 files, 102 tests, each run twice (204, of which 2 macOS-only skip in the Windows layout) | about 6 minutes |
+| **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs`, `ui/scripts/checks/` | no, run by hand | `checks/local-terminal.mjs`, `checks/terminal-fonts.mjs`, `checks/reload-and-second-start.mjs` | seconds |
 
 The browser tests cover the main screens and dialogs, not yet the host key and password prompts or the color scheme
 editor. There is no CI: tests run when a developer runs them, or through the build scripts:
@@ -209,15 +209,15 @@ TEST_CASE("ssh: password authentication, shell echo and exit code", "[ssh]") {
 
 ## 5. What is tested
 
-### Native tests (313 test cases)
+### Native tests (330 test cases)
 
-268 run by default; `putty: real registry smoke test` and `codepage (Windows): regenerate the tables` are hidden. The **Needs** column shows the tool without which a
+326 run by default; `putty: real registry smoke test`, `codepage (Windows): regenerate the tables` and the two `proxy exit child` helpers are hidden. The **Needs** column shows the tool without which a
 test case is skipped. On macOS every suite runs; its `platform_ui` has the macOS local files tests (listed after
 Windows' below). The other counts are Windows'.
 
-#### app — `st_test_app.exe` (34)
+#### app — `st_test_app.exe` (38)
 
-Command line (PuTTY-compatible options, `ssh://` / `sftp://` URLs, `-load`, `--version`), data-folder resolution (portable / installed / override), the version and build id (`BuildInfo`), the embedded web UI (index parsing, request paths, content types, loading the embedded test files), and the host window policy (`HostController` against a fake window: allowed pages and origins, window events (menu bar commands and title bar insets too), confirming close, saved placement). *Kind: unit.* Source: [native/tests/app](../native/tests/app).
+Command line (PuTTY-compatible options, `ssh://` / `sftp://` URLs, `-load`, `--version`), data-folder resolution (portable / installed / override), the version and build id (`BuildInfo`), the embedded web UI (index parsing, request paths, content types, loading the embedded test files), and the host window policy (`HostController` against a fake window: allowed pages and origins, window events (menu bar commands and title bar insets too), confirming close, saved placement), and what a reloaded page gets (`PageHandover`). *Kind: unit.* Source: [native/tests/app](../native/tests/app).
 
 | Test case | Tags | Needs (skipped without) | File |
 |---|---|---|---|
@@ -251,12 +251,15 @@ Command line (PuTTY-compatible options, `ssh://` / `sftp://` URLs, `-load`, `--v
 | host: the bundled UI is served under its origin | `[app][host]` |  | `host_tests.cpp` |
 | host: menu bar commands and the title bar insets reach the page | `[app][host]` |  | `host_tests.cpp` |
 | host: the controller releases the window's hooks | `[app][host]` |  | `host_tests.cpp` |
+| page handover: the first page closes nothing and is not a reload | `[app][reload]` |  | `page_handover_tests.cpp` |
+| page handover: a reload closes the old page's connections and hands over its workspace once | `[app][reload]` | closed once per reload; the newest workspace; asked again: no longer a reload | `page_handover_tests.cpp` |
+| page handover: a reload before the page sent a workspace hands over none | `[app][reload]` |  | `page_handover_tests.cpp` |
 | ui: index lines map paths to resource ids | `[app][ui]` |  | `ui_tests.cpp` |
 | ui: request URIs become paths relative to the UI root | `[app][ui]` |  | `ui_tests.cpp` |
 | ui: content types by extension | `[app][ui]` |  | `ui_tests.cpp` |
 | ui: files embedded as resources are found by path | `[app][ui]` |  | `ui_tests.cpp` |
 
-#### core — `st_test_core.exe` (8)
+#### core — `st_test_core.exe` (9)
 
 Strings (UTF-8 paths, UTF-8 validation, UTF-16LE), crypto helpers, session defaults and lenient JSON parsing, bridge message routing, app log rotation. *Kind: unit.* Source: [native/tests/core](../native/tests/core).
 
@@ -267,6 +270,7 @@ Strings (UTF-8 paths, UTF-8 validation, UTF-16LE), crypto helpers, session defau
 | crypto: base64 + fingerprint | — |  | `core_tests.cpp` |
 | types: session defaults and lenient parsing | — |  | `core_tests.cpp` |
 | bridge: invoke, send and events | — |  | `core_tests.cpp` |
+| bridge: a reloaded page gets no answers or events meant for the page before it | — | the new page's ids start at 1 again: the old page's late answer (also a dropped one) and its queued events never reach it; within one page as before | `core_tests.cpp` |
 | log: a full log is kept as `<name>.1.log` and a new one starts | — |  | `core_tests.cpp` |
 | threads: with every worker blocked a new job still runs; the extra workers end when idle | `[core][threads]` |  | `threading_tests.cpp` |
 | threads: the debouncer runs the newest call once things are quiet | `[core][threads]` |  | `threading_tests.cpp` |
@@ -365,13 +369,15 @@ The platform layer's tier 0 (`native/src/platform/sys`): what every OS's impleme
 
 On macOS, `pty_posix_tests.cpp` has the POSIX counterparts (8): output and exit code, command-line splitting, input / resize / environment / a non-ASCII folder, default signal handling for the program, kill hangs it up, readable errors, the shell list starting with the login shell, and a terminal whose descriptors are numbered above 1024.
 
-#### platform_ui — `st_test_platform_ui.exe` (9)
+#### platform_ui — `st_test_platform_ui.exe` (11)
 
-Windows command-line splitting for second instances, local files (`platform/ui/LocalFs`: paths, listings, file operations, long paths, "This PC", folder watcher, the local:* bridge handlers), and drag & drop of local files (`platform/ui/DragDrop`): the shell data object. *Kind: integration (Windows shell, file system).* Source: [native/tests/platform/win/ui](../native/tests/platform/win/ui).
+Second instances (command-line splitting; the window of the same data folder, and the key in the forwarded message), local files (`platform/ui/LocalFs`: paths, listings, file operations, long paths, "This PC", folder watcher, the local:* bridge handlers), and drag & drop of local files (`platform/ui/DragDrop`): the shell data object. *Kind: integration (Windows shell, file system).* Source: [native/tests/platform/win/ui](../native/tests/platform/win/ui).
 
 | Test case | Tags | Needs (skipped without) | File |
 |---|---|---|---|
 | cli: splitCommandLine follows Windows quoting rules | `[app][cli]` |  | `cli_win_tests.cpp` |
+| instance: a second start finds the window of its own data folder only | `[app][instance]` | two marked windows and an unmarked one (1.1.0): each key finds its own; the unmarked one only as the fallback; unmarked windows are not found | `instance_win_tests.cpp` |
+| instance: the forwarded command line carries its data folder's key | `[app][instance]` | another key, the old format without a key, an empty or partial key are refused | `instance_win_tests.cpp` |
 | dnd: shell data object for local files | `[dnd]` |  | `dnd_win_tests.cpp` |
 | localfs: path normalisation | `[localfs]` |  | `localfs_win_tests.cpp` |
 | localfs: list, stat and file operations | `[localfs]` |  | `localfs_win_tests.cpp` |
@@ -454,7 +460,7 @@ It covers:
 | s3fs: small uploads are one PUT with the file's time, big ones multipart in parallel; a failed multipart upload continues on the next try (only the missing parts); a cancelled one is aborted and the old object kept; memory stays within the parts in flight (96 MB down and up, 8 MB parts, 4 at once); presigned links | `s3fs_tests.cpp` |
 | s3 session: the secret is asked, saved, and the file manager works through the transfer engine; a wrong secret is asked again; a session bucket is checked; an untrusted certificate is asked about first (only an unsigned probe went out), then remembered in Known hosts, or rejected; sign-in errors are readable | `s3service_tests.cpp` |
 
-#### session — `st_test_session.exe` (29)
+#### session — `st_test_session.exe` (30)
 
 Charset decoding/encoding, session logging, the session manager (ordering, batching, prompts, event log, bridge handlers). *Kind: unit (fake transports).* Source: [native/tests/session](../native/tests/session).
 
@@ -488,9 +494,10 @@ Charset decoding/encoding, session logging, the session manager (ordering, batch
 | session manager: validation and duplicate connection ids | `[manager]` |  | `sessionmanager_tests.cpp` |
 | session manager: start failure and saved session touch | `[manager]` |  | `sessionmanager_tests.cpp` |
 | session manager: closeAll tears everything down | `[manager]` |  | `sessionmanager_tests.cpp` |
+| session manager: a page reset closes every connection and sends nothing more about them | `[manager][reload]` | a waiting prompt is withdrawn without `prompts:onCancel`; late output, log lines and the close reach no page; the new page's connections as before | `sessionmanager_tests.cpp` |
 | session manager: bridge handlers | `[manager]` |  | `sessionmanager_tests.cpp` |
 
-#### sftp — `st_test_sftp.exe` (29)
+#### sftp — `st_test_sftp.exe` (31)
 
 File manager backend over SFTP and SCP: browsing, transfers, conflicts, resume, move, find, synchronize, edit. *Kind: integration (test SSH server).* Source: [native/tests/sftp](../native/tests/sftp).
 
@@ -499,6 +506,8 @@ File manager backend over SFTP and SCP: browsing, transfers, conflicts, resume, 
 | edit: saved changes are uploaded | `[edit]` |  | `edit_tests.cpp` |
 | edit: missing files fail cleanly | `[edit]` |  | `edit_tests.cpp` |
 | edit: the temp folder for opened files falls back when the system's is missing | `[edit]` |  | `edit_tests.cpp` |
+| edit: a page reset ends the file sessions without a word to the new page | `[edit][reload]` | a watched edit is no longer uploaded, a download waiting at a conflict goes nowhere, no "cancelled" or "closed" event; the old file session is gone | `edit_tests.cpp` |
+| edit: closing a file session the normal way still reports its edits and transfers | `[edit][reload]` | the edit's "closed", the transfer's "cancelled" | `edit_tests.cpp` |
 | find: glob matching | `[find]` |  | `findsync_tests.cpp` |
 | find: recursive search over SFTP | `[find]` |  | `findsync_tests.cpp` |
 | sync: filters and comparison rules | `[sync]` |  | `findsync_tests.cpp` |
@@ -526,9 +535,9 @@ File manager backend over SFTP and SCP: browsing, transfers, conflicts, resume, 
 | transfer: upload as / download as give the one item a new name | `[sftp][transfer]` | also moved under a new name (the source goes), and a move skipped at a conflict keeps the source | `transfer_tests.cpp` |
 | transfer: start and end times of a transfer | `[sftp][transfer]` | a finished one has both, in order; one cancelled while it ran too | `transfer_tests.cpp` |
 
-#### ssh — `st_test_ssh.exe` (30)
+#### ssh — `st_test_ssh.exe` (36)
 
-SSH transport end to end: every login method, host-key prompts, PTY, signals, port forwarding (including backpressure: bounded buffers, no busy loop, nothing lost when the far end closes), X11 forwarding (display names, Xauthority files, the cookie gate, and a forwarded X client reaching a local X server with the real cookie), jump hosts, Pageant and `ssh-agent`. *Kind: integration (test SSH server).* Source: [native/tests/ssh](../native/tests/ssh).
+SSH transport end to end: every login method, host-key prompts (a changed key holds back the saved password, forwarding and tunnels), PTY, signals, port forwarding (including backpressure: bounded buffers, no busy loop, nothing lost when the far end closes), X11 forwarding (display names, Xauthority files, the cookie gate, and a forwarded X client reaching a local X server with the real cookie), jump hosts, Pageant and `ssh-agent`. *Kind: integration (test SSH server).* Source: [native/tests/ssh](../native/tests/ssh).
 
 | Test case | Tags | Needs (skipped without) | File |
 |---|---|---|---|
@@ -559,6 +568,12 @@ SSH transport end to end: every login method, host-key prompts, PTY, signals, po
 | ssh: authentication through Pageant (agent) | `[ssh][agent]` | a Pageant instance is already running, not touching it, PuTTY `pageant.exe` | `ssh_tests.cpp` |
 | ssh: authentication through ssh-agent (SSH_AUTH_SOCK) | `[ssh][agent]` | not Windows; OpenSSH `ssh-agent`, `ssh-add` | `ssh_tests.cpp` |
 | ssh: X11 forwarding checks the cookie and hands the X server the real one | `[ssh][x11]` |  | `ssh_tests.cpp` |
+| ssh: after a changed host key: no saved password, no forwarding, tunnels when asked for | `[ssh][hostkey]` | accepted once and saved: the password is asked (saying why), no agent / X11 request, no tunnel until "tunnels:open", then local and remote tunnels work; the next connection: asked again (once) or as before (saved) | `ssh_tests.cpp` |
+| ssh: after a changed host key the one-time password is not sent either (keyboard-interactive) | `[ssh][hostkey]` |  | `ssh_tests.cpp` |
+| ssh: a known or new host key keeps the saved password, forwarding and tunnels | `[ssh][hostkey]` |  | `ssh_tests.cpp` |
+| ssh: a SOCKS request longer than the limit is closed | `[ssh][forward][socks]` | an endless SOCKS4 user id: a short one waits, past 1 KiB closed, nothing forwarded | `ssh_tests.cpp` |
+| ssh: a SOCKS client that does not finish its request in time is closed | `[ssh][forward][socks]` | silent, and greeted only (a short test deadline) | `ssh_tests.cpp` |
+| ssh: SOCKS4, SOCKS4a and SOCKS5 requests still work, also slow ones and data right behind them | `[ssh][forward][socks]` | byte by byte; 3 KiB of data right behind the request is forwarded | `ssh_tests.cpp` |
 | x11: display names | `[ssh][x11]` |  | `x11_tests.cpp` |
 | x11: the real cookie from an Xauthority file | `[ssh][x11]` |  | `x11_tests.cpp` |
 | x11: the cookie gate | `[ssh][x11]` |  | `x11_tests.cpp` |
@@ -615,7 +630,7 @@ Self-tests of the fake servers, validated with independent clients (`plink`, `ps
 | TestSshServer serves SFTP to psftp | `[support][plink]` | PuTTY `psftp` | `support_tests.cpp` |
 | TestSshServer honours local forwarding from plink | `[support][plink]` | PuTTY `plink` | `support_tests.cpp` |
 
-### UI unit tests (229 tests)
+### UI unit tests (247 tests)
 
 #### `actions.test.ts` (7)
 
@@ -734,6 +749,10 @@ Saving and restoring open tabs, including file manager tabs, snapshots from olde
 | workspace persistence with local terminals | brings local terminals back waiting to be started, other sessions as before |
 | workspace persistence of names | "Keep tab and pane names" off: the tabs come back with automatic titles, the snapshot keeps the names |
 | workspace persistence of names | tab and pane names come back after a restart |
+
+#### `restoreAtStart.test.ts` (9)
+
+The tabs at start: after a reload the old page's tabs come back from the host's memory (also with "Restore tabs on startup" off, not the saved ones) and connect again, with a notice; a normal start as before; the workspace goes to the host's memory on every structural change, to disk only when restoring is on. Source: [ui/src/store/restoreAtStart.test.ts](../ui/src/store/restoreAtStart.test.ts).
 
 #### `skipMacFiles.test.ts` (3), `reportedFolder.test.ts` (2), `quickconnect/local.test.ts` (3)
 
@@ -892,7 +911,7 @@ What they check:
 
 Source: [ui/src/components/dialogs/session/s3Model.test.ts](../ui/src/components/dialogs/session/s3Model.test.ts).
 
-### UI browser tests (99 tests, each run as `windows` and `macos`; the two marked macOS only skip in the Windows layout)
+### UI browser tests (102 tests, each run as `windows` and `macos`; the two marked macOS only skip in the Windows layout)
 
 Source: [ui/e2e](../ui/e2e).
 
@@ -997,6 +1016,9 @@ Source: [ui/e2e](../ui/e2e).
 | `s3.spec.ts` | Copy link… makes a time-limited link (1 hour preselected, "Other…" up to 7 days, copied; folders have none) |
 | `s3.spec.ts` | the session editor has the S3 type with service presets (MinIO: plain HTTP warned), bucket checks and sign-in methods |
 | `s3.spec.ts` | Quick connect opens s3://bucket/folder |
+| `hostkey.spec.ts` | a changed host key, connect once: the question says what stays off; the terminal says so; Special Commands > Open this session's tunnels, then it is gone from the list |
+| `hostkey.spec.ts` | a changed host key, cancel ends the connection |
+| `hostkey.spec.ts` | a known host connects as before: no question, no held tunnels |
 
 ## 6. How to run the tests
 
@@ -1204,6 +1226,19 @@ Expected results:
 |---|---|---|---|---|
 | macOS | WebGL | DOM | DOM, with the note in Settings | DOM |
 | Windows | WebGL | DOM | WebGL | DOM |
+
+### `checks/reload-and-second-start.mjs`: a reloaded window and two data folders (Windows)
+
+```
+node scripts/app.mjs --steps scripts/checks/reload-and-second-start.mjs --out ../artifacts/check.png
+```
+
+Needs the Debug build's `st_testserver.exe` (`build-debug.ps1 -All`). It starts the test server and quick-connects to
+it. Then it reloads the page and checks, from the server's own count, that the old connection closed and exactly one
+new one opened, that the tab came back (with "Restore tabs on startup" off, the default) and that the toast says so.
+Then it opens a second instance with another data folder (its window on top) and starts `SSHTermaq.exe --data-dir
+<the first one's> test@127.0.0.1:<port>`: the tab must open in the first window, not in the top one. Prints `PASS` /
+`FAIL` lines.
 
 ### `shot.mjs`: the UI in a browser, with the mock backend
 

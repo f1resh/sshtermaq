@@ -40,4 +40,11 @@ public:
 
 std::unique_ptr<Transport> makeSshTransport(TransportContext ctx);
 
+/** A dynamic tunnel's (SOCKS) client must send a complete request within this time and in at most this many bytes,
+ *  or it is closed: the longest valid request is under 600 bytes. */
+inline constexpr size_t kSocksMaxHandshake = 1024;
+inline constexpr int kSocksHandshakeTimeoutMs = 30000;
+/** Tests: a shorter handshake time (0 = the default). Applies to connections accepted afterwards. */
+void setSocksHandshakeTimeoutForTests(int ms);
+
 }  // namespace st

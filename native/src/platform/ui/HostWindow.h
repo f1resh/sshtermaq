@@ -26,6 +26,9 @@ struct HostWindowOptions {
     /** Debug builds, macOS: a Unix socket over which ui/scripts/app.mjs drives the window (Windows: WebView2's
      *  remote debugging, which needs nothing from the host). */
     std::string automationSocket;
+    /** The data folder's single-instance key (App.cpp). Windows: marks the window, so a second start with the same
+     *  data folder finds it, and only command lines for this key are taken. */
+    std::string instanceKey;
 };
 
 /** A file of the bundled UI, as served to the web view. `body` must stay valid while the window exists. */

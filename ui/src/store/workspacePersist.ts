@@ -176,13 +176,14 @@ export function deserializeWorkspace(
   return { tabs, panes, activeTabId };
 }
 
-/** Restores the saved workspace (appending to anything already open). Returns the number of tabs restored. */
+/** Restores the saved workspace, or `from` (appending to anything already open). Returns the number of tabs restored. */
 export async function restoreWorkspace(
   lookup: (id: string) => SessionConfig | undefined,
   template?: SessionConfig,
-  keepNames = true
+  keepNames = true,
+  from?: WorkspaceSnapshot
 ): Promise<number> {
-  const snap = await api.app.getState<WorkspaceSnapshot>(WORKSPACE_STATE_KEY);
+  const snap = from ?? (await api.app.getState<WorkspaceSnapshot>(WORKSPACE_STATE_KEY));
   if (!snap) return 0;
   const restored = deserializeWorkspace(snap, lookup, template, keepNames);
   if (!restored.tabs.length) return 0;
@@ -195,18 +196,23 @@ export async function restoreWorkspace(
 }
 
 /**
- * Saves the workspace (debounced) whenever its structure changes while `enabled()` is true.
- * Returns an unsubscribe function.
+ * Saves the workspace (debounced) whenever its structure changes while `enabled()` is true. Every change also goes to
+ * the host's memory (app:setReloadSnapshot), so a page that replaces this one after a reload gets the tabs back even
+ * when restoring tabs is off. Returns an unsubscribe function.
  */
 export function startWorkspaceAutosave(enabled: () => boolean, isSaved: (id: string) => boolean, delayMs = 600): () => void {
   let last = '';
+  let lastHandover = '';
   let timer: ReturnType<typeof setTimeout> | undefined;
   const flush = () => {
     timer = undefined;
-    if (!enabled()) return;
     const snap = serializeWorkspace(useWorkspace.getState(), isSaved);
     const json = JSON.stringify(snap);
-    if (json === last) return;
+    if (json !== lastHandover) {
+      lastHandover = json;
+      api.app.setReloadSnapshot(snap);
+    }
+    if (!enabled() || json === last) return;
     last = json;
     api.app.setState(WORKSPACE_STATE_KEY, snap).catch((e) => console.warn('workspace save failed', e));
   };

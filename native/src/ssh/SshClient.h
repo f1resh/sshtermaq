@@ -23,6 +23,9 @@ struct ConnectResult {
      * can reach the socket's number any more (cancellation, the proxy command registry): the OS reuses numbers.
      */
     SessionPtr failed;
+    /** The server's host key differed from the stored one and the user accepted it (once or saved). The saved
+     *  password was not sent; the transport keeps agent / X11 forwarding and tunnels off (OpenSSH does the same). */
+    bool hostKeyChanged = false;
 };
 
 class SshConnector {
@@ -80,6 +83,8 @@ private:
     /** ssh.auth.loginId names a login that no longer exists: told once, then the session's own settings. */
     bool loginMissing_ = false;
     bool bannerShown_ = false;
+    /** A changed host key was accepted: no saved / one-time password is sent, the prompts say why. */
+    bool hostKeyChanged_ = false;
     std::unique_ptr<AgentRelay> agentRelay_;
 };
 

@@ -263,6 +263,9 @@ export function registerCoreMocks(ctx: MockContext): void {
   }));
   ctx.handle('app:systemPrefersDark', () => globalThis.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true);
   ctx.handle('app:takeOpenRequests', () => []);
+  // The browser has no host that outlives the page: a reload starts fresh.
+  ctx.on('app:setReloadSnapshot', () => undefined);
+  ctx.handle('app:takeReloadInfo', () => ({ reloaded: false, closedConnections: 0 }));
   ctx.handle('app:getState', (key: string) => mockDb.state[key]);
   ctx.handle('app:setState', (key: string, value: unknown) => {
     mockDb.state[key] = value;

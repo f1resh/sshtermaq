@@ -43,6 +43,10 @@ public:
     std::shared_ptr<Transport> transport(const std::string& connId) const;
     /** Number of connections that are connecting/connected. */
     int activeCount() const;
+    /** The page was reloaded (the old page's tabs are gone, the new one opens its own connections): closes every
+     *  connection without waiting, and sends nothing more about them to the UI (no data, status, event log or
+     *  prompt). Waiting prompts are withdrawn. Returns how many were open. */
+    int closeForPageReset();
     /** Close everything (app shutdown); blocks until transports are torn down (bounded wait). */
     void closeAll();
 

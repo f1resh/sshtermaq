@@ -17,6 +17,10 @@ namespace st::ssh {
 
 namespace {
 
+/** Shown with the password question after a changed host key was accepted. */
+constexpr char kChangedKeyNote[] =
+    "This server's host key changed, so the saved password was not sent. Type it only if you trust the server.";
+
 std::string keyBlobOf(ssh_key key) {
     char* b64 = nullptr;
     if (ssh_pki_export_pubkey_base64(key, &b64) != SSH_OK || !b64) return {};
@@ -155,6 +159,7 @@ ConnectResult SshConnector::run(sys::SocketHandle sock, int logLevel) {
     }
     if (establish(session.get(), sock, logLevel, r)) r.session = std::move(session);
     else r.failed = std::move(session);
+    r.hostKeyChanged = hostKeyChanged_;
     return r;
 }
 
@@ -261,6 +266,11 @@ bool SshConnector::verifyHostKey(ssh_session s, std::string& error, bool& cancel
     } else {
         log(LogLevel::Info, "Host key accepted for this session only");
     }
+    if (check == HostKeyCheck::Mismatch) {
+        hostKeyChanged_ = true;
+        log(LogLevel::Warn, "The host key changed: no saved password is sent on this connection, and agent forwarding, "
+                            "X11 forwarding and tunnels are off");
+    }
     return true;
 }
 
@@ -310,6 +320,7 @@ bool SshConnector::ensureUnlocked(bool& cancelled) {
 std::optional<std::string> SshConnector::takeStoredPassword(bool& cancelled) {
     if (storedPasswordUsed_) return std::nullopt;
     storedPasswordUsed_ = true;
+    if (hostKeyChanged_) return std::nullopt;  // the server may not be the real one: the user types it
     if (!ctx_.oneTimePassword.empty() && cfg_.id == ctx_.session.id) return ctx_.oneTimePassword;
     if (!loginId_.empty()) {
         if (loginPassword_ != "stored" || !ctx_.vault) return std::nullopt;
@@ -553,8 +564,10 @@ int SshConnector::tryKbdInt(ssh_session s, bool& cancelled) {
         }
         if (n > 0 && answers.empty()) {
             if (!ctx_.prompter) return SSH_AUTH_DENIED;
+            std::string shown = instruction;
+            if (hostKeyChanged_ && rounds == 1) shown = std::string(kChangedKeyNote) + (instruction.empty() ? "" : "\n" + instruction);
             PromptResponse pr = ctx_.prompter->prompt(prompts::kbdint(name.empty() ? "Keyboard-interactive authentication" : name,
-                                                                      name, instruction, items, canRemember()));
+                                                                      name, shown, items, canRemember()));
             if (pr.cancelled) {
                 cancelled = true;
                 return SSH_AUTH_DENIED;
@@ -585,8 +598,9 @@ int SshConnector::tryPassword(ssh_session s, bool& cancelled) {
         bool remember = false;
         if (!pw) {
             if (!ctx_.prompter) return SSH_AUTH_DENIED;
-            PromptResponse pr = ctx_.prompter->prompt(
-                prompts::password(user_ + "@" + cfg_.host + "'s password", attempt > 0 ? "Access denied" : "", user_, canRemember()));
+            PromptResponse pr = ctx_.prompter->prompt(prompts::password(
+                user_ + "@" + cfg_.host + "'s password", attempt > 0 ? "Access denied" : hostKeyChanged_ ? kChangedKeyNote : "", user_,
+                canRemember()));
             if (pr.cancelled || pr.values.empty()) {
                 cancelled = true;
                 return SSH_AUTH_DENIED;

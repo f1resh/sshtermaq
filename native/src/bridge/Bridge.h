@@ -6,6 +6,9 @@
 //  - onWebMessage() is called on the UI thread (by the host window).
 //  - handle()/handleSync() handlers run on the UI thread; handleAsync() handlers run on ThreadPool::shared().
 //  - Responder::resolve/reject and emit() are thread-safe; they marshal to the UI thread via the Dispatcher.
+//
+// Pages: a reloaded page starts its request ids at 1 again. newPage() (called when a page starts loading) makes every
+// answer to an earlier page's request, and every message still queued for it, a no-op, so none reaches the new page.
 #include "core/Json.h"
 #include "core/Threading.h"
 
@@ -60,14 +63,18 @@ public:
     /** Entry point for messages from the WebView (UI thread). `filePaths` = paths of additional File objects (UTF-8). */
     void onWebMessage(const std::string& json, const std::vector<std::string>& filePaths = {});
 
+    /** A new page is loading (UI thread): answers and messages for the previous page are dropped from now on. */
+    void newPage();
+
     Dispatcher& dispatcher() { return dispatcher_; }
 
     /** True once at least one handler exists for channel (diagnostics/tests). */
     bool hasHandler(const std::string& channel) const;
 
 private:
-    void post(std::string text);  // thread-safe, delivers to sink on UI thread
-    void respond(int64_t id, bool ok, const Json& payload);
+    /** Thread-safe; delivers to the sink on the UI thread, unless another page has started loading by then. */
+    void post(std::string text, uint64_t page);
+    void respond(int64_t id, bool ok, const Json& payload, uint64_t page);
     /** App log line for a rejected invoke: once per channel and message per minute, so expected failures (a missing
      *  folder, a refused connection) cannot flood the log. Thread-safe. */
     void logFailure(const std::string& channel, const std::string& message);
@@ -78,6 +85,7 @@ private:
     std::unordered_map<std::string, InvokeHandler> invokes_;
     std::unordered_map<std::string, SendHandler> sends_;
     std::shared_ptr<std::atomic<bool>> alive_;
+    std::atomic<uint64_t> page_{0};
     std::mutex failuresMutex_;
     std::unordered_map<std::string, std::chrono::steady_clock::time_point> failures_;  // logFailure's last line per key
 };

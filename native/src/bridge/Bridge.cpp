@@ -8,6 +8,7 @@ struct Bridge::Responder::State {
     Bridge* bridge = nullptr;
     std::shared_ptr<std::atomic<bool>> alive;
     int64_t id = 0;
+    uint64_t page = 0;  // the page that asked
     std::string channel;
     std::atomic<bool> done{false};
 
@@ -15,21 +16,21 @@ struct Bridge::Responder::State {
         // Dropped without a reply -> reject so the UI promise never hangs.
         if (!done.exchange(true) && alive && alive->load() && bridge) {
             bridge->logFailure(channel, "dropped without a response");
-            bridge->respond(id, false, Json("Request was dropped without a response"));
+            bridge->respond(id, false, Json("Request was dropped without a response"), page);
         }
     }
 };
 
 void Bridge::Responder::resolve(Json result) const {
     if (!state_ || state_->done.exchange(true)) return;
-    if (state_->alive && state_->alive->load()) state_->bridge->respond(state_->id, true, result);
+    if (state_->alive && state_->alive->load()) state_->bridge->respond(state_->id, true, result, state_->page);
 }
 
 void Bridge::Responder::reject(const std::string& message) const {
     if (!state_ || state_->done.exchange(true)) return;
     if (state_->alive && state_->alive->load()) {
         state_->bridge->logFailure(state_->channel, message);
-        state_->bridge->respond(state_->id, false, Json(message));
+        state_->bridge->respond(state_->id, false, Json(message), state_->page);
     }
 }
 
@@ -99,25 +100,28 @@ bool Bridge::hasHandler(const std::string& channel) const {
     return invokes_.count(channel) || sends_.count(channel);
 }
 
+void Bridge::newPage() { ++page_; }
+
 void Bridge::emit(const std::string& channel, Json args) {
     if (!args.is_array()) args = Json::array({std::move(args)});
     Json msg = {{"t", "evt"}, {"ch", channel}, {"args", std::move(args)}};
-    post(msg.dump(-1, ' ', false, Json::error_handler_t::replace));
+    post(msg.dump(-1, ' ', false, Json::error_handler_t::replace), page_.load());
 }
 
-void Bridge::respond(int64_t id, bool ok, const Json& payload) {
+void Bridge::respond(int64_t id, bool ok, const Json& payload, uint64_t page) {
+    if (page != page_.load()) return;  // asked by a page that has been reloaded since
     Json msg = {{"t", "res"}, {"id", id}, {"ok", ok}};
     if (ok)
         msg["result"] = payload;
     else
         msg["error"] = payload.is_string() ? payload : Json(payload.dump());
-    post(msg.dump(-1, ' ', false, Json::error_handler_t::replace));
+    post(msg.dump(-1, ' ', false, Json::error_handler_t::replace), page);
 }
 
-void Bridge::post(std::string text) {
+void Bridge::post(std::string text, uint64_t page) {
     auto alive = alive_;
-    auto deliver = [this, alive, text = std::move(text)] {
-        if (!alive->load()) return;
+    auto deliver = [this, alive, page, text = std::move(text)] {
+        if (!alive->load() || page != page_.load()) return;
         std::function<void(const std::string&)> sink;
         {
             std::lock_guard lock(mutex_);
@@ -150,6 +154,7 @@ void Bridge::onWebMessage(const std::string& json, const std::vector<std::string
         reply.state_->bridge = this;
         reply.state_->alive = alive_;
         reply.state_->id = msg.value("id", int64_t{0});
+        reply.state_->page = page_.load();
         reply.state_->channel = ch;
 
         if (ch == "files:pathsForFiles") {

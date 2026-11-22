@@ -1202,3 +1202,359 @@ TEST_CASE("ssh: X11 forwarding checks the cookie and hands the X server the real
         CHECK(h.listener.allLogs().find("no cookie for the local display") != std::string::npos);
     }
 }
+
+/* ---- a changed host key: no saved password, no forwarding, tunnels only when asked for (review 8) ---- */
+
+namespace {
+
+/** Stores another key than the server's for it, so the next connection sees a changed host key. */
+void storeOtherHostKey(Harness& h, const TestSshServer& server) {
+    KnownHost fake;
+    fake.host = "127.0.0.1";
+    fake.port = server.port();
+    fake.keyType = "ssh-ed25519";
+    ssh_key other = nullptr;
+    ssh_pki_generate_key(SSH_KEYTYPE_ED25519, nullptr, &other);
+    char* b64 = nullptr;
+    ssh_pki_export_pubkey_base64(other, &b64);
+    fake.key = b64;
+    ssh_string_free_char(b64);
+    ssh_key_free(other);
+    h.knownHosts.add(fake);
+}
+
+/** A session with agent and X11 forwarding, a local tunnel to `echoPort` (its port in `localPort`) and a remote one. */
+SessionConfig forwardingSession(const TestSshServer& server, int echoPort, int& localPort) {
+    SessionConfig c = Harness::session(server);
+    c.ssh.auth.agentForwarding = true;
+    c.ssh.x11.enabled = true;
+    c.ssh.x11.display = "localhost:42";
+    { auto l = net::listenLoopback(0, localPort); }
+    PortForward local;
+    local.id = "l1";
+    local.type = ForwardType::Local;
+    local.sourcePort = localPort;
+    local.destHost = "127.0.0.1";
+    local.destPort = echoPort;
+    PortForward remote;
+    remote.id = "r1";
+    remote.type = ForwardType::Remote;
+    remote.sourcePort = 0;
+    remote.destHost = "127.0.0.1";
+    remote.destPort = echoPort;
+    c.ssh.tunnels = {local, remote};
+    return c;
+}
+
+/** Sends `text` through the local tunnel at `port`; true when it comes back. */
+bool echoesThrough(int port, const std::string& text) {
+    auto sock = net::connectTcp("127.0.0.1", port, 2000);
+    if (!sock || !net::sendAll(sock.get(), text)) return false;
+    std::string got;
+    for (int i = 0; i < 50 && got.size() < text.size(); ++i) {
+        if (!net::waitReadable(sock.get(), 100)) continue;
+        char buf[256];
+        const int n = recv(sock.get(), buf, sizeof buf, 0);
+        if (n <= 0) break;
+        got.append(buf, static_cast<size_t>(n));
+    }
+    return got == text;
+}
+
+bool hasSpecial(Transport& t, const std::string& id) {
+    for (const auto& s : t.specials())
+        if (s.id == id) return true;
+    return false;
+}
+
+}  // namespace
+
+TEST_CASE("ssh: after a changed host key: no saved password, no forwarding, tunnels when asked for", "[ssh][hostkey]") {
+    for (const std::string choice : {"accept-once", "accept-save"}) {
+        CAPTURE(choice);
+        TestEchoServer echo;
+        TestSshServerOptions o;
+        o.allowKbdInt = false;
+        TestSshServer server(o);
+        Harness h;
+        storeOtherHostKey(h, server);
+        int localPort = 0;
+        SessionConfig c = forwardingSession(server, echo.port(), localPort);
+        h.credentials.set(Credentials::passwordKey(c.id), "secret");
+        std::mutex pm;
+        Json passwordPrompt;
+        h.prompter.handler = [&](const Json& p) {
+            const std::string kind = p.value("kind", "");
+            if (kind == "hostkey") return accept(choice);
+            if (kind == "password") {
+                std::lock_guard l(pm);
+                passwordPrompt = p;
+                return answer({"secret"});
+            }
+            return PromptResponse{};
+        };
+        auto prompted = [&] {
+            std::lock_guard l(pm);
+            return passwordPrompt;
+        };
+        h.start(c);
+        const bool connected = h.listener.waitConnected();
+        INFO(h.listener.allLogs());
+        REQUIRE(connected);
+        REQUIRE(h.listener.waitData("$ "));
+
+        // The saved password was not sent: the user typed it, told why.
+        REQUIRE_FALSE(prompted().is_null());
+        CHECK(prompted().dump().find("host key changed") != std::string::npos);
+        CHECK(server.hasEvent("auth:password:ok"));
+        // Neither agent nor X11 forwarding was asked for; no tunnel is open.
+        CHECK_FALSE(server.hasEvent("auth-agent-req"));
+        CHECK_FALSE(server.hasEvent("x11-req"));
+        CHECK_FALSE(server.hasEvent("tcpip-forward"));
+        CHECK_FALSE(net::connectTcp("127.0.0.1", localPort, 1000));
+        {
+            std::lock_guard l(h.listener.m);
+            CHECK(h.listener.local.find("host key changed") != std::string::npos);
+            CHECK(h.listener.local.find("Open this session's tunnels") != std::string::npos);
+        }
+
+        // The user opens the tunnels: both work, and the command is gone from the list. Forwarding stays off.
+        REQUIRE(hasSpecial(*h.transport, "tunnels:open"));
+        h.transport->sendSpecial("tunnels:open");
+        REQUIRE(server.waitForEvent("tcpip-forward:", 3000));
+        bool open = false;
+        for (int i = 0; i < 20 && !open; ++i) {
+            open = echoesThrough(localPort, "after asking");
+            if (!open) std::this_thread::sleep_for(100ms);
+        }
+        CHECK(open);
+        CHECK_FALSE(hasSpecial(*h.transport, "tunnels:open"));
+        CHECK_FALSE(server.hasEvent("auth-agent-req"));
+        CHECK_FALSE(server.hasEvent("x11-req"));
+        h.transport.reset();
+
+        // The next connection: accepted once, it asks again and is held back again; saved, everything is as before.
+        {
+            std::lock_guard l(pm);
+            passwordPrompt = Json();
+        }
+        FakeListener second;
+        TransportContext ctx = h.context(c);
+        ctx.listener = &second;
+        auto t = makeSshTransport(ctx);
+        t->start();
+        REQUIRE(second.waitConnected());
+        REQUIRE(second.waitData("$ "));
+        if (choice == "accept-save") {
+            CHECK(prompted().is_null());  // the saved password
+            CHECK(server.waitForEvent("auth-agent-req", 2000));
+            CHECK_FALSE(hasSpecial(*t, "tunnels:open"));
+        } else {
+            CHECK_FALSE(prompted().is_null());
+            CHECK(hasSpecial(*t, "tunnels:open"));
+        }
+    }
+}
+
+TEST_CASE("ssh: after a changed host key the one-time password is not sent either (keyboard-interactive)", "[ssh][hostkey]") {
+    TestSshServer server;  // keyboard-interactive and password
+    Harness h;
+    storeOtherHostKey(h, server);
+    std::mutex pm;
+    Json kbdPrompt;
+    h.prompter.handler = [&](const Json& p) {
+        const std::string kind = p.value("kind", "");
+        if (kind == "hostkey") return accept("accept-once");
+        if (kind == "kbdint") {
+            std::lock_guard l(pm);
+            kbdPrompt = p;
+            return answer(std::vector<std::string>(p["prompts"].size(), "secret"));
+        }
+        if (kind == "password") return answer({"secret"});
+        return PromptResponse{};
+    };
+    TransportContext ctx = h.context(Harness::session(server));
+    ctx.oneTimePassword = "secret";  // -pw
+    h.transport = makeSshTransport(ctx);
+    h.transport->start();
+    REQUIRE(h.listener.waitConnected());
+    std::lock_guard l(pm);
+    REQUIRE_FALSE(kbdPrompt.is_null());
+    CHECK(kbdPrompt.dump().find("host key changed") != std::string::npos);
+}
+
+TEST_CASE("ssh: a known or new host key keeps the saved password, forwarding and tunnels", "[ssh][hostkey]") {
+    TestEchoServer echo;
+    TestSshServerOptions o;
+    o.allowKbdInt = false;
+    TestSshServer server(o);
+    Harness h;  // no stored key: a new one, accepted and saved
+    int localPort = 0;
+    SessionConfig c = forwardingSession(server, echo.port(), localPort);
+    h.credentials.set(Credentials::passwordKey(c.id), "secret");
+    for (int run = 0; run < 2; ++run) {  // a new key, then the same key again
+        CAPTURE(run);
+        FakeListener l;
+        TransportContext ctx = h.context(c);
+        ctx.listener = &l;
+        auto t = makeSshTransport(ctx);
+        t->start();
+        REQUIRE(l.waitConnected());
+        REQUIRE(l.waitData("$ "));
+        auto kinds = h.prompter.kinds();
+        CHECK(std::count(kinds.begin(), kinds.end(), "password") == 0);
+        CHECK(server.waitForEvent("auth-agent-req", 2000));
+        CHECK(server.waitForEvent("x11-req", 2000));
+        CHECK(server.waitForEvent("tcpip-forward:", 2000));
+        CHECK(echoesThrough(localPort, "as before"));
+        CHECK_FALSE(hasSpecial(*t, "tunnels:open"));
+        std::lock_guard lk(l.m);
+        CHECK(l.local.find("host key changed") == std::string::npos);
+    }
+}
+
+/* ---- dynamic tunnels: the SOCKS handshake is limited in size and time (review 9) ---- */
+
+namespace {
+
+struct SocksFixture {
+    TestEchoServer echo;
+    TestSshServer server;
+    Harness h;
+    int port = 0;
+
+    SocksFixture() {
+        SessionConfig c = Harness::session(server);
+        { auto l = net::listenLoopback(0, port); }
+        PortForward f;
+        f.id = "d1";
+        f.type = ForwardType::Dynamic;
+        f.sourcePort = port;
+        c.ssh.tunnels = {f};
+        c.ssh.noShell = true;
+        h.start(c);
+        REQUIRE(h.listener.waitConnected());
+        std::this_thread::sleep_for(200ms);
+    }
+
+    std::string echoPortBytes() const {
+        return {static_cast<char>(echo.port() >> 8), static_cast<char>(echo.port() & 0xff)};
+    }
+};
+
+/** Reads up to `n` bytes (fewer when the connection ends or nothing more comes within `timeoutMs`). */
+std::string readSome(net::Handle s, size_t n, int timeoutMs = 3000) {
+    std::string got;
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    while (got.size() < n && std::chrono::steady_clock::now() < until) {
+        if (!net::waitReadable(s, 50)) continue;
+        char buf[4096];
+        const int r = recv(s, buf, static_cast<int>(std::min<size_t>(sizeof buf, n - got.size())), 0);
+        if (r <= 0) break;
+        got.append(buf, static_cast<size_t>(r));
+    }
+    return got;
+}
+
+/** True when the far side closed the connection within `timeoutMs`. */
+bool closedByPeer(net::Handle s, int timeoutMs) {
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    while (std::chrono::steady_clock::now() < until) {
+        if (!net::waitReadable(s, 50)) continue;
+        char buf[256];
+        if (recv(s, buf, sizeof buf, 0) <= 0) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+TEST_CASE("ssh: a SOCKS request longer than the limit is closed", "[ssh][forward][socks]") {
+    SocksFixture f;
+    auto sock = net::connectTcp("127.0.0.1", f.port, 3000);
+    REQUIRE(sock);
+    // SOCKS4 with a user id that never ends: before the fix it only ever grew.
+    std::string req("\x04\x01", 2);
+    req += f.echoPortBytes();
+    req += std::string("\x7f\x00\x00\x01", 4);
+    REQUIRE(net::sendAll(sock.get(), req + "user"));
+    CHECK_FALSE(closedByPeer(sock.get(), 300));  // a short, still incomplete request waits
+    (void)net::sendAll(sock.get(), std::string(kSocksMaxHandshake, 'u'));
+    CHECK(closedByPeer(sock.get(), 3000));
+    CHECK(f.h.listener.allLogs().find("longer than 1024 bytes") != std::string::npos);
+    CHECK_FALSE(f.server.hasEvent("direct-tcpip"));
+}
+
+TEST_CASE("ssh: a SOCKS client that does not finish its request in time is closed", "[ssh][forward][socks]") {
+    setSocksHandshakeTimeoutForTests(800);
+    struct Reset {
+        ~Reset() { setSocksHandshakeTimeoutForTests(0); }
+    } reset;
+    SocksFixture f;
+    auto silent = net::connectTcp("127.0.0.1", f.port, 3000);   // sends nothing
+    auto greeted = net::connectTcp("127.0.0.1", f.port, 3000);  // only the greeting
+    REQUIRE(silent);
+    REQUIRE(greeted);
+    REQUIRE(net::sendAll(greeted.get(), std::string("\x05\x01\x00", 3)));
+    REQUIRE(readSome(greeted.get(), 2) == std::string("\x05\x00", 2));
+    const auto t0 = std::chrono::steady_clock::now();
+    CHECK(closedByPeer(silent.get(), 5000));
+    CHECK(closedByPeer(greeted.get(), 5000));
+    CHECK(std::chrono::steady_clock::now() - t0 < 4s);
+    CHECK(f.h.listener.allLogs().find("no complete SOCKS request in time") != std::string::npos);
+}
+
+TEST_CASE("ssh: SOCKS4, SOCKS4a and SOCKS5 requests still work, also slow ones and data right behind them", "[ssh][forward][socks]") {
+    SocksFixture f;
+    const std::string port = f.echoPortBytes();
+
+    SECTION("SOCKS4") {
+        auto s = net::connectTcp("127.0.0.1", f.port, 3000);
+        REQUIRE(s);
+        REQUIRE(net::sendAll(s.get(), std::string("\x04\x01", 2) + port + std::string("\x7f\x00\x00\x01", 4) + "user" + '\0'));
+        const std::string reply = readSome(s.get(), 8);
+        REQUIRE(reply.size() == 8);
+        CHECK(reply[1] == 0x5a);
+        REQUIRE(net::sendAll(s.get(), "four"));
+        CHECK(readSome(s.get(), 4) == "four");
+    }
+    SECTION("SOCKS4a (a host name)") {
+        auto s = net::connectTcp("127.0.0.1", f.port, 3000);
+        REQUIRE(s);
+        REQUIRE(net::sendAll(s.get(), std::string("\x04\x01", 2) + port + std::string("\x00\x00\x00\x01", 4) + '\0' +
+                                          "127.0.0.1" + '\0'));
+        const std::string reply = readSome(s.get(), 8);
+        REQUIRE(reply.size() == 8);
+        CHECK(reply[1] == 0x5a);
+        REQUIRE(net::sendAll(s.get(), "four-a"));
+        CHECK(readSome(s.get(), 6) == "four-a");
+    }
+    SECTION("SOCKS5, the request sent byte by byte") {
+        auto s = net::connectTcp("127.0.0.1", f.port, 3000);
+        REQUIRE(s);
+        REQUIRE(net::sendAll(s.get(), std::string("\x05\x01\x00", 3)));
+        REQUIRE(readSome(s.get(), 2) == std::string("\x05\x00", 2));
+        const std::string req = std::string("\x05\x01\x00\x03\x09", 5) + "127.0.0.1" + port;
+        for (char ch : req) {
+            REQUIRE(net::sendAll(s.get(), std::string(1, ch)));
+            std::this_thread::sleep_for(20ms);
+        }
+        const std::string reply = readSome(s.get(), 10);
+        REQUIRE(reply.size() == 10);
+        CHECK(reply[1] == 0);
+        REQUIRE(net::sendAll(s.get(), "five"));
+        CHECK(readSome(s.get(), 4) == "five");
+    }
+    SECTION("SOCKS5 with data right behind the request (more than the handshake limit)") {
+        auto s = net::connectTcp("127.0.0.1", f.port, 3000);
+        REQUIRE(s);
+        REQUIRE(net::sendAll(s.get(), std::string("\x05\x01\x00", 3)));
+        REQUIRE(readSome(s.get(), 2) == std::string("\x05\x00", 2));
+        const std::string data(3 * kSocksMaxHandshake, 'd');
+        REQUIRE(net::sendAll(s.get(), std::string("\x05\x01\x00\x01\x7f\x00\x00\x01", 8) + port + data));
+        const std::string reply = readSome(s.get(), 10);
+        REQUIRE(reply.size() == 10);
+        CHECK(reply[1] == 0);
+        CHECK(readSome(s.get(), data.size()) == data);
+    }
+}

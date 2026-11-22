@@ -24,6 +24,7 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace st {
 
@@ -130,8 +131,12 @@ struct FindJob {
 struct SftpCore : std::enable_shared_from_this<SftpCore> {
     SftpCore(SessionManager& s, Bridge& b) : sessions(s), bridge(b) {
         EngineHooks hooks;
-        hooks.progress = [this](const TransferProgress& p) { bridge.emit("sftp:onProgress", Json::array({Json(p)})); };
-        hooks.conflict = [this](const TransferConflict& c) { bridge.emit("sftp:onConflict", Json::array({Json(c)})); };
+        hooks.progress = [this](const TransferProgress& p) {
+            if (!silenced(p.sftpId)) bridge.emit("sftp:onProgress", Json::array({Json(p)}));
+        };
+        hooks.conflict = [this](const TransferConflict& c) {
+            if (!silenced(c.sftpId)) bridge.emit("sftp:onConflict", Json::array({Json(c)}));
+        };
         engine = std::make_unique<TransferEngine>(std::move(hooks));
     }
 
@@ -143,6 +148,15 @@ struct SftpCore : std::enable_shared_from_this<SftpCore> {
     std::mutex m;
     std::unordered_map<std::string, SessionPtr> byId;
     std::unordered_map<std::string, std::shared_ptr<FindJob>> finds;  // guarded by m
+
+    // File sessions of a page that was reloaded: nothing more is sent about them (their own mutex: the engine's
+    // hooks check it from its threads).
+    std::mutex silencedMutex;
+    std::unordered_set<std::string> silencedIds;
+    bool silenced(const std::string& sftpId) {
+        std::lock_guard lk(silencedMutex);
+        return silencedIds.count(sftpId) > 0;
+    }
 
     // Edits and their watcher thread.
     std::mutex em;
@@ -263,6 +277,33 @@ struct SftpCore : std::enable_shared_from_this<SftpCore> {
         auto self = shared_from_this();
         auto guard = std::make_shared<JobGuard>(*this);
         ThreadPool::shared().submit([self, s, guard] { self->teardown(s); });
+    }
+
+    /** The page was reloaded: closes every file session without waiting (their transfers are cancelled, finds and
+     *  edits stopped) and sends nothing more about them. Returns how many were open. */
+    int closeForPageReset() {
+        std::vector<SessionPtr> all;
+        {
+            std::lock_guard lk(m);
+            for (auto& [id, s] : byId) all.push_back(s);
+            byId.clear();
+            for (auto& [fid, job] : finds) job->cancel = true;
+        }
+        {
+            std::lock_guard lk(silencedMutex);
+            for (auto& s : all) silencedIds.insert(s->id);
+        }
+        {
+            std::lock_guard lk(em);
+            for (auto it = edits.begin(); it != edits.end();)
+                it = silenced(it->second->sessionId) ? edits.erase(it) : std::next(it);
+        }
+        auto self = shared_from_this();
+        for (auto& s : all) {
+            auto guard = std::make_shared<JobGuard>(*this);
+            ThreadPool::shared().submit([self, s, guard] { self->teardown(s); });
+        }
+        return static_cast<int>(all.size());
     }
 
     void closeAll() {
@@ -432,7 +473,7 @@ struct SftpCore : std::enable_shared_from_this<SftpCore> {
             auto emit = [&](FindEvent& ev) {
                 ev.findId = findId;
                 ev.sftpId = s->id;
-                self->bridge.emit("sftp:onFind", Json::array({Json(ev)}));
+                if (!self->silenced(s->id)) self->bridge.emit("sftp:onFind", Json::array({Json(ev)}));
             };
             try {
                 runFind(*s->fs, req, job->cancel, emit);
@@ -506,7 +547,7 @@ struct SftpCore : std::enable_shared_from_this<SftpCore> {
         ev.localPath = sys::fromPath(e.localPath);
         ev.state = state;
         ev.error = error;
-        bridge.emit("sftp:onEdit", Json::array({Json(ev)}));
+        if (!silenced(e.sessionId)) bridge.emit("sftp:onEdit", Json::array({Json(ev)}));
     }
 
     void edit(const std::string& id, const std::string& remotePath, const EditOptions& opts, Bridge::Responder reply) {
@@ -810,6 +851,8 @@ void SftpService::registerHandlers() {
 void SftpService::setEditLauncherForTests(std::function<void(const std::string&, const std::string&)> launcher) {
     impl_->core->editLauncher = std::move(launcher);
 }
+
+int SftpService::closeForPageReset() { return impl_ && !impl_->closed ? impl_->core->closeForPageReset() : 0; }
 
 void SftpService::closeAll() {
     if (!impl_ || impl_->closed) return;

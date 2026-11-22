@@ -4,6 +4,7 @@
 #include "app/Cli.h"
 #include "app/CoreHandlers.h"
 #include "app/HostController.h"
+#include "app/PageHandover.h"
 #include "app/Paths.h"
 #include "bridge/Bridge.h"
 #include "core/Crypto.h"
@@ -93,7 +94,8 @@ int runApp(const std::vector<std::string>& args) {
                  sys::archName() + ", data dir: " + sys::fromPath(paths.dataDir) + (paths.portable ? " (portable)" : ""));
     for (const auto& e : host.errors) applog::warn("Command line: " + e);
 
-    ui::InstanceLock instance(instanceKey(paths.dataDir));
+    const std::string key = instanceKey(paths.dataDir);
+    ui::InstanceLock instance(key);
     if (!instance.primary()) {
         if (ui::InstanceLock::forwardToPrimary()) return 0;
         applog::warn("Another instance holds the lock but could not be reached; starting anyway");
@@ -112,6 +114,7 @@ int runApp(const std::vector<std::string>& args) {
         wopts.devUrl = host.devUrl;
         wopts.devtools = host.devtools;
         wopts.automationSocket = host.automation;
+        wopts.instanceKey = key;
         std::unique_ptr<ui::HostWindow> mainWindow = ui::createHostWindow(wopts);
         ui::HostWindow& window = *mainWindow;
         Bridge bridge(window);
@@ -130,12 +133,21 @@ int runApp(const std::vector<std::string>& args) {
         registerCoreHandlers({bridge, store, controller, paths, openRequests});
 
         controller.activeSessionCount = [&sessions] { return sessions.activeCount(); };
-        controller.onPageLoading = [&openRequests, &window, logged = false]() mutable {
+
+        PageHandover handover(bridge, [&sessions, &sftp, &localFs] {
+            const int conns = sessions.closeForPageReset();
+            const int files = sftp.closeForPageReset();
+            localFs.closeAll();
+            applog::warn("The page was reloaded: closed " + std::to_string(conns) + " connection(s) and " +
+                         std::to_string(files) + " file session(s) of the previous page");
+            return conns;
+        });
+        handover.registerHandlers();
+        controller.onPageLoading = [&openRequests, &window, &handover]() {
+            handover.pageLoading();
             openRequests.reset();
-            if (!logged) {  // known once the web view exists; rendering problems often depend on it
-                logged = true;
-                applog::info("Web view: " + window.browserVersion());
-            }
+            // Known once the web view exists; rendering problems often depend on it.
+            if (handover.loads() == 1) applog::info("Web view: " + window.browserVersion());
         };
         window.onSecondInstance = [&store, &openRequests](const std::vector<std::string>& a,
                                                           const std::filesystem::path& cwd) {

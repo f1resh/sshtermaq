@@ -22,6 +22,9 @@ public:
 
     /** Registers sftp:* bridge handlers (uses platform/ui/Dialogs for omitted local paths). */
     void registerHandlers();
+    /** The page was reloaded: closes every file session without waiting and sends nothing more about them (see
+     *  SessionManager::closeForPageReset). Returns how many were open. */
+    int closeForPageReset();
     /** Closes all SFTP sessions (app shutdown). */
     void closeAll();
 

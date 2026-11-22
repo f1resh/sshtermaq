@@ -8,8 +8,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <random>
+#include <thread>
+#include <vector>
 
 using namespace st;
 
@@ -102,6 +105,72 @@ TEST_CASE("bridge: invoke, send and events") {
     REQUIRE(e["t"] == "evt");
     REQUIRE(e["ch"] == "t:evt");
     REQUIRE(e["args"][1] == 1);
+}
+
+namespace {
+/** Messages posted from other threads wait until pump(), like the UI thread's queue. */
+struct QueueDispatcher : Dispatcher {
+    std::vector<std::function<void()>> queued;
+    std::thread::id ui = std::this_thread::get_id();
+    void post(std::function<void()> fn) override { queued.push_back(std::move(fn)); }
+    bool isUiThread() const override { return std::this_thread::get_id() == ui; }
+    void pump() {
+        auto q = std::move(queued);
+        queued.clear();
+        for (auto& f : q) f();
+    }
+};
+}  // namespace
+
+TEST_CASE("bridge: a reloaded page gets no answers or events meant for the page before it") {
+    QueueDispatcher d;
+    Bridge b(d);
+    std::vector<Json> out;
+    b.setSink([&](const std::string& s) { out.push_back(Json::parse(s)); });
+    std::vector<Bridge::Responder> held;
+    b.handle("t:later", [&](const Json&, Bridge::Responder r) { held.push_back(r); });
+    b.handleSync("t:now", [](const Json& a) { return Json(argInt(a, 0)); });
+
+    // The first page asks (id 1) and is answered later.
+    b.onWebMessage(R"({"t":"req","id":1,"ch":"t:later","args":[]})");
+    REQUIRE(held.size() == 1);
+    // An event emitted from another thread is still queued when the page reloads.
+    std::thread([&] { b.emit("t:old", Json::array({1})); }).join();
+    REQUIRE(d.queued.size() == 1);
+
+    b.newPage();
+    d.pump();
+    CHECK(out.empty());  // the queued event was for the old page
+
+    // The new page starts its ids at 1 again: its own answer arrives, the old page's late one does not.
+    b.onWebMessage(R"({"t":"req","id":1,"ch":"t:now","args":[42]})");
+    REQUIRE(out.size() == 1);
+    CHECK(out[0]["id"] == 1);
+    CHECK(out[0]["result"] == 42);
+    held[0].resolve(Json("stale"));
+    std::thread([&] { held[0].reject("also stale"); }).join();
+    d.pump();
+    CHECK(out.size() == 1);
+
+    // Old behaviour within one page: answers and events (also from other threads) arrive.
+    b.onWebMessage(R"({"t":"req","id":2,"ch":"t:later","args":[]})");
+    REQUIRE(held.size() == 2);
+    std::thread([&] {
+        held[1].resolve(Json("fresh"));
+        b.emit("t:new", Json::array({2}));
+    }).join();
+    d.pump();
+    REQUIRE(out.size() == 3);
+    CHECK(out[1]["id"] == 2);
+    CHECK(out[1]["result"] == "fresh");
+    CHECK(out[2]["ch"] == "t:new");
+
+    // A request the old page never got an answer to, dropped after the reload, says nothing to the new page.
+    b.onWebMessage(R"({"t":"req","id":3,"ch":"t:later","args":[]})");
+    b.newPage();
+    held.clear();  // the last copy goes: "dropped without a response", for the old page only
+    d.pump();
+    CHECK(out.size() == 3);
 }
 
 TEST_CASE("log: a full log is kept as <name>.1.log and a new one starts") {

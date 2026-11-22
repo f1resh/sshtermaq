@@ -121,6 +121,15 @@ into the page differs:
 | Windows (WebView2) | `chrome.webview.postMessage` | `PostWebMessageAsJson`, one message at a time |
 | macOS (WKWebView) | `webkit.messageHandlers.st.postMessage` | `callAsyncJavaScript` with the queued messages as one JSON array string (page: `JSON.parse`); at most ~1 MB per call and 4 calls in flight, the rest waits in the host |
 
+**A reloaded page.** When the page's renderer process dies, the host loads the page again (`HostWindowWin`'s
+`ProcessFailed`, `HostWindowMac`'s `webViewWebContentProcessDidTerminate`). The new page knows nothing of the old one's
+tabs, so `app/PageHandover` (from `HostController::onPageLoading`) closes the old page's connections and file sessions
+without a word to the new page (`SessionManager::closeForPageReset`, `SftpService::closeForPageReset`: no more data,
+status, prompts or progress for them), and `Bridge::newPage()` drops every answer and queued message meant for the old
+page (its request ids start at 1 again). The page keeps its workspace in the host's memory (`app:setReloadSnapshot`,
+never on disk); the new page asks `app:takeReloadInfo` once, reopens those tabs with new connections and says so.
+Taking over the live connections instead is planned for 1.3.0 ([notes/v1.3.0.md](notes/v1.3.0.md)).
+
 **macOS decision** (step B3 of the port, measured with [native/tools/hostprobe](../native/tools/hostprobe/README.md)):
 `callAsyncJavaScript` moves about 225 MB/s, 4× what xterm.js can render, passes the messages as data (never as
 script source) and its completions give backpressure. Rejected: `evaluateJavaScript` (as fast, but the messages
@@ -154,6 +163,15 @@ Transport::onData(bytes) ─▶ SessionLog ─▶ Decoder(charset) ─▶ batch 
 ```
 connId = `<paneId>#<generation>` (the UI restarts a pane by bumping the generation).
 
+**A changed host key.** When the user accepts a host key that differs from the stored one (once or saved), that one
+connection sends no saved, login or `-pw` password (the prompt says why), asks for no agent or X11 forwarding (and
+refuses an agent channel the server opens anyway), and holds its tunnels until the user picks Special Commands > Open
+this session's tunnels (`tunnels:open`, listed only then). `ConnectResult::hostKeyChanged` carries it from
+`SshConnector` to the transport; each jump host decides for itself. A new (unknown) key changes nothing.
+
+**Dynamic tunnels (SOCKS).** A client must send a complete SOCKS4/4a/5 request within 30 s and in at most 1 KiB
+(`kSocksHandshakeTimeoutMs`, `kSocksMaxHandshake` in `ssh/SshTransport.h`), or it is closed with an event-log line.
+
 ### Logs
 | Log | Where | What goes in |
 |---|---|---|
@@ -173,6 +191,7 @@ breaks existing installs. Change one only with a migration that reads the old va
 | Keychain item: service `SSHTermaq`, account `credentials-key` (macOS) | `native/src/platform/mac/sys/SecretMac.cpp` | the same: the key is not found, saved passwords are lost |
 | Secret names in `credentials.json`: `session:<id>:password`, `vault:key:<id>` (a stored key of Credentials), `vault:key:<id>:passphrase` (a key's remembered passphrase), `vault:login:<id>:password` (a login's stored password), `vault:master` (the master password record: Argon2id parameters, salt, check value); with a master password each Credentials secret is `mp1:` + base64(AES-256-GCM nonce, ciphertext, tag; the secret's name as associated data). The exported Credentials file (`*.sshtcred`): `{"format": "SSHTermaq credentials", "version": 1, "kdf": {argon2id m t p salt}, "cipher": "aes-256-gcm", "data"}`, its payload sealed with "SSHTermaq credentials v1" as associated data | `native/src/store/Credentials.h`, `native/src/store/Vault.h` | saved passwords, stored keys, remembered passphrases and logins' passwords are no longer found or no longer open; old exported files no longer import |
 | `enc:` prefix of encrypted proxy passwords | `native/src/store/Store.cpp` | stored proxy passwords are read as plain text |
+| Second start (Windows): the mutex `Local\SSHTermaq-<key>` (the key: SHA-256 of the data folder, `app/App.cpp`), the window class `SSHTermaqMainWindow`, its properties `SSHTermaq.Instance` and `SSHTermaq.Instance.<key>`, and the `WM_COPYDATA` id `STR2` with "key, cwd, command line" (`STRC` without the key: 1.1.0 and older, sent only to an unmarked window, refused by 1.2.0) | `native/src/platform/win/ui/AppWin.cpp`, `HostWindowWin.h` | a second start of another version no longer reaches the running window, or starts a second instance on the same data folder |
 | Data folder `SSHTermaq` (`%APPDATA%\SSHTermaq`, `~/Library/Application Support/SSHTermaq`), portable `portable.flag` / `data` next to the exe, `SSHTERMAQ_DATA_DIR` | `native/src/app/Paths.cpp` | sessions, settings and known hosts are not found; portable copies and scripts stop working |
 | Data file names `sessions.json`, `settings.json`, `state.json`, `known_hosts.json`, `credentials.json`, `vault.json` and their `version` fields | `native/src/store/Store.cpp` | the same; a format change needs a version bump and a reader for the old version |
 | JSON field names and enum values of `SessionConfig` / `AppSettings` | `ui/src/shared/types.ts`, `native/src/core/Types.h` | saved sessions and settings lose those values (they are stored as these names) |

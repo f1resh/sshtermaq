@@ -142,6 +142,7 @@ bool HostWindowWin::create() {
         applog::error("CreateWindowEx failed: " + sys::lastErrorMessage());
         return false;
     }
+    if (!options_.instanceKey.empty()) markInstanceWindow(hwnd_, options_.instanceKey);
     // Make DWM extend the frame (shadow + Win11 rounded corners) and recompute the client area.
     MARGINS m{0, 0, 1, 0};
     DwmExtendFrameIntoClientArea(hwnd_, &m);
@@ -239,19 +240,20 @@ LRESULT HostWindowWin::handleMessage(UINT msg, WPARAM wp, LPARAM lp) {
 
         case WM_COPYDATA: {
             auto* cds = reinterpret_cast<COPYDATASTRUCT*>(lp);
+            if (cds && cds->dwData == kCopyDataCommandLineOld) {
+                applog::warn("Ignored a command line from an older version's second start (it does not say its data folder)");
+                return FALSE;
+            }
             if (cds && cds->dwData == kCopyDataCommandLine && cds->lpData && cds->cbData >= sizeof(wchar_t)) {
-                std::wstring payload(static_cast<const wchar_t*>(cds->lpData), cds->cbData / sizeof(wchar_t));
-                while (!payload.empty() && payload.back() == L'\0') payload.pop_back();
-                // payload = cwd \0 command line
-                std::wstring cwd, cmd;
-                auto nul = payload.find(L'\0');
-                if (nul == std::wstring::npos) {
-                    cmd = payload;
-                } else {
-                    cwd = payload.substr(0, nul);
-                    cmd = payload.substr(nul + 1);
+                const auto fwd = readCommandLinePayload(
+                    std::wstring(static_cast<const wchar_t*>(cds->lpData), cds->cbData / sizeof(wchar_t)),
+                    options_.instanceKey);
+                if (!fwd) {  // for another data folder's instance: never run it here
+                    applog::warn("Ignored a command line forwarded for another data folder");
+                    return FALSE;
                 }
-                std::vector<std::string> args = splitCommandLine(cmd);
+                const std::wstring cwd = fwd->cwd;
+                std::vector<std::string> args = splitCommandLine(fwd->commandLine);
                 activate();
                 if (onSecondInstance) {
                     // Defer: don't run app logic inside SendMessage from another process.
@@ -271,6 +273,7 @@ LRESULT HostWindowWin::handleMessage(UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
 
         case WM_DESTROY:
+            if (!options_.instanceKey.empty()) unmarkInstanceWindow(hwnd_, options_.instanceKey);
             savePlacement(true);
             if (web_->controller) {
                 web_->controller->Close();

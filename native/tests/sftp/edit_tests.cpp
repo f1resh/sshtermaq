@@ -132,3 +132,68 @@ TEST_CASE("edit: the temp folder for opened files falls back when the system's i
     vars.clear();
     CHECK(sftpimpl::chooseTempFolder({}, env, {}).empty());
 }
+
+/* ---- a reloaded page: its file sessions end quietly (review 6) ---- */
+
+namespace {
+
+/** Events of the file manager's channels about one file session. */
+size_t sessionEvents(SftpFixture& f, const std::string& sftpId) {
+    size_t n = 0;
+    for (const char* ch : {"sftp:onProgress", "sftp:onConflict", "sftp:onEdit", "sftp:onFind"})
+        for (const auto& e : f.h.eventsOn(ch))
+            if (e["args"][0].value("sftpId", "") == sftpId) ++n;
+    return n;
+}
+
+/** An edit being watched and a download waiting at a conflict question, on `f`'s file session. */
+std::pair<std::string, fs::path> busySession(SftpFixture& f, std::mutex& lm, std::vector<std::string>& launched) {
+    const fs::path r = f.remoteRoot.path();
+    spit(r / "config.ini", "a=1\n");
+    spit(r / "report.txt", "remote");
+    spit(f.local.path() / "report.txt", "local");
+    f.sftp->setEditLauncherForTests([&](const std::string& path, const std::string&) {
+        std::lock_guard lk(lm);
+        launched.push_back(path);
+    });
+    const std::string editId = f.h.invoke("sftp:edit", Json::array({f.id, "/config.ini", Json::object()}));
+    REQUIRE(waitEditState(f, editId, "opened", 1));
+    f.download("/report.txt", f.local.path());
+    f.waitConflict();
+    std::lock_guard lk(lm);
+    return {editId, sys::toPath(launched.at(0))};
+}
+
+}  // namespace
+
+TEST_CASE("edit: a page reset ends the file sessions without a word to the new page", "[edit][reload]") {
+    SftpFixture f;
+    std::mutex lm;
+    std::vector<std::string> launched;
+    const auto [editId, local] = busySession(f, lm, launched);
+    const size_t before = sessionEvents(f, f.id);
+
+    CHECK(f.sessions->closeForPageReset() == 1);
+    CHECK(f.sftp->closeForPageReset() == 1);
+    spit(local, "a=2\n");  // a save after the reset is not uploaded: the edit is no longer watched
+    std::this_thread::sleep_for(2500ms);
+    CHECK(slurp(f.remoteRoot.path() / "config.ini") == "a=1\n");
+    CHECK(slurp(f.local.path() / "report.txt") == "local");  // the waiting download went nowhere
+    CHECK(sessionEvents(f, f.id) == before);                  // no "cancelled", no "closed"
+    CHECK(f.h.invokeError("sftp:list", Json::array({f.id, "/"})).find("Unknown or closed") != std::string::npos);
+    CHECK(f.sftp->closeForPageReset() == 0);
+}
+
+TEST_CASE("edit: closing a file session the normal way still reports its edits and transfers", "[edit][reload]") {
+    SftpFixture f;
+    std::mutex lm;
+    std::vector<std::string> launched;
+    const auto [editId, local] = busySession(f, lm, launched);
+    (void)local;
+    f.h.send("sftp:close", Json::array({f.id}));
+    REQUIRE(waitEditState(f, editId, "closed", 1));
+    CHECK(f.h.waitEvent([&](const Json& e) {
+        return e["ch"] == "sftp:onProgress" && e["args"][0]["sftpId"] == f.id && e["args"][0]["state"] == "cancelled";
+    }, 10s));
+    f.id.clear();  // closed already
+}

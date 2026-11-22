@@ -134,6 +134,7 @@ struct FakeIo {
     // Behaviour.
     LdiscModes ldisc;
     bool throwOnStart = false;
+    bool holdClose = false;       // close() is only recorded: the test delivers onClose itself (closeWith)
     bool closeDelivered = false;  // I/O thread only
 
     void post(std::function<void()> f) {
@@ -229,6 +230,7 @@ public:
             ++io_->closeCalls;
         }
         io_->cv.notify_all();
+        if (io_->holdClose) return;
         auto io = io_;
         io_->post([io] {
             CloseInfo ci;
@@ -712,6 +714,61 @@ TEST_CASE("session manager: closeAll tears everything down", "[manager]") {
         CHECK(io->destroyed);
     }
     CHECK(blocked.get_future().get().cancelled);
+}
+
+TEST_CASE("session manager: a page reset closes every connection and sends nothing more about them", "[manager][reload]") {
+    Fixture f;
+    f.configure = [](FakeIo& io) { io.holdClose = true; };
+    std::vector<std::shared_ptr<FakeIo>> ios;
+    for (int i = 0; i < 3; ++i) ios.push_back(f.openStarted(Fixture::request("old#" + std::to_string(i))));
+    for (auto& io : ios) REQUIRE(io->run([&] { io->listener->onStatus(ConnStatus::Connected, ""); }));
+    // One waits for a password.
+    std::promise<PromptResponse> blocked;
+    ios[1]->post([&] { blocked.set_value(ios[1]->prompter->prompt(prompts::password("SSH password", "", "user", true))); });
+    REQUIRE(f.cap.waitFor([](const std::vector<Json>& m) { return !promptsOf(m).empty(); }));
+    const std::string promptId = promptsOf(f.cap.all()).front()["id"].get<std::string>();
+    REQUIRE(f.cap.waitFor([](const std::vector<Json>& m) { return statusesOf(m, "old#2").size() == 1; }));
+    const size_t before = f.cap.all().size();
+
+    CHECK(f.mgr->closeForPageReset() == 3);
+    for (auto& io : ios) CHECK(io->waitFor([&] { return io->closeCalls == 1; }));
+    // The prompt is withdrawn: the waiting connection goes on (cancelled), the page is not told.
+    auto fut = blocked.get_future();
+    REQUIRE(fut.wait_for(5s) == std::future_status::ready);
+    CHECK(fut.get().cancelled);
+
+    // Whatever the old connections still do before they end reaches no page.
+    for (auto& io : ios) {
+        REQUIRE(io->run([&] {
+            io->listener->onData("late output");
+            io->listener->onLog(LogLevel::Info, "late log line");
+            CloseInfo ci;
+            ci.clean = true;
+            ci.reason = "Closed by user";
+            io->closeWith(ci);
+        }));
+    }
+    for (auto& io : ios) CHECK(io->waitFor([&] { return io->destroyed; }));
+    CHECK(f.mgr->activeCount() == 0);
+    std::this_thread::sleep_for(50ms);  // past the output batching window
+    const auto msgs = f.cap.all();
+    CHECK(msgs.size() == before);
+    CHECK_FALSE(cancelledPrompt(msgs, promptId));
+    // Their event logs are kept (the app log has the close).
+    CHECK_FALSE(f.mgr->eventLog("old#0").empty());
+
+    // The new page's connections work as before, with their own events.
+    f.configure = nullptr;
+    auto io = f.openStarted(Fixture::request("new#0"));
+    REQUIRE(io->run([&] {
+        io->listener->onStatus(ConnStatus::Connected, "");
+        io->listener->onData("hello");
+    }));
+    REQUIRE(f.cap.waitFor([](const std::vector<Json>& m) { return dataOf(m, "new#0") == "hello"; }));
+    f.mgr->close("new#0");
+    REQUIRE(f.waitClosed("new#0"));
+    CHECK(statusesOf(f.cap.all(), "new#0").back() == "disconnected");
+    CHECK(f.mgr->closeForPageReset() == 0);  // nothing left open
 }
 
 TEST_CASE("session manager: bridge handlers", "[manager]") {

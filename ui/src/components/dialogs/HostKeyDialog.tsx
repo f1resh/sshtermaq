@@ -139,6 +139,11 @@ export function HostKeyDialog({ prompt, onChoice }: HostKeyDialogProps) {
           updating the stored key. If you were not expecting it, cancel the connection. <strong>Connect once</strong> carries on without
           changing the stored key.
         </p>
+        <p className="hostkey__help" data-testid="hostkey-lockdown">
+          Either way, this connection does not send a saved password (you type it), and agent forwarding, X11 forwarding and
+          tunnels stay off. Tunnels can be opened afterwards from the terminal's <strong>Special Commands</strong>; forwarding is back
+          at the next connection once the new key is saved.
+        </p>
         <Checkbox
           className="hostkey__confirm"
           checked={confirmed}

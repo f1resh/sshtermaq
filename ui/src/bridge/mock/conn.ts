@@ -3,6 +3,7 @@
  * An SSH session whose Credentials key is passphrase protected, with no remembered passphrase, is asked for it first
  * (any passphrase but "wrong" opens it; "Remember for this key" remembers it), as the real connection does. Before
  * that, one that needs a sealed secret while Credentials are locked asks for the master password ("Unlock Credentials").
+ * The host CHANGED_KEY_HOST presents a changed host key.
  */
 import type { ConnOpenRequest, EventLogEntry, PromptInput, PromptRequest, PromptResponse, SpecialCommandDef } from '@shared/types';
 import { sessionLabel } from '@shared/defaults';
@@ -18,7 +19,12 @@ interface MockConn {
   cols: number;
   rows: number;
   promptId?: string;
+  /** Accepted a changed host key: its tunnels wait for the special command "tunnels:open". */
+  tunnelsHeld?: boolean;
 }
+
+/** A host whose key "changed" since it was stored: the mismatch question, then a connection without forwarding. */
+export const CHANGED_KEY_HOST = 'changed-key.example.test';
 
 const conns = new Map<string, MockConn>();
 
@@ -113,11 +119,40 @@ export function registerConnMocks(ctx: MockContext): void {
         askPassphrase();
       });
     };
+    // A server whose host key changed (CHANGED_KEY_HOST): asked like the host does; accepted, the connection runs
+    // without forwarding, and its tunnels wait for "Open this session's tunnels".
+    const askHostKey = () =>
+      ask(
+        {
+          kind: 'hostkey',
+          host: s.host,
+          port: s.port || 22,
+          keyType: 'ssh-ed25519',
+          fingerprint: 'SHA256:mockNewKeyMockNewKeyMockNewKeyMockNewKey0',
+          fingerprintMd5: 'MD5:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff',
+          status: 'mismatch',
+          previous: ['ssh-ed25519 SHA256:mockOldKeyMockOldKeyMockOldKeyMockOldKey00']
+        },
+        (r) => {
+          if (r.choice === 'reject' || !r.choice) {
+            c.closed = true;
+            ctx.emit('conn:onStatus', { connId: req.connId, status: 'disconnected', clean: true, message: 'Host key not accepted' });
+            return;
+          }
+          c.tunnelsHeld = true;
+          log(c, 'The host key changed: no saved password is sent on this connection, and agent forwarding, X11 forwarding and tunnels are off');
+          setTimeout(() => {
+            connected();
+            out(c, "\r\nThe server's host key changed. Tunnels stay off on this connection. To open the tunnels, choose Special Commands > Open this session's tunnels.\r\n" + promptOf(c));
+          }, 100);
+        }
+      );
     setTimeout(() => {
       if (c.closed) return;
       ctx.emit('conn:onStatus', { connId: req.connId, status: 'authenticating' });
       log(c, 'Authenticating (mock)');
-      askUnlock();
+      if (s.host === CHANGED_KEY_HOST) askHostKey();
+      else askUnlock();
     }, 150);
   });
 
@@ -180,9 +215,15 @@ export function registerConnMocks(ctx: MockContext): void {
   });
   ctx.on('conn:special', (connId: string, id: string) => {
     const c = conns.get(connId);
-    if (c) log(c, `Special command: ${id}`);
+    if (!c) return;
+    log(c, `Special command: ${id}`);
+    if (id === 'tunnels:open' && c.tunnelsHeld) {
+      c.tunnelsHeld = false;
+      log(c, 'Opening the tunnels (asked for after the host key changed)');
+    }
   });
-  ctx.handle('conn:specials', (): SpecialCommandDef[] => [
+  ctx.handle('conn:specials', (connId: string): SpecialCommandDef[] => [
+    ...(conns.get(connId)?.tunnelsHeld ? [{ id: 'tunnels:open', label: "Open this session's tunnels", group: 'Host key changed' }] : []),
     { id: 'break', label: 'Break' },
     { id: 'eof', label: 'EOF' },
     { id: 'ignore', label: 'IGNORE message' },
