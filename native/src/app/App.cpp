@@ -130,7 +130,7 @@ int runApp(const std::vector<std::string>& args) {
         registerImportHandlers(bridge, store);
         sftp.registerHandlers();
         localFs.registerHandlers();
-        registerCoreHandlers({bridge, store, controller, paths, openRequests});
+        registerCoreHandlers({bridge, store, controller, paths, openRequests, !host.noUpdateCheck});
 
         controller.activeSessionCount = [&sessions] { return sessions.activeCount(); };
 

@@ -107,7 +107,7 @@ export default async function reloadAndSecondStart(page, { exe, dataDir, bridge,
 
   /* ---- 11.3 ---- */
   const otherData = mkdtempSync(join(tmpdir(), 'sshtermaq-e2e-b-'));
-  const b = spawn(exe, ['--data-dir', otherData], {
+  const b = spawn(exe, ['--data-dir', otherData, '--no-update-check'], {
     env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9334' },
     stdio: 'ignore'
   });

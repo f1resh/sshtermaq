@@ -102,6 +102,9 @@ export interface SshOptions {
   ciphers: string[];
   hostKeyAlgorithms: string[];
   macs: string[];
+  /** Old SHA-1 RSA signatures (`ssh-rsa`) for servers older than OpenSSH 7.2: the host key and RSA key sign-in. SHA-2
+   *  is still used wherever the server offers it. */
+  allowSha1Rsa: boolean;
   auth: SshAuthOptions;
   x11: {
     enabled: boolean;
@@ -521,6 +524,8 @@ export interface AppSettings {
     scrollOnKeystroke: boolean;
     /** What double-click on a sidebar session does. */
     sessionDoubleClick: 'tab' | 'split';
+    /** Look for a new version once a day (GitHub's latest release). Not in the Store build, which the Store updates. */
+    checkForUpdates: boolean;
   };
   keybindings: Partial<Record<CommandId, string>>;
   customSchemes: ColorScheme[];
@@ -1095,6 +1100,25 @@ export interface AppInfo {
   platform: string;
   userDataDir: string;
   portable: boolean;
+  /** How this copy was installed: the Store updates its package; Homebrew has its own upgrade command. */
+  installChannel: InstallChannel;
+  /** Version checks are possible (not a Store package, no --no-update-check). */
+  updateChecks: boolean;
+}
+
+export type InstallChannel = 'store' | 'homebrew' | 'other';
+
+/** update:check: the latest published release on GitHub. */
+export interface UpdateCheckResult {
+  ok: boolean;
+  /** When !ok: why (no answer, the server's status, an unusable answer). */
+  error?: string;
+  /** The running version. */
+  current: string;
+  /** "1.3.0" and its release page (always https://github.com/f1resh/sshtermaq/releases/tag/...). */
+  latest?: { version: string; url: string };
+  /** latest is newer than the running version. */
+  newer: boolean;
 }
 
 /** Request (from CLI args or a second app instance) to open a connection. */

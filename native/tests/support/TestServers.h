@@ -45,6 +45,11 @@ struct TestSshServerOptions {
      */
     std::filesystem::path execShell;
     std::filesystem::path execCwd;
+    /**
+     * Like OpenSSH before 7.2: only the `ssh-rsa` host key type (set hostKeyType "rsa"), and only `ssh-rsa` in
+     * server-sig-algs, so a client can sign in with an RSA key only by signing with SHA-1.
+     */
+    bool onlySha1Rsa = false;
 };
 
 /** A shell for exec requests that run real tools (ls, scp): Git for Windows' sh.exe (GNU coreutils and OpenSSH's scp

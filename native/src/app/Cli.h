@@ -14,7 +14,8 @@
 // ignored with a warning.
 // As in PuTTY, options given explicitly on the command line win over values loaded with -load, whatever their
 // order. Without -load, the "Default Settings" template is the base.
-// Host-only options: --dev-url URL, --devtools, --data-dir DIR, --version / -V (parsed by parseHostOptions).
+// Host-only options: --dev-url URL, --devtools, --data-dir DIR, --no-update-check, --version / -V (parsed by
+// parseHostOptions).
 #include "core/Types.h"
 
 #include <filesystem>
@@ -34,6 +35,7 @@ struct HostOptions {
     std::filesystem::path dataDir;     // --data-dir DIR
     std::string automation;            // --automation SOCKET (macOS Debug builds: ui/scripts/app.mjs drives the app)
     bool version = false;              // --version or -V (as in PuTTY): show the version and build id, then exit
+    bool noUpdateCheck = false;        // --no-update-check: no version check in this run (tests, screenshots)
     std::vector<std::string> rest;     // remaining (PuTTY) arguments, in order
     std::vector<std::string> errors;
 };

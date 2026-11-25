@@ -90,6 +90,8 @@ export interface PaneOps {
   dropItems(dir: string, onFolder: boolean, move: boolean): void;
   /** Extra context menu entries for a selection. */
   menuExtras?(items: FileItem[]): MenuItem[];
+  /** Extra "Copy …" entries next to "Copy path" (a selection) and "Copy current path" (`items` empty: the folder `path`). */
+  copyExtras?(items: FileItem[], path: string): MenuItem[];
   switchPane(): void;
   find?(): void;
 }
@@ -385,6 +387,7 @@ export const FilePane = forwardRef<FilePaneHandle, FilePaneProps>(function FileP
           { label: 'Rename…', shortcut: 'F2', disabled: !one || special || locked, onClick: () => one && beginRename(one) },
           ...(ops.chmod && one ? [{ label: 'Permissions…', onClick: () => ops.chmod?.(one) }] : []),
           { label: list.length > 1 ? 'Copy paths' : 'Copy path', onClick: () => copyPath(list) },
+          ...(ops.copyExtras?.(list, path) ?? []),
           ...(side === 'local' && one && !special ? [{ label: `Show in ${osTerms.fileBrowser}`, onClick: () => void api.local.reveal(one.path) }] : []),
           { type: 'separator' },
           { label: 'Delete', shortcut: listShortcut('delete', 'Del'), danger: true, disabled: special || locked, onClick: () => void removeItems(list) }
@@ -395,6 +398,7 @@ export const FilePane = forwardRef<FilePaneHandle, FilePaneProps>(function FileP
           { label: 'Select all', shortcut: listShortcut('selectAll'), onClick: () => setSelected(new Set(visiblePaths)) },
           { type: 'separator' },
           { label: 'Copy current path', onClick: () => api.app.writeClipboard(path) },
+          ...(ops.copyExtras?.([], path) ?? []),
           ...(side === 'local' && path ? [{ label: `Open in ${osTerms.fileBrowser}`, onClick: () => void api.local.open(path) }] : [])
         ];
     showContextMenu(x, y, items);

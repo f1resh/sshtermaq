@@ -202,7 +202,7 @@ export function S3Section() {
               </FormField>
             )}
             {keySource === 'login' && a.loginId && !chosen && vaultLoaded && (
-              <Callout tone="danger">The chosen login is no longer in Credentials. Choose another one.</Callout>
+              <Callout tone="warning">The chosen login is no longer in Credentials, so this session signs in with its own access key. Choose another login.</Callout>
             )}
           </>
         )}

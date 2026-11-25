@@ -3,6 +3,8 @@
  * The whole bar is a drag region (WebView2 non-client region); interactive children opt out with no-drag.
  * macOS: room for the traffic lights instead of the app menu (its commands are in the menu bar: commands/menubar.ts)
  * and no caption buttons; the drag areas go to the host (useTitleBarLayout).
+ * A newer version shows as a chip (UpdateChip) next to the window buttons: before the caption buttons on Windows,
+ * after the traffic lights on macOS.
  */
 import { useRef, type ReactNode } from 'react';
 import { Command, Download, Info, KeyRound, LogOut, Maximize, PanelLeft, PanelLeftClose, PanelLeftOpen, Settings, SquarePlus, Zap } from 'lucide-react';
@@ -16,6 +18,7 @@ import { Logo } from '@/components/welcome/Logo';
 import { isMac } from '@shared/platform';
 import { CaptionButtons } from './CaptionButtons';
 import { TabStrip } from './TabStrip';
+import { UpdateChip } from './UpdateChip';
 import { useTitleBarLayout } from './useTitleBarLayout';
 import './titlebar.css';
 
@@ -51,7 +54,10 @@ export function TitleBar() {
   return (
     <header ref={bar} className={cx('titlebar drag-region', isMac && 'titlebar--mac', !focused && 'titlebar--inactive')}>
       {isMac ? (
-        <div className="titlebar__lights" style={{ width: insets.left }} />
+        <>
+          <div className="titlebar__lights" style={{ width: insets.left }} />
+          <UpdateChip />
+        </>
       ) : (
         <button
           className="titlebar__app no-drag"
@@ -76,6 +82,7 @@ export function TitleBar() {
       </button>
       <TabStrip />
       <div className="titlebar__drag" />
+      {!isMac && <UpdateChip />}
       {!isMac && <CaptionButtons />}
     </header>
   );

@@ -27,6 +27,7 @@ import { FindDialog } from './FindDialog';
 import { LinkDialog } from './LinkDialog';
 import { local, nameError, remote, type Crumb, type FileItem, type Side } from './paths';
 import { listShortcut } from './listKeys';
+import { s3Uri } from './s3Uri';
 import { localSource, remoteSource } from './sources';
 import { SyncDialog } from './SyncDialog';
 import { TransferQueue } from './TransferQueue';
@@ -416,6 +417,17 @@ export function FileManager({ paneId, visible }: { paneId: string; visible: bool
         ? (items) => {
             const one = items.length === 1 && !items[0].isDir ? items[0] : undefined;
             return [{ label: 'Copy link…', disabled: !one, onClick: () => one && setDialog({ type: 'link', item: one }) }];
+          }
+        : undefined,
+    copyExtras:
+      side === 'remote' && isS3 && session
+        ? (items, folder) => {
+            if (!items.length) {
+              const uri = s3Uri(folder, true, session.s3.bucket);
+              return [{ label: 'Copy current s3:// path', disabled: !uri, onClick: () => uri && void api.app.writeClipboard(uri) }];
+            }
+            const uris = items.map((i) => s3Uri(i.path, i.isDir, session.s3.bucket)).filter((u): u is string => !!u);
+            return [{ label: items.length > 1 ? 'Copy s3:// paths' : 'Copy s3:// path', onClick: () => void api.app.writeClipboard(uris.join('\r\n')) }];
           }
         : undefined,
     dropPaths: (paths, targetDir) => {

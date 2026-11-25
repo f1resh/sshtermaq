@@ -170,3 +170,17 @@ a {
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+/* A newer version is out (src/store/updates.ts): on the sidebar's Settings button and Settings › About. */
+.update-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.sidebar__footer-btn .update-dot {
+  margin-left: -2px;
+  align-self: flex-start;
+  margin-top: 6px;
+}

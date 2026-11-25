@@ -1,6 +1,6 @@
 # SSHTermaq privacy policy
 
-*Last updated: 23 October 2026*
+*Last updated: 24 November 2026*
 
 SSHTermaq is an SSH, Telnet, Rlogin, Raw and serial client that runs on your own computer. It has no account, no
 online service and no analytics.
@@ -8,7 +8,8 @@ online service and no analytics.
 ## What SSHTermaq does not do
 - It does not collect, send or sell any information about you or how you use it.
 - It contains no telemetry, crash reporting, advertising or tracking.
-- It does not contact any server of its developer, so the developer receives nothing from it.
+- It does not contact any server of its developer, so the developer receives nothing from it. The only connection
+  the app makes on its own is the version check described below.
 
 On Windows the app's window shows its interface with Microsoft Edge WebView2, a component of Windows. Microsoft's
 diagnostic-data settings in Windows apply to WebView2 as they do to Windows itself.
@@ -33,6 +34,17 @@ those servers do with it is governed by their owners' policies.
 
 Links in the app (such as the project page on GitHub) open in your web browser; GitHub's own privacy statement applies
 there.
+
+## Checking for new versions
+Once a day at most, a few seconds after it starts, SSHTermaq asks GitHub for the latest published release of the
+project (one HTTPS request to `api.github.com/repos/f1resh/sshtermaq/releases/latest`). Nothing about you or your
+computer is sent beyond what any HTTPS request shows (your IP address), and the request names the app only as
+`SSHTermaq`, without its version. The answer is compared with the running version on your computer; if a newer one
+exists, the app says so and links to its release page. It never downloads or installs anything by itself. GitHub's own
+privacy statement applies to the request.
+
+You can turn the check off in Settings › About ("Check for new versions"). The Microsoft Store version makes no check
+at all: the Store updates it.
 
 ## Children
 SSHTermaq is a technical tool and does not knowingly handle information about children.

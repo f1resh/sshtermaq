@@ -2,6 +2,7 @@
 
 #include "app/BuildInfo.h"
 #include "app/HostController.h"
+#include "app/UpdateCheck.h"
 #include "bridge/Bridge.h"
 #include "core/Crypto.h"
 #include "core/Log.h"
@@ -154,6 +155,7 @@ void registerCoreHandlers(const CoreHandlerContext& c) {
     ui::HostWindow& win = host.window();
     const AppPaths paths = c.paths;
     OpenRequestQueue& open = c.openRequests;
+    const bool updateChecks = c.updateChecks && std::string(sys::installChannel()) != "store";
 
     /* ---- sessions ---- */
     b.handleSync("sessions:list", [&store](const Json&) { return store.listSessionsJson(); });
@@ -257,7 +259,7 @@ void registerCoreHandlers(const CoreHandlerContext& c) {
     });
 
     /* ---- app ---- */
-    b.handleSync("app:info", [&win, paths](const Json&) {
+    b.handleSync("app:info", [&win, paths, updateChecks](const Json&) {
         const BuildInfo& build = buildInfo();
         return Json{{"name", "SSHTermaq"},
                     {"version", build.version},
@@ -269,7 +271,19 @@ void registerCoreHandlers(const CoreHandlerContext& c) {
                     {"node", ""},
                     {"platform", sys::osName()},
                     {"userDataDir", sys::fromPath(paths.dataDir)},
-                    {"portable", paths.portable}};
+                    {"portable", paths.portable},
+                    {"installChannel", sys::installChannel()},
+                    {"updateChecks", updateChecks}};
+    });
+    // The version check (app/UpdateCheck.h). The UI decides when (once a day, "Check now"); never in a Store package
+    // (the Store updates it) or with --no-update-check.
+    b.handleAsync("update:check", [updateChecks](const Json&) {
+        if (!updateChecks) throw std::runtime_error("Version checks are off in this copy");
+        const update::CheckResult r = update::checkLatestRelease(buildInfo().version);
+        Json out{{"ok", r.ok}, {"newer", r.newer}, {"current", buildInfo().version}};
+        if (!r.ok) out["error"] = r.error;
+        if (r.latest) out["latest"] = Json{{"version", r.latest->version}, {"url", r.latest->url}};
+        return out;
     });
     b.handleSync("app:openExternal", [](const Json& a) {
         const std::string url = argStr(a, 0);

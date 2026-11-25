@@ -183,6 +183,9 @@ struct SshOptions {
     std::vector<std::string> ciphers;
     std::vector<std::string> hostKeyAlgorithms;
     std::vector<std::string> macs;
+    /** Old SHA-1 RSA signatures (`ssh-rsa`), for servers older than OpenSSH 7.2: the host key and RSA key sign-in.
+     *  SHA-2 is still used wherever the server offers it. */
+    bool allowSha1Rsa = false;
     SshAuthOptions auth;
     X11Options x11;
     std::vector<PortForward> tunnels;
@@ -193,7 +196,7 @@ struct SshOptions {
     std::string localStartPath;
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(SshOptions, remoteCommand, noShell, allocatePty, compression, kex, ciphers,
-                                                hostKeyAlgorithms, macs, auth, x11, tunnels, localPortsAcceptAll,
+                                                hostKeyAlgorithms, macs, allowSha1Rsa, auth, x11, tunnels, localPortsAcceptAll,
                                                 remotePortsAcceptAll, sftpStartPath, fileProtocol, localStartPath)
 
 struct TelnetOptions {

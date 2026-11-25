@@ -481,6 +481,14 @@ TEST_CASE("cli: host options are split off", "[app][cli]") {
     REQUIRE(parseHostOptions({"--automation"}).errors.size() == 1);
 }
 
+TEST_CASE("cli: --no-update-check turns the version check off for this run", "[app][cli][update]") {
+    REQUIRE_FALSE(parseHostOptions({"h.test"}).noUpdateCheck);
+    auto h = parseHostOptions({"--no-update-check", "-ssh", "h.test"});
+    REQUIRE(h.noUpdateCheck);
+    REQUIRE(h.rest == std::vector<std::string>{"-ssh", "h.test"});
+    REQUIRE(h.errors.empty());
+}
+
 TEST_CASE("cli: --version and -V ask for the version; -v stays PuTTY's verbose", "[app][cli]") {
     REQUIRE_FALSE(parseHostOptions({"h.test"}).version);
     auto h = parseHostOptions({"--version"});

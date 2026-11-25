@@ -53,6 +53,15 @@ if(MSVC)
   add_compile_options(/utf-8 /W4 /permissive- /Zc:__cplusplus /Zc:preprocessor /EHsc /MP /bigobj
     /wd4100  # unreferenced formal parameter (stubs / callbacks)
     /wd4127) # conditional expression is constant
+  # Exploit mitigations (1.2.0 review item 11.6): Control Flow Guard, /sdl's extra checks, and compatibility with CET
+  # shadow stacks (x64 only). ASLR (/DYNAMICBASE, /HIGHENTROPYVA) and DEP (/NXCOMPAT) are the x64 linker's defaults.
+  # The dependencies get the same from triplets/x64-windows-st.cmake, except OpenSSL's own code, which calls assembly
+  # through function pointers (see there); scripts/windows/check-mitigations.ps1 checks the result.
+  add_compile_options(/guard:cf /sdl)
+  add_link_options(/guard:cf)
+  if(NOT CMAKE_CXX_COMPILER_ARCHITECTURE_ID MATCHES "ARM")
+    add_link_options(/CETCOMPAT)
+  endif()
 endif()
 if(APPLE)
   # -g in Release too: scripts/macos/build.sh moves the debug info into a .dSYM (for crash reports) and strips the app.
@@ -320,6 +329,10 @@ if(WIN32)
   endif()
   add_executable(SSHTermaq WIN32 ${ST_PLATFORM}/win/main/WinMain.cpp ${app_res} ${ST_UI_EMBED_DIR}/ui.rc ${ST_GEN_DIR}/app.manifest)
   target_include_directories(SSHTermaq PRIVATE ${ST_GEN_DIR})  # st_build_info.h for app.rc
+  # The DLLs the program imports (ssh.dll, system DLLs) are looked for in its own folder and System32 only, never in
+  # the current folder or PATH (0x200 | 0x800: LOAD_LIBRARY_SEARCH_APPLICATION_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32).
+  # DLLs loaded later at run time: SetDefaultDllDirectories in WinMain.cpp.
+  target_link_options(SSHTermaq PRIVATE /DEPENDENTLOADFLAG:0xA00)
   set_target_properties(SSHTermaq PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:SSHTermaq>")
 else()
   # SSHTermaq.app: Info.plist and the icon from native/res/macos, the UI inside the executable.

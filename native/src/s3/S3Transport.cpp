@@ -387,11 +387,17 @@ private:
         // 'keys': the session's own access key, or a login from Credentials.
         std::string keyId = trim(s.s3.auth.accessKeyId);
         std::string loginPassword;
-        if (!s.s3.auth.loginId.empty()) {
+        bool useLogin = !s.s3.auth.loginId.empty();
+        if (useLogin) {
             auto login = ctx_.vault ? ctx_.vault->getLogin(s.s3.auth.loginId) : std::nullopt;
-            if (!login) throw s3::CredentialsError("The login chosen for this session is no longer in Credentials");
-            keyId = trim(login->username);
-            loginPassword = login->password;
+            if (!login) {
+                // As SSH does: the session's own access key (saved, or asked), with a line in the event log.
+                log(LogLevel::Warn, "S3: the login chosen from Credentials no longer exists; using this session's own access key");
+                useLogin = false;
+            } else {
+                keyId = trim(login->username);
+                loginPassword = login->password;
+            }
         }
         if (keyId.empty()) {
             auto asked = askText("S3 access key", "Access key ID:", true);
@@ -402,7 +408,7 @@ private:
         if (retryMessage.empty()) {
             if (!ctx_.oneTimePassword.empty()) {
                 found = ctx_.oneTimePassword;
-            } else if (!s.s3.auth.loginId.empty()) {
+            } else if (useLogin) {
                 if (loginPassword == "stored" && ctx_.vault) {
                     if (ctx_.vault->needsUnlock(Vault::loginSecretKey(s.s3.auth.loginId)) && !ensureUnlocked()) throw Cancelled{};
                     try {
@@ -418,7 +424,7 @@ private:
             secret = *found;
         } else {
             if (!ctx_.prompter) throw s3::CredentialsError("The secret access key is not saved");
-            const bool canSave = s.s3.auth.loginId.empty() && !s.id.empty();
+            const bool canSave = !useLogin && !s.id.empty();
             const PromptResponse pr = ctx_.prompter->prompt(
                 prompts::password("Secret access key for " + keyId, retryMessage, keyId, canSave));
             if (pr.cancelled || pr.values.empty()) throw Cancelled{};

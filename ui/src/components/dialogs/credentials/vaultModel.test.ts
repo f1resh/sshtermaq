@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createDefaultSession } from '@shared/defaults';
 import type { VaultImportResult, VaultKey, VaultLogin } from '@shared/types';
+import { switchProtocol } from '../session/sessionModel';
 import { importSummary, keyLabel, keysAndLogins, loginNameTaken, loginSummary, loginsUsingKey, nameTaken, sessionsUsingKey, sessionsUsingLogin, shortKeyType, suggestedKeyName } from './vaultModel';
 
 const key = (over: Partial<VaultKey> = {}): VaultKey => ({
@@ -85,6 +86,12 @@ describe('Credentials logins', () => {
     a.ssh.auth.loginId = 'l1';
     const b = createDefaultSession({ name: 'db' });
     expect(sessionsUsingLogin('l1', [a, b]).map((s) => s.name)).toEqual(['web-01']);
+    // S3 sessions that take their access key from the login count too; one that signs in another way does not.
+    const s3 = switchProtocol(createDefaultSession({ name: 'backups' }), 's3');
+    s3.s3.auth.loginId = 'l1';
+    const profile = switchProtocol(createDefaultSession({ name: 'archive' }), 's3');
+    profile.s3.auth = { ...profile.s3.auth, method: 'profile', loginId: 'l1' };
+    expect(sessionsUsingLogin('l1', [a, b, s3, profile]).map((s) => s.name)).toEqual(['backups', 'web-01']);
     expect(loginsUsingKey('k1', [login({ keyId: 'k1', name: 'b' }), login({ id: 'l2', keyId: 'k1', name: 'a' }), login({ id: 'l3' })]).map((l) => l.name)).toEqual(['a', 'b']);
   });
 

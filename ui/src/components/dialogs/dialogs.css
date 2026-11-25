@@ -1282,6 +1282,37 @@
   font-size: var(--fs-xs);
   line-height: 1.5;
 }
+.about__updates {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.about__update-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.about__update-status {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+.about__update-new {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.about__update-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .about--compact .about__hero {
   padding-top: 0;
 }

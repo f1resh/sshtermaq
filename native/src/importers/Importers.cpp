@@ -345,11 +345,29 @@ ImportPreview previewSshConfig(const std::string& pathIn, const Store& store) {
         if (no("requesttty")) s.ssh.allocatePty = false;
         if (no("passwordauthentication")) s.ssh.auth.password = false;
         if (no("kbdinteractiveauthentication") || no("challengeresponseauthentication")) s.ssh.auth.keyboardInteractive = false;
+        // "+ssh-rsa" in HostKeyAlgorithms or PubkeyAcceptedAlgorithms (PubkeyAcceptedKeyTypes before OpenSSH 8.5) is
+        // how OpenSSH users reach servers older than OpenSSH 7.2: it becomes "Allow old SHA-1 RSA".
+        auto namesSha1Rsa = [](const std::string& list) {
+            for (const auto& a : split(list, ',', true))
+                if (trim(a) == "ssh-rsa" || trim(a) == "ssh-rsa-cert-v01@openssh.com") return true;
+            return false;
+        };
+        for (const char* k : {"hostkeyalgorithms", "pubkeyacceptedalgorithms", "pubkeyacceptedkeytypes"})
+            if (opt.count(k) && !opt[k].empty() && opt[k][0] != '-' && namesSha1Rsa(opt[k].substr(opt[k][0] == '+' || opt[k][0] == '^' ? 1 : 0)))
+                s.ssh.allowSha1Rsa = true;
+            else if (opt.count(k) && k[0] == 'p')
+                warnings.push_back("Directive \"" + std::string(k) + "\" is not supported");  // only its ssh-rsa is
         auto algos = [&](const char* k, std::vector<std::string>& out) {
             if (!opt.count(k)) return;
             std::string v = opt[k];
             if (!v.empty() && (v[0] == '+' || v[0] == '-' || v[0] == '^')) {
-                warnings.push_back(std::string("Relative algorithm list for ") + k + " is not supported; defaults kept");
+                // Adding only ssh-rsa is fully covered by the switch above.
+                bool onlyRsa = v[0] == '+';
+                for (const auto& a : split(v.substr(1), ',', true))
+                    if (trim(a) != "ssh-rsa" && trim(a) != "ssh-rsa-cert-v01@openssh.com") onlyRsa = false;
+                if (!onlyRsa)
+                    warnings.push_back(std::string("Relative algorithm list for ") + k + " is not supported; defaults kept" +
+                                       (s.ssh.allowSha1Rsa ? " (ssh-rsa: \"Allow old SHA-1 RSA\" is on)" : ""));
                 return;
             }
             for (auto& a : split(v, ',', true)) out.push_back(trim(a));
@@ -362,7 +380,8 @@ ImportPreview previewSshConfig(const std::string& pathIn, const Store& store) {
             "hostname", "port", "user", "identityfile", "proxyjump", "proxycommand", "forwardagent", "forwardx11",
             "forwardx11trusted", "compression", "serveraliveinterval", "connecttimeout", "addressfamily", "remotecommand",
             "requesttty", "passwordauthentication", "kbdinteractiveauthentication", "challengeresponseauthentication",
-            "ciphers", "kexalgorithms", "hostkeyalgorithms", "macs", "sendenv", "pubkeyauthentication"};
+            "ciphers", "kexalgorithms", "hostkeyalgorithms", "macs", "sendenv", "pubkeyauthentication",
+            "pubkeyacceptedalgorithms", "pubkeyacceptedkeytypes"};
         // IgnoreUnknown: directives (globs) the file itself says may be unknown, quietly.
         std::vector<std::string> quiet;
         if (opt.count("ignoreunknown"))

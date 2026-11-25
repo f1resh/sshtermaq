@@ -6,13 +6,15 @@
  *            the steps a Page with the common Playwright calls (evaluate, waitForSelector, click, keyboard, screenshot).
  *
  *   node scripts/app.mjs [--exe <path>] [--data-dir <dir>] [--steps file.mjs]
- *                        [--out ../artifacts/app.png] [--keep-data] [--args "..."]
+ *                        [--out ../artifacts/app.png] [--keep-data] [--update-check] [--args "..."]
  *
  * --exe defaults to the Debug build: ../build/vs/Debug/SSHTermaq.exe, or on macOS
  * ../build/mac-<arch>/Debug/SSHTermaq.app/Contents/MacOS/SSHTermaq.
  * A fresh temporary data directory is used unless --data-dir is given (the user's real data is never touched).
  * The steps module default export receives (page, { out, exe, dataDir, bridge, platform }) where bridge(ch, ...args)
  * performs a raw bridge invoke from the page and platform is process.platform.
+ * The app is started with --no-update-check, so it never asks GitHub for a new version and never shows the notice;
+ * --update-check leaves the version check on (to check it in the real app).
  */
 import { spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
@@ -38,7 +40,7 @@ const steps = opt('steps');
 const port = Number(opt('port', 9333));
 const tempData = !opt('data-dir');
 const dataDir = opt('data-dir') ? resolve(opt('data-dir')) : mkdtempSync(join(tmpdir(), 'sshtermaq-e2e-'));
-const extra = (opt('args', '') || '').split(' ').filter(Boolean);
+const extra = [...(flag('update-check') ? [] : ['--no-update-check']), ...(opt('args', '') || '').split(' ').filter(Boolean)];
 const onExit = (code) => console.log(`app exited with code ${code}`);
 
 /** Windows: WebView2 with remote debugging, Playwright over CDP. */

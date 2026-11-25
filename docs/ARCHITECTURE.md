@@ -130,6 +130,15 @@ page (its request ids start at 1 again). The page keeps its workspace in the hos
 never on disk); the new page asks `app:takeReloadInfo` once, reopens those tabs with new connections and says so.
 Taking over the live connections instead is planned for 1.3.0 ([notes/v1.3.0.md](notes/v1.3.0.md)).
 
+**The version check.** `update:check` (`app/UpdateCheck`, in CoreHandlers) makes one HTTPS request through
+`sys/Http` (WinHTTP / NSURLSession, the system's proxy settings, 10 s, at most 1 MB) for GitHub's
+`repos/f1resh/sshtermaq/releases/latest`, reads the tag strictly as N.N.N (drafts and pre-releases are not offered),
+compares it with the running version and returns the release page it builds itself (never a URL from the answer).
+When to ask is the page's choice (`ui/src/store/updates.ts`: 5 s after start, then once a day; the times, a skipped
+version and "remind me tomorrow" in `state.json` under `updateCheck`; the setting `behavior.checkForUpdates`). It is
+refused in a Store package (`sys::installChannel()`: `GetCurrentPackageFullName`) and with `--no-update-check`
+(`app:info` says so in `installChannel` / `updateChecks`); `ui/scripts/app.mjs` passes that flag unless asked not to.
+
 **macOS decision** (step B3 of the port, measured with [native/tools/hostprobe](../native/tools/hostprobe/README.md)):
 `callAsyncJavaScript` moves about 225 MB/s, 4× what xterm.js can render, passes the messages as data (never as
 script source) and its completions give backpressure. Rejected: `evaluateJavaScript` (as fast, but the messages
@@ -221,7 +230,7 @@ breaks existing installs. Change one only with a migration that reads the old va
 
 Bridge handler ownership: `conn:*`, `prompts:*` → session · `importer:*`, `keys:*`, `knownHosts:importOpenSsh` →
 keys-import · `sftp:*`, `local:*` → sftp · `s3:*` → host (`s3:profiles` in CoreHandlers) · everything else (`sessions`, `credentials`, `settings`, `knownHosts` list/remove,
-`serial`, `dialog`, `app`, `window`) → host. The host's composition root calls `registerConnHandlers`,
+`serial`, `dialog`, `app`, `update`, `window`) → host. The host's composition root calls `registerConnHandlers`,
 `registerImportHandlers`, `SftpService::registerHandlers`, `LocalFsService::registerHandlers` and its own core
 handlers, and calls `ui::dialogs::init` and `ui::dnd::init` once the main window exists (`ui::UiThread` sets up
 the UI thread: OLE on Windows).

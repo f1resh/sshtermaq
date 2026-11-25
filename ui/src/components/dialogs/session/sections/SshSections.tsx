@@ -967,8 +967,8 @@ export function AlgorithmsSection() {
   const { draft, update } = useEditor();
   const s = draft.ssh;
   const anyWeak = useMemo(
-    () => [s.kex, s.ciphers, s.hostKeyAlgorithms, s.macs].some((list) => list.some((n) => WEAK_ALGORITHMS.has(n))),
-    [s.kex, s.ciphers, s.hostKeyAlgorithms, s.macs]
+    () => s.allowSha1Rsa || [s.kex, s.ciphers, s.hostKeyAlgorithms, s.macs].some((list) => list.some((n) => WEAK_ALGORITHMS.has(n))),
+    [s.allowSha1Rsa, s.kex, s.ciphers, s.hostKeyAlgorithms, s.macs]
   );
   return (
     <>
@@ -976,6 +976,14 @@ export function AlgorithmsSection() {
         Algorithms are offered in the order shown; unticked ones are never used. Drag rows or use the arrows to reorder. “Defaults” uses the
         secure library defaults.
       </Callout>
+      <div className="dlg-rows">
+        <ToggleRow
+          label="Allow old SHA-1 RSA (ssh-rsa), for servers older than OpenSSH 7.2"
+          description="Lets this session accept an ssh-rsa host key and sign in with an RSA key using SHA-1. SHA-2 is still used wherever the server offers it."
+          checked={s.allowSha1Rsa}
+          onChange={(v) => update((d) => void (d.ssh.allowSha1Rsa = v))}
+        />
+      </div>
       {anyWeak && (
         <Callout tone="warning" title="Weak algorithms enabled">
           Only enable weak algorithms when connecting to legacy equipment that supports nothing else.

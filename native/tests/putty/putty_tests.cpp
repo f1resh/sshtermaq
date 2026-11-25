@@ -443,6 +443,40 @@ TEST_CASE("ssh config: macOS's Keychain options and IgnoreUnknown give no warnin
     CHECK(w[0].find("unlisted") != std::string::npos);
 }
 
+TEST_CASE("ssh config: +ssh-rsa turns on \"Allow old SHA-1 RSA\"", "[importers][sshconfig][sha1rsa]") {
+    TempDir dir;
+    writeFile(dir.path() / "config",
+              "Host oldbox\n  HostName old.example\n  HostKeyAlgorithms +ssh-rsa\n  PubkeyAcceptedAlgorithms +ssh-rsa\n\n"
+              "Host olderfile\n  HostName older.example\n  PubkeyAcceptedKeyTypes +ssh-rsa\n\n"
+              "Host mixed\n  HostName mixed.example\n  HostKeyAlgorithms +ssh-rsa,ssh-dss\n\n"
+              "Host listed\n  HostName listed.example\n  HostKeyAlgorithms ssh-ed25519,ssh-rsa\n\n"
+              "Host removed\n  HostName removed.example\n  HostKeyAlgorithms -ssh-rsa\n  PubkeyAcceptedAlgorithms ssh-ed25519\n\n"
+              "Host plain\n  HostName plain.example\n");
+    TempDir storeDir;
+    Store store(storeDir.path());
+    store.load();
+    ImportPreview p = importers::previewSshConfig(sys::fromPath(dir.path() / "config"), store);
+    REQUIRE(p.candidates.size() == 6);
+    auto find = [&](const std::string& n) {
+        return *std::find_if(p.candidates.begin(), p.candidates.end(), [&](const ImportCandidate& c) { return c.name == n; });
+    };
+    const auto oldbox = find("oldbox");
+    CHECK(oldbox.session.ssh.allowSha1Rsa);
+    CHECK(oldbox.session.ssh.hostKeyAlgorithms.empty());  // the defaults stay, ssh-rsa comes from the switch
+    CHECK(oldbox.warnings.empty());
+    CHECK(find("olderfile").session.ssh.allowSha1Rsa);
+    const auto mixed = find("mixed");
+    CHECK(mixed.session.ssh.allowSha1Rsa);
+    CHECK(mixed.warnings.size() == 1);  // ssh-dss can't be added on top of the defaults
+    const auto listed = find("listed");
+    CHECK(listed.session.ssh.allowSha1Rsa);
+    CHECK(listed.session.ssh.hostKeyAlgorithms == std::vector<std::string>{"ssh-ed25519", "ssh-rsa"});
+    const auto removed = find("removed");
+    CHECK_FALSE(removed.session.ssh.allowSha1Rsa);
+    CHECK(removed.warnings.size() == 2);  // the relative -list, and an accepted-key list that is not imported
+    CHECK_FALSE(find("plain").session.ssh.allowSha1Rsa);
+}
+
 TEST_CASE("known_hosts: plain, bracketed and hashed entries", "[importers][knownhosts]") {
     const std::string blob = [] {
         std::string b;

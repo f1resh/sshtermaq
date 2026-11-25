@@ -4,6 +4,7 @@
  * (any passphrase but "wrong" opens it; "Remember for this key" remembers it), as the real connection does. Before
  * that, one that needs a sealed secret while Credentials are locked asks for the master password ("Unlock Credentials").
  * The host CHANGED_KEY_HOST presents a changed host key.
+ * The host OLD_RSA_HOST speaks only the old SHA-1 RSA (`ssh-rsa`): it connects only with "Allow old SHA-1 RSA" on.
  */
 import type { ConnOpenRequest, EventLogEntry, PromptInput, PromptRequest, PromptResponse, SpecialCommandDef } from '@shared/types';
 import { sessionLabel } from '@shared/defaults';
@@ -25,6 +26,7 @@ interface MockConn {
 
 /** A host whose key "changed" since it was stored: the mismatch question, then a connection without forwarding. */
 export const CHANGED_KEY_HOST = 'changed-key.example.test';
+export const OLD_RSA_HOST = 'old-rsa.example.test';
 
 const conns = new Map<string, MockConn>();
 
@@ -151,6 +153,18 @@ export function registerConnMocks(ctx: MockContext): void {
       if (c.closed) return;
       ctx.emit('conn:onStatus', { connId: req.connId, status: 'authenticating' });
       log(c, 'Authenticating (mock)');
+      if (s.host === OLD_RSA_HOST && !s.ssh.allowSha1Rsa) {
+        // As native/src/ssh/SshClient.cpp says it (kSha1RsaHint).
+        c.closed = true;
+        log(c, 'kex error : no match for method server host key algo: server [ssh-rsa], client [ssh-ed25519,rsa-sha2-512,rsa-sha2-256]');
+        ctx.emit('conn:onStatus', {
+          connId: req.connId,
+          status: 'error',
+          message: `This server only supports the old SHA-1 RSA signatures (ssh-rsa). Turn on "Allow old SHA-1 RSA" in the session's Algorithms settings.`
+        });
+        return;
+      }
+      if (s.host === OLD_RSA_HOST) log(c, 'Allowing ssh-rsa (SHA-1) for this session');
       if (s.host === CHANGED_KEY_HOST) askHostKey();
       else askUnlock();
     }, 150);

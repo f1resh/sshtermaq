@@ -72,6 +72,7 @@ export function createDefaultSession(overrides: Partial<SessionConfig> = {}): Se
       ciphers: [],
       hostKeyAlgorithms: [],
       macs: [],
+      allowSha1Rsa: false,
       auth: {
         privateKeyPath: '',
         keyId: '',
@@ -319,7 +320,8 @@ export function createDefaultSettings(): AppSettings {
       reconnect: 'prompt',
       scrollOnOutput: false,
       scrollOnKeystroke: true,
-      sessionDoubleClick: 'tab'
+      sessionDoubleClick: 'tab',
+      checkForUpdates: true
     },
     keybindings: { ...DEFAULT_KEYBINDINGS },
     customSchemes: [],

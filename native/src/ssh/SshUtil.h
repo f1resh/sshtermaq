@@ -79,6 +79,19 @@ std::vector<std::string> filterAlgorithms(const std::vector<std::string>& wanted
 std::vector<std::string> hostKeyAlgorithmsForKeyType(const std::string& keyType);
 /** libssh's default host key algorithm preference (filtered to what this build supports). */
 std::vector<std::string> defaultHostKeyAlgorithms();
+/** The key types a client signs in with by default in libssh (its DEFAULT_PUBLIC_KEY_ALGORITHMS), plus `ssh-rsa` and
+ *  its certificate at the end: for "Allow old SHA-1 RSA" (filtered to what this build supports). */
+std::vector<std::string> acceptedKeyTypesWithSha1Rsa();
+
+/** Said when a server only speaks the old SHA-1 RSA signatures (as the connection's error, or in the terminal). */
+inline constexpr const char* kSha1RsaHint =
+    "This server only supports the old SHA-1 RSA signatures (ssh-rsa). Turn on \"Allow old SHA-1 RSA\" in the "
+    "session's Algorithms settings.";
+/** libssh's key exchange error says the server's host key types are only `ssh-rsa` (or `ssh-rsa` and `ssh-dss`):
+ *  "kex error : no match for method server host key algo: server [ssh-rsa], client [...]". */
+bool isSha1RsaOnlyHostKeyError(const std::string& error);
+/** libssh would not sign in with an RSA key as `ssh-rsa` (SHA-1): the server offered no SHA-2 RSA signatures. */
+bool isSha1RsaKeyRefusedError(const std::string& error);
 
 /** Encoded terminal modes (RFC 4254 section 8) as PuTTY sends them: ERASE from the backspace setting,
  *  IUTF8 for UTF-8 sessions and the terminal speeds ("38400,38400" = output,input). Ends with TTY_OP_END. */

@@ -38,6 +38,8 @@ struct CoreHandlerContext {
     HostController& host;
     AppPaths paths;
     OpenRequestQueue& openRequests;
+    /** False with --no-update-check: update:check refuses (as it does in a Store package). */
+    bool updateChecks = true;
 };
 
 void registerCoreHandlers(const CoreHandlerContext& ctx);

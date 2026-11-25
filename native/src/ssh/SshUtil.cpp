@@ -89,6 +89,40 @@ std::vector<std::string> defaultHostKeyAlgorithms() {
     return filterAlgorithms(preferred, SSH_HOSTKEYS, dropped);
 }
 
+std::vector<std::string> acceptedKeyTypesWithSha1Rsa() {
+    static const std::vector<std::string> wanted = {
+        "ssh-ed25519-cert-v01@openssh.com", "ecdsa-sha2-nistp521-cert-v01@openssh.com",
+        "ecdsa-sha2-nistp384-cert-v01@openssh.com", "ecdsa-sha2-nistp256-cert-v01@openssh.com",
+        "sk-ecdsa-sha2-nistp256-cert-v01@openssh.com", "rsa-sha2-512-cert-v01@openssh.com",
+        "rsa-sha2-256-cert-v01@openssh.com", "ssh-ed25519", "ecdsa-sha2-nistp521", "ecdsa-sha2-nistp384",
+        "ecdsa-sha2-nistp256", "sk-ssh-ed25519@openssh.com", "sk-ecdsa-sha2-nistp256@openssh.com", "rsa-sha2-512",
+        "rsa-sha2-256", "ssh-rsa", "ssh-rsa-cert-v01@openssh.com"};
+    std::vector<std::string> dropped;
+    return filterAlgorithms(wanted, SSH_HOSTKEYS, dropped);
+}
+
+bool isSha1RsaOnlyHostKeyError(const std::string& error) {
+    static const std::string marker = "server host key algo: server [";
+    const size_t at = error.find(marker);
+    if (at == std::string::npos) return false;
+    const size_t start = at + marker.size();
+    const size_t end = error.find(']', start);
+    if (end == std::string::npos) return false;
+    bool rsa = false;
+    for (const std::string& name : split(error.substr(start, end - start), ',', true)) {
+        const std::string n = trim(name);
+        if (n == "ssh-rsa")
+            rsa = true;
+        else if (n != "ssh-dss")
+            return false;  // the server has something else: not this case
+    }
+    return rsa;
+}
+
+bool isSha1RsaKeyRefusedError(const std::string& error) {
+    return error.find("'ssh-rsa'") != std::string::npos && error.find("PUBLICKEY_ACCEPTED_TYPES") != std::string::npos;
+}
+
 /* ---- PTY modes ------------------------------------------------------------------------------------- */
 
 std::string encodePtyModes(const SessionConfig& s, int* ospeed, int* ispeed) {

@@ -67,7 +67,8 @@ import type {
   SyncRequest,
   TransferConflict,
   TransferOptions,
-  TransferProgress
+  TransferProgress,
+  UpdateCheckResult
 } from './types';
 
 export type Unsubscribe = () => void;
@@ -316,6 +317,11 @@ export interface Api {
     confirmClose(allow: boolean): void;
     quit(): void;
   };
+  /** The version check (native/src/app/UpdateCheck.h): one request for GitHub's latest release. Refused in a Store
+   *  package and with --no-update-check (AppInfo.updateChecks). When to ask is up to the UI (src/store/updates.ts). */
+  update: {
+    check(): Promise<UpdateCheckResult>;
+  };
   /** Native window controls (the UI draws its own title bar with tabs + caption buttons). */
   window: {
     minimize(): void;
@@ -544,6 +550,9 @@ export const API_SCHEMA = {
     onCloseRequested: 'event',
     confirmClose: 'send',
     quit: 'send'
+  },
+  update: {
+    check: 'invoke'
   },
   window: {
     minimize: 'send',

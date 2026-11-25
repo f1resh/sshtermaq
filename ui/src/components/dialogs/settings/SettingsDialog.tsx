@@ -30,6 +30,7 @@ import { useSettings } from '@/store/data';
 import { useShells } from '@/store/shells';
 import { useUi } from '@/store/ui';
 import { canvasDrawsFont } from '@/terminal/canvasFont';
+import { useOffer } from '@/store/updates';
 import { APP_THEMES } from '@/theme/appThemes';
 import { BUILTIN_SCHEMES } from '@/theme/schemes';
 import { BACKDROPS_ENABLED, useSystemDark } from '@/theme/ThemeController';
@@ -69,6 +70,8 @@ function useSettingsState(): [AppSettings, (patch: DeepPartial<AppSettings>) => 
 }
 
 export function SettingsDialog({ initialSection, onClose }: { initialSection?: string; onClose: () => void }) {
+  const update = useOffer();
+  const nav = update ? NAV.map((n) => (n.id === 'about' ? { ...n, badge: <span className="update-dot" aria-label="A new version is available" /> } : n)) : NAV;
   const [section, setSection] = useState<SectionId>(() => (NAV.some((n) => n.id === initialSection) ? (initialSection as SectionId) : 'appearance'));
   const content: Record<SectionId, ReactNode> = {
     appearance: <AppearancePage />,
@@ -81,13 +84,13 @@ export function SettingsDialog({ initialSection, onClose }: { initialSection?: s
     hosts: <KnownHostsPage />,
     defaults: <DefaultsPage onClose={onClose} />,
     data: <DataPage />,
-    about: <AboutContent />
+    about: <AboutContent updates />
   };
   return (
     <Modal open title="Settings" onClose={onClose} width={980} height={700} bodyClassName="dlg-body--flush">
       <div className="dlg-split">
         <div className="dlg-split__nav">
-          <NavList items={NAV} active={section} onSelect={(id) => setSection(id as SectionId)} ariaLabel="Settings sections" />
+          <NavList items={nav} active={section} onSelect={(id) => setSection(id as SectionId)} ariaLabel="Settings sections" />
         </div>
         <div className="dlg-split__content settings-content">{content[section]}</div>
       </div>

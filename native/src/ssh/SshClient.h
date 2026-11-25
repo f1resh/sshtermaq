@@ -54,6 +54,8 @@ private:
     bool authenticate(ssh_session s, std::string& error, bool& cancelled);
     int tryAgent(ssh_session s);
     int tryKeyFile(ssh_session s, bool& cancelled);
+    /** After a refused key: was it an RSA key libssh would only sign with SHA-1 (`ssh-rsa`)? Says so once. */
+    bool noteSha1RsaRefused(ssh_session s);
     int tryKbdInt(ssh_session s, bool& cancelled);
     int tryPassword(ssh_session s, bool& cancelled);
     /** Saved (or one-time) password not yet tried. `cancelled`: the user cancelled unlocking Credentials for it. */
@@ -85,6 +87,8 @@ private:
     bool bannerShown_ = false;
     /** A changed host key was accepted: no saved / one-time password is sent, the prompts say why. */
     bool hostKeyChanged_ = false;
+    /** An RSA key was refused because only `ssh-rsa` signatures would do (and "Allow old SHA-1 RSA" is off). */
+    bool sha1RsaRefused_ = false;
     std::unique_ptr<AgentRelay> agentRelay_;
 };
 

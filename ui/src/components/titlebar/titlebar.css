@@ -78,6 +78,34 @@
   color: var(--text-faint);
 }
 
+/* "Update": a newer version is out (UpdateChip). Before the caption buttons on Windows, after the lights on macOS. */
+.titlebar__update {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  margin: auto 8px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.titlebar--mac .titlebar__update {
+  margin-left: 0;
+}
+.titlebar__update:hover {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+.titlebar__update:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .titlebar__drag {
   flex: 1 1 auto;
   min-width: 48px;

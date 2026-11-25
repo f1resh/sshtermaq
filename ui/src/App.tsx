@@ -25,6 +25,7 @@ import { tabTitle, useWorkspace } from '@/store/workspace';
 import { pickDefaultShell, useShells } from '@/store/shells';
 import { resolveLocalTarget, shellToOpen } from '@/components/quickconnect/local';
 import { restoreAtStart } from '@/store/restoreAtStart';
+import { startUpdateChecks } from '@/store/updates';
 import { startWorkspaceAutosave } from '@/store/workspacePersist';
 import { initConnEvents } from '@/terminal/connEvents';
 import { ThemeController } from '@/theme/ThemeController';
@@ -113,6 +114,12 @@ function useHostWiring(ready: boolean) {
       () => useSettings.getState().settings.behavior.restoreTabs,
       (id) => !!useSessions.getState().byId(id)
     );
+  }, [ready]);
+
+  // The version check: a few seconds after start, then once a day (src/store/updates.ts).
+  useEffect(() => {
+    if (!ready) return;
+    return startUpdateChecks();
   }, [ready]);
 
   // Window title follows the active tab.

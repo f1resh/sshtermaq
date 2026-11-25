@@ -1,6 +1,6 @@
 import { createDefaultSession, createDefaultSettings, deepMerge, normalizeFolder, normalizeSession } from '@shared/defaults';
 import { isMac } from '@shared/platform';
-import type { AppSettings, KnownHost, SessionConfig, VaultKey, VaultLogin } from '@shared/types';
+import type { AppSettings, InstallChannel, KnownHost, SessionConfig, VaultKey, VaultLogin } from '@shared/types';
 import type { MockContext } from './index';
 
 const LS_KEY = 'sshtermaq.mock.v1';
@@ -165,6 +165,21 @@ function allFolders(): string[] {
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 
+/** The mock's version; a mocked newer release must compare above it (src/store/updatesModel.ts). */
+export const MOCK_VERSION = '1.2.0';
+
+/** What the mock's version check answers (set by Playwright tests before the page loads); `requests` counts calls. */
+export interface MockUpdates {
+  latest?: string;
+  error?: string;
+  channel?: InstallChannel;
+  requests?: number;
+}
+function mockUpdates(): MockUpdates {
+  const g = globalThis as { __mockUpdates?: MockUpdates };
+  return (g.__mockUpdates ??= {});
+}
+
 export function registerCoreMocks(ctx: MockContext): void {
   const changed = () => {
     persistMock();
@@ -250,7 +265,7 @@ export function registerCoreMocks(ctx: MockContext): void {
   /* app */
   ctx.handle('app:info', () => ({
     name: 'SSHTermaq',
-    version: '0.0.0',
+    version: MOCK_VERSION,
     build: 0,
     commit: 'mock',
     buildTime: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
@@ -259,8 +274,25 @@ export function registerCoreMocks(ctx: MockContext): void {
     node: '',
     platform: 'browser-mock',
     userDataDir: 'C:\\Users\\mock\\AppData\\Roaming\\SSHTermaq',
-    portable: false
+    portable: false,
+    installChannel: mockUpdates().channel ?? 'other',
+    updateChecks: (mockUpdates().channel ?? 'other') !== 'store'
   }));
+  // The version check: by default the latest release is the running version, so tests and screenshots never see the
+  // notice. Tests set globalThis.__mockUpdates (before the page loads) for a newer release, a failure or a channel.
+  ctx.handle('update:check', () => {
+    const m = mockUpdates();
+    m.requests = (m.requests ?? 0) + 1;
+    if (m.channel === 'store') throw new Error('Version checks are off in this copy');
+    if (m.error) return { ok: false, error: m.error, current: MOCK_VERSION, newer: false };
+    const version = m.latest ?? MOCK_VERSION;
+    return {
+      ok: true,
+      current: MOCK_VERSION,
+      latest: { version, url: `https://github.com/f1resh/sshtermaq/releases/tag/${version}` },
+      newer: version !== MOCK_VERSION
+    };
+  });
   ctx.handle('app:systemPrefersDark', () => globalThis.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true);
   ctx.handle('app:takeOpenRequests', () => []);
   // The browser has no host that outlives the page: a reload starts fresh.

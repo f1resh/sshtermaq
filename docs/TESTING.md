@@ -10,9 +10,9 @@ them depends on another.
 
 | Part | What it tests | Framework | Where | Automated | Size | Run time |
 |---|---|---|---|---|---|---|
-| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, S3 (signing, sign-in, the HTTP client, the S3 file system), proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files) | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 13 suites, 330 test cases | about 2 minutes |
-| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system; finished transfers' times; the font picker's lists; Credentials (which sessions and logins use a key or a login, how a login signs in, names; unlocking and retrying when they are locked; what an import did); the tabs a reloaded window gets back; host names (the cases shared with the native check); the question before a link connects; imported sessions that run a command on this computer; the WebGL renderer's font check (DOM for fonts a canvas can't draw) | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 26 files, 247 tests | under 2 seconds |
-| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart, the SFTP panel, the two-pane file manager, import and export, the key generator, settings, Credentials (keys, logins, remembered passphrases, the master password, export and import), links asking before they connect, S3 sessions, a changed host key | Playwright Test | `ui/e2e/*.spec.ts` | yes | 22 files, 102 tests, each run twice (204, of which 2 macOS-only skip in the Windows layout) | about 6 minutes |
+| **Native tests** | the C++ backend: SSH, Telnet, Rlogin, Raw, local terminals, S3 (signing, sign-in, the HTTP client, the S3 file system), proxies, keys, PuTTY import, storage, sessions, file transfer, the host window policy, the platform layer (files, pseudo-terminals, drag & drop, local files), the version check | Catch2 3, run by CTest | `native/tests/<module>/`, `native/tests/platform/` | yes | 13 suites, 348 test cases | about 2 minutes |
+| **UI unit tests** | pure TypeScript logic of the React UI: keyboard mapping, quick connect parser, file manager paths and shortcuts, tab titles and persistence, pane closing, SFTP panel, focus and sidebar actions, built-in themes and colour schemes, version and build id in About, the macOS key bindings and menu bar, UI errors reported to the app log; the bridge contract between the UI, the native host and the mock backend; local terminal labels, sessions, restore, quick connect and reported folders; tab and pane names; the .DS_Store default per system; finished transfers' times; the font picker's lists; Credentials (which sessions and logins use a key or a login, how a login signs in, names; unlocking and retrying when they are locked; what an import did); the tabs a reloaded window gets back; host names (the cases shared with the native check); the question before a link connects; imported sessions that run a command on this computer; the s3:// path of a file or folder; the version check (when it asks, what it offers, skip and remind me tomorrow); "Allow old SHA-1 RSA" in saved sessions; the WebGL renderer's font check (DOM for fonts a canvas can't draw) | Vitest 4 | `ui/src/**/*.test.ts`, next to the code | yes | 29 files, 266 tests | under 2 seconds |
+| **UI browser tests** | the React UI in a real browser (Edge on Windows) against the mock backend, in the Windows and the macOS layout: welcome screen, title bar, session editor, sidebar, command palette, connecting, terminal input and output, quick connect, split panes, restarting after a lost connection, opening local terminals (also from quick connect), download / upload / move under a new name, renaming tabs and panes, names after a restart, the SFTP panel, the two-pane file manager, import and export, the key generator, settings, Credentials (keys, logins, remembered passphrases, the master password, export and import), links asking before they connect, S3 sessions, a changed host key, the version check, old servers that only speak ssh-rsa | Playwright Test | `ui/e2e/*.spec.ts` | yes | 24 files, 113 tests, each run twice (226, of which 2 macOS-only skip in the Windows layout) | about 6 minutes |
 | **End-to-end and visual checks** | the whole UI, either inside the real app or in a browser against the mock backend | Playwright scripts | `ui/scripts/app.mjs`, `ui/scripts/shot.mjs`, `ui/scripts/checks/` | no, run by hand | `checks/local-terminal.mjs`, `checks/terminal-fonts.mjs`, `checks/reload-and-second-start.mjs` | seconds |
 
 The browser tests cover the main screens and dialogs, not yet the host key and password prompts or the color scheme
@@ -209,13 +209,13 @@ TEST_CASE("ssh: password authentication, shell echo and exit code", "[ssh]") {
 
 ## 5. What is tested
 
-### Native tests (330 test cases)
+### Native tests (348 test cases)
 
-326 run by default; `putty: real registry smoke test`, `codepage (Windows): regenerate the tables` and the two `proxy exit child` helpers are hidden. The **Needs** column shows the tool without which a
+344 run by default; `putty: real registry smoke test`, `codepage (Windows): regenerate the tables` and the two `proxy exit child` helpers are hidden. The **Needs** column shows the tool without which a
 test case is skipped. On macOS every suite runs; its `platform_ui` has the macOS local files tests (listed after
 Windows' below). The other counts are Windows'.
 
-#### app — `st_test_app.exe` (38)
+#### app — `st_test_app.exe` (44)
 
 Command line (PuTTY-compatible options, `ssh://` / `sftp://` URLs, `-load`, `--version`), data-folder resolution (portable / installed / override), the version and build id (`BuildInfo`), the embedded web UI (index parsing, request paths, content types, loading the embedded test files), and the host window policy (`HostController` against a fake window: allowed pages and origins, window events (menu bar commands and title bar insets too), confirming close, saved placement), and what a reloaded page gets (`PageHandover`). *Kind: unit.* Source: [native/tests/app](../native/tests/app).
 
@@ -237,6 +237,7 @@ Command line (PuTTY-compatible options, `ssh://` / `sftp://` URLs, `-load`, `--v
 | cli: -m reads the remote command, -pwfile the password | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: logging, misc options, unknown options | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: host options are split off | `[app][cli]` |  | `cli_tests.cpp` |
+| cli: --no-update-check turns the version check off for this run | `[app][cli][update]` |  | `cli_tests.cpp` |
 | cli: --version and -V ask for the version; -v stays PuTTY's verbose | `[app][cli]` |  | `cli_tests.cpp` |
 | cli: parse with a real Store (-load + default template) | `[app][cli]` |  | `cli_tests.cpp` |
 | buildinfo: version, build number and commit come from the build | `[app][buildinfo]` |  | `buildinfo_tests.cpp` |
@@ -254,6 +255,11 @@ Command line (PuTTY-compatible options, `ssh://` / `sftp://` URLs, `-load`, `--v
 | page handover: the first page closes nothing and is not a reload | `[app][reload]` |  | `page_handover_tests.cpp` |
 | page handover: a reload closes the old page's connections and hands over its workspace once | `[app][reload]` | closed once per reload; the newest workspace; asked again: no longer a reload | `page_handover_tests.cpp` |
 | page handover: a reload before the page sent a workspace hands over none | `[app][reload]` |  | `page_handover_tests.cpp` |
+| update: versions are N.N.N, with an optional v, and compare as numbers | `[app][update]` | `1.2.0` < `1.10.0`; pre-release tags, junk and spaces refused | `update_tests.cpp` |
+| update: GitHub's answer gives the version and a release page built here | `[app][update]` | the answer's own links never used; drafts, pre-releases, odd tags and non-JSON refused | `update_tests.cpp` |
+| update: the request, and what it sends | `[app][update]` | newer / same / older; only `User-Agent: SSHTermaq` and `Accept`, no cookie or authorization; a 403, junk, a pre-release, an answer over 1 MB; a running version that is not N.N.N asks nothing | `update_tests.cpp` |
+| update: a slow server, no server, an untrusted certificate | `[app][update]` | a self-signed server gets no request (only what the system trusts) | `update_tests.cpp` |
+| update: this test run is not a Store package | `[app][update]` | `sys::installChannel()` | `update_tests.cpp` |
 | ui: index lines map paths to resource ids | `[app][ui]` |  | `ui_tests.cpp` |
 | ui: request URIs become paths relative to the UI root | `[app][ui]` |  | `ui_tests.cpp` |
 | ui: content types by extension | `[app][ui]` |  | `ui_tests.cpp` |
@@ -409,7 +415,7 @@ found by name; dragging itself needs a mouse and is checked by hand. *Kind: inte
 | dnd (macOS): dropped files are found by the page's names | `[dnd]` |  | `dnd_mac_tests.cpp` |
 | fonts: the installed families, with the monospace ones marked | `[platform][fonts]` |  | `common/ui/fonts_tests.cpp` |
 
-#### putty — `st_test_putty.exe` (12)
+#### putty — `st_test_putty.exe` (13)
 
 PuTTY import/export (registry names, settings mapping, `.reg` files, host keys, the settings files of PuTTY for Unix / macOS) and the `~/.ssh/config` (with macOS's `UseKeychain` and `IgnoreUnknown`) and `known_hosts` importers. *Kind: unit.* Source: [native/tests/putty](../native/tests/putty).
 
@@ -425,10 +431,11 @@ PuTTY import/export (registry names, settings mapping, `.reg` files, host keys, 
 | putty: the settings files of PuTTY for Unix / macOS | `[putty][unix]` |  | `putty_tests.cpp` |
 | ssh config: hosts, wildcards, jump hosts and forwards | `[importers][sshconfig]` |  | `putty_tests.cpp` |
 | ssh config: macOS's Keychain options and IgnoreUnknown give no warnings | `[importers][sshconfig]` |  | `putty_tests.cpp` |
+| ssh config: +ssh-rsa turns on "Allow old SHA-1 RSA" | `[importers][sshconfig][sha1rsa]` | `HostKeyAlgorithms`, `PubkeyAcceptedAlgorithms` and the older `PubkeyAcceptedKeyTypes`; the defaults stay; `+ssh-rsa,ssh-dss` warns about ssh-dss; a full list keeps its own order; `-ssh-rsa` leaves it off | `putty_tests.cpp` |
 | known_hosts: plain, bracketed and hashed entries | `[importers][knownhosts]` |  | `putty_tests.cpp` |
 | putty: real registry smoke test (read-only, counts only) | `[.registry]` | hidden: runs only when its tag is given | `putty_tests.cpp` |
 
-#### s3 — `st_test_s3.exe` (52)
+#### s3 — `st_test_s3.exe` (59)
 
 S3 storage, against [native/tests/s3/TestS3Server.h](../native/tests/s3/TestS3Server.h), a fake S3 service on
 `TestHttpServer`. The fake checks every request's signature against what the client really sent, can inject a fault on
@@ -459,6 +466,7 @@ It covers:
 | s3fs: downloads in parallel 8 MB ranges, in order, resumed from an offset; a dropped range is continued; a file changed meanwhile fails (If-Match) | `s3fs_tests.cpp` |
 | s3fs: small uploads are one PUT with the file's time, big ones multipart in parallel; a failed multipart upload continues on the next try (only the missing parts); a cancelled one is aborted and the old object kept; memory stays within the parts in flight (96 MB down and up, 8 MB parts, 4 at once); presigned links | `s3fs_tests.cpp` |
 | s3 session: the secret is asked, saved, and the file manager works through the transfer engine; a wrong secret is asked again; a session bucket is checked; an untrusted certificate is asked about first (only an unsigned probe went out), then remembered in Known hosts, or rejected; sign-in errors are readable | `s3service_tests.cpp` |
+| s3 session, access keys from a login in Credentials (`[vault]`): a stored login signs in without a prompt and wins over the session's own key and saved secret, also for a second session, and a new secret in the login is what the next connection uses; "ask every time" and "none" ask with no "save" and save nothing; a wrong stored secret is asked again and the login is not changed; a wrong access key ID says so; a deleted login falls back to the session's own access key, as SSH does (its saved secret, or asked and saved); `-pw` wins over the stored secret; locked Credentials ask for the master password (wrong one asked again, already unlocked, cancelled, not needed for "ask every time") | `s3service_tests.cpp` |
 
 #### session — `st_test_session.exe` (30)
 
@@ -535,7 +543,7 @@ File manager backend over SFTP and SCP: browsing, transfers, conflicts, resume, 
 | transfer: upload as / download as give the one item a new name | `[sftp][transfer]` | also moved under a new name (the source goes), and a move skipped at a conflict keeps the source | `transfer_tests.cpp` |
 | transfer: start and end times of a transfer | `[sftp][transfer]` | a finished one has both, in order; one cancelled while it ran too | `transfer_tests.cpp` |
 
-#### ssh — `st_test_ssh.exe` (36)
+#### ssh — `st_test_ssh.exe` (40)
 
 SSH transport end to end: every login method, host-key prompts (a changed key holds back the saved password, forwarding and tunnels), PTY, signals, port forwarding (including backpressure: bounded buffers, no busy loop, nothing lost when the far end closes), X11 forwarding (display names, Xauthority files, the cookie gate, and a forwarded X client reaching a local X server with the real cookie), jump hosts, Pageant and `ssh-agent`. *Kind: integration (test SSH server).* Source: [native/tests/ssh](../native/tests/ssh).
 
@@ -574,6 +582,10 @@ SSH transport end to end: every login method, host-key prompts (a changed key ho
 | ssh: a SOCKS request longer than the limit is closed | `[ssh][forward][socks]` | an endless SOCKS4 user id: a short one waits, past 1 KiB closed, nothing forwarded | `ssh_tests.cpp` |
 | ssh: a SOCKS client that does not finish its request in time is closed | `[ssh][forward][socks]` | silent, and greeted only (a short test deadline) | `ssh_tests.cpp` |
 | ssh: SOCKS4, SOCKS4a and SOCKS5 requests still work, also slow ones and data right behind them | `[ssh][forward][socks]` | byte by byte; 3 KiB of data right behind the request is forwarded | `ssh_tests.cpp` |
+| ssh: an old server with only an ssh-rsa host key | `[ssh][sha1rsa]` | `TestSshServerOptions::onlySha1Rsa` plays OpenSSH before 7.2. Off: fails with the hint (libssh's own words in the log), nothing sent; on: connects with a password; a host key list of the user's own decides by itself | `ssh_tests.cpp` |
+| ssh: an old server that takes only SHA-1 signatures from an RSA key | `[ssh][sha1rsa]` | off (the host key allowed by hand): the key is refused with the hint, also in the terminal; on: signed in with the RSA key | `ssh_tests.cpp` |
+| ssh: a current server keeps SHA-2 with the switch on, and RSA keys still work with it off | `[ssh][sha1rsa]` |  | `ssh_tests.cpp` |
+| ssh: the lists for "Allow old SHA-1 RSA" | `[ssh][sha1rsa]` | `ssh-rsa` not in the defaults, last in the accepted key types (SHA-2 first); which libssh errors give the hint | `ssh_tests.cpp` |
 | x11: display names | `[ssh][x11]` |  | `x11_tests.cpp` |
 | x11: the real cookie from an Xauthority file | `[ssh][x11]` |  | `x11_tests.cpp` |
 | x11: the cookie gate | `[ssh][x11]` |  | `x11_tests.cpp` |
@@ -630,7 +642,7 @@ Self-tests of the fake servers, validated with independent clients (`plink`, `ps
 | TestSshServer serves SFTP to psftp | `[support][plink]` | PuTTY `psftp` | `support_tests.cpp` |
 | TestSshServer honours local forwarding from plink | `[support][plink]` | PuTTY `plink` | `support_tests.cpp` |
 
-### UI unit tests (247 tests)
+### UI unit tests (266 tests)
 
 #### `actions.test.ts` (7)
 
@@ -753,6 +765,22 @@ Saving and restoring open tabs, including file manager tabs, snapshots from olde
 #### `restoreAtStart.test.ts` (9)
 
 The tabs at start: after a reload the old page's tabs come back from the host's memory (also with "Restore tabs on startup" off, not the saved ones) and connect again, with a notice; a normal start as before; the workspace goes to the host's memory on every structural change, to disk only when restoring is on. Source: [ui/src/store/restoreAtStart.test.ts](../ui/src/store/restoreAtStart.test.ts).
+
+#### `session/sha1Rsa.test.ts` (2)
+
+"Allow old SHA-1 RSA": off for new sessions and for sessions saved before it existed; kept through a save and a load
+and from the Default Settings template. Source:
+[ui/src/components/dialogs/session/sha1Rsa.test.ts](../ui/src/components/dialogs/session/sha1Rsa.test.ts).
+
+#### `updates.test.ts` (13)
+
+The version check: versions compare as numbers; a check is due once a day (also after the clock went back); the
+notice only for a newer version that is not skipped or put off; only the project's release pages open; Homebrew's
+upgrade command. In the app (fake timers, the bridge mocked): the first check 5 s after start and none more that day;
+a window left open asks again after a day; a check earlier today offers what it found without asking; the setting off
+means no request but "Check now" asks; a Store package or `--no-update-check` never asks; "Remind me tomorrow" and
+"Check now"; "Skip this version" and the next version; a failed check keeps what was known and counts as the day's
+check. Source: [ui/src/store/updates.test.ts](../ui/src/store/updates.test.ts).
 
 #### `skipMacFiles.test.ts` (3), `reportedFolder.test.ts` (2), `quickconnect/local.test.ts` (3)
 
@@ -878,7 +906,7 @@ What a finished transfer shows ("Done · 3,000 files · 23 MB in 41 s", "Failed 
 speed and the clock times, the queue's "All done · … in …"; without times as before), and the font picker's lists
 (installed monospace fonts, missing suggestions greyed with a download page, other installed fonts; the note for a
 chosen font that is not installed); Credentials: the sessions and logins that use a key, the sessions that use a
-login, how a login signs in ("password stored · key work-laptop · agent", "key missing"), unique names; when the host
+login (S3 sessions that take their access key from it too), how a login signs in ("password stored · key work-laptop · agent", "key missing"), unique names; when the host
 answers "Credentials are locked", one unlock dialog (shared by requests at the same time) and the call once more,
 cancelled: the error stands, other errors never ask; what an import says ("Added 2 keys and 1 login (3 secrets).",
 "Already here, left as they are: …", "Renamed, the name was taken: …", "Nothing new: …"). Sources: [ui/src/components/files/transferTimes.test.ts](../ui/src/components/files/transferTimes.test.ts),
@@ -911,7 +939,13 @@ What they check:
 
 Source: [ui/src/components/dialogs/session/s3Model.test.ts](../ui/src/components/dialogs/session/s3Model.test.ts).
 
-### UI browser tests (102 tests, each run as `windows` and `macos`; the two marked macOS only skip in the Windows layout)
+#### `files/s3Uri.test.ts` (4)
+
+"Copy s3:// path": without a bucket in the session the path's first part is the bucket (the list of buckets has
+none); with one the paths are inside it; folders end with "/" (not doubled); keys keep spaces, `+`, `&` and non-ASCII
+as they are. Source: [ui/src/components/files/s3Uri.test.ts](../ui/src/components/files/s3Uri.test.ts).
+
+### UI browser tests (113 tests, each run as `windows` and `macos`; the two marked macOS only skip in the Windows layout)
 
 Source: [ui/e2e](../ui/e2e).
 
@@ -1014,11 +1048,22 @@ Source: [ui/e2e](../ui/e2e).
 | `credentials-export.spec.ts` | locked Credentials are unlocked first, then exported |
 | `s3.spec.ts` | a saved S3 session opens the buckets in a file manager tab (the S3 badge; no Permissions column or terminal button; the bucket list cannot be changed; folders inside a bucket work) |
 | `s3.spec.ts` | Copy link… makes a time-limited link (1 hour preselected, "Other…" up to 7 days, copied; folders have none) |
+| `s3.spec.ts` | Copy s3:// path gives the full path of a bucket, a folder (ending in "/"), a file, several at once and the current folder (none for the list of buckets); "Copy path" stays the pane's path; an SFTP file manager has no s3:// entries (`file-manager.spec.ts`) |
 | `s3.spec.ts` | the session editor has the S3 type with service presets (MinIO: plain HTTP warned), bucket checks and sign-in methods |
+| `s3.spec.ts` | the access key can come from a saved login in Credentials (chosen and saved, still chosen when opened again; Credentials counts the S3 session and its delete question names it; a deleted login is pointed out; back to "This session" clears it) |
 | `s3.spec.ts` | Quick connect opens s3://bucket/folder |
 | `hostkey.spec.ts` | a changed host key, connect once: the question says what stays off; the terminal says so; Special Commands > Open this session's tunnels, then it is gone from the list |
 | `hostkey.spec.ts` | a changed host key, cancel ends the connection |
 | `hostkey.spec.ts` | a known host connects as before: no question, no held tunnels |
+| `updates.spec.ts` | a newer release: the "Update" chip before the caption buttons (Windows) or after the traffic lights (macOS), its menu opens the release page; a dot on Settings, which opens at About, and on About |
+| `updates.spec.ts` | "Remind me tomorrow" hides it, also after a restart the same day (no new request); "Check now" brings it back |
+| `updates.spec.ts` | "Skip this version": gone; About still says it is out; a later version is offered |
+| `updates.spec.ts` | up to date: no chip; About says so; the setting off means no request at the next start |
+| `updates.spec.ts` | a failed check says why in About, and nothing shows in the title bar |
+| `updates.spec.ts` | Homebrew: the menu copies `brew upgrade --cask sshtermaq` |
+| `updates.spec.ts` | a Store package: no request, no chip, no Updates section |
+| `sha1rsa.spec.ts` | an old server (the mock's `old-rsa.example.test`): the banner says what to turn on; "Algorithm settings" opens the editor there; the switch shows the weak warning; saved, the session connects |
+| `sha1rsa.spec.ts` | other sessions: the switch is off and nothing is weak |
 
 ## 6. How to run the tests
 
@@ -1132,10 +1177,17 @@ In an S3 session use the service "MinIO", the endpoint above, access key `AKIDTE
 
 Both scripts need the UI's `node_modules` (`npm ci`) and are run from the `ui` folder.
 
+### `check-mitigations.ps1`: exploit mitigations of a Windows build
+
+`scripts\windows\check-mitigations.ps1 <folder or files>` reads SSHTermaq.exe and ssh.dll with dumpbin and fails unless
+each has High Entropy VA, Dynamic base, NX, Control Flow Guard, CET compatibility and the 0x0A00 dependent load flag
+(1.2.0 review item 11.6). `build.ps1` runs it on the folder it assembles; by hand: `check-mitigations.ps1 build\vs\Debug`.
+
 ### `app.mjs`: the real app
 
 Starts the app with a new temporary data folder (your own sessions are never touched), runs an optional steps file,
-takes a screenshot and closes the app.
+takes a screenshot and closes the app. It passes `--no-update-check`, so the app never asks GitHub for a new version
+during a check; `--update-check` leaves the version check on.
 
 - **Windows:** `SSHTermaq.exe`; Playwright attaches to its WebView2 over the DevTools protocol, and the steps get
   Playwright's full `page`.

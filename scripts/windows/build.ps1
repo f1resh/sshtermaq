@@ -130,6 +130,8 @@ New-Item -ItemType Directory -Force $dist | Out-Null
 $bin = 'build/release/Release'
 Copy-Item "$bin/SSHTermaq.exe" $dist      # the web UI is embedded in the executable
 Get-ChildItem $bin -Filter *.dll | Copy-Item -Destination $dist
+# Control Flow Guard, CET, ASLR, DEP and the DLL search limits on both files (1.2.0 review item 11.6).
+& (Join-Path $PSScriptRoot 'check-mitigations.ps1') $dist | Out-Host
 if ($Portable) { New-Item -ItemType File (Join-Path $dist 'portable.flag') | Out-Null }
 if ($Sign) { & $signScript (Join-Path $dist 'SSHTermaq.exe') @((Get-ChildItem $dist -Filter *.dll).FullName) }
 

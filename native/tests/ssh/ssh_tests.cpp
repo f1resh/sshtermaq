@@ -12,6 +12,7 @@
 #include "keys/Keygen.h"
 #include "ssh/SshJump.h"
 #include "ssh/SshTransport.h"
+#include "ssh/SshUtil.h"
 #include "store/Credentials.h"
 #include "store/KnownHosts.h"
 #include "store/Vault.h"
@@ -1557,4 +1558,142 @@ TEST_CASE("ssh: SOCKS4, SOCKS4a and SOCKS5 requests still work, also slow ones a
         CHECK(reply[1] == 0);
         CHECK(readSome(s.get(), data.size()) == data);
     }
+}
+
+/* ---- old servers that only speak SHA-1 RSA (1.2.0 item 2) ------------------------------------------------------ */
+
+using ssh::acceptedKeyTypesWithSha1Rsa;
+using ssh::defaultHostKeyAlgorithms;
+using ssh::isSha1RsaKeyRefusedError;
+using ssh::isSha1RsaOnlyHostKeyError;
+using ssh::kSha1RsaHint;
+
+namespace {
+
+/** An RSA key pair in a file, and the server line that lets it in. */
+struct RsaUserKey {
+    TempDir dir;
+    std::filesystem::path path = dir.path() / "id_rsa";
+    std::string authorized;
+    RsaUserKey() {
+        ssh_key key = nullptr;
+        ssh_pki_ctx ctx = ssh_pki_ctx_new();
+        int bits = 2048;
+        ssh_pki_ctx_options_set(ctx, SSH_PKI_OPTION_RSA_KEY_SIZE, &bits);
+        REQUIRE(ssh_pki_generate_key(SSH_KEYTYPE_RSA, ctx, &key) == SSH_OK);
+        ssh_pki_ctx_free(ctx);
+        REQUIRE(ssh_pki_export_privkey_file(key, nullptr, nullptr, nullptr, sys::fromPath(path).c_str()) == SSH_OK);
+        authorized = authorizedLine(key);
+        ssh_key_free(key);
+    }
+};
+
+TestSshServerOptions oldOpenSsh(const RsaUserKey& key, bool password) {
+    TestSshServerOptions o;
+    o.hostKeyType = "rsa";
+    o.onlySha1Rsa = true;
+    o.allowKbdInt = false;
+    o.allowPassword = password;
+    o.authorizedKeys = {key.authorized};
+    return o;
+}
+
+}  // namespace
+
+TEST_CASE("ssh: an old server with only an ssh-rsa host key", "[ssh][sha1rsa]") {
+    RsaUserKey key;
+    TestSshServer server(oldOpenSsh(key, true));
+    Harness h;
+    SessionConfig c = Harness::session(server);
+
+    SECTION("the switch off (the default): the connection fails and says what to turn on") {
+        h.start(c);
+        REQUIRE(h.listener.waitClosed());
+        INFO(h.listener.allLogs());
+        CHECK(h.listener.info.reason == kSha1RsaHint);
+        CHECK(h.listener.allLogs().find("server host key algo: server [ssh-rsa]") != std::string::npos);  // libssh's own words
+        CHECK_FALSE(server.hasEvent("auth:"));
+    }
+    SECTION("the switch on: it connects, with a password") {
+        c.ssh.allowSha1Rsa = true;
+        h.start(c);
+        const bool connected = h.listener.waitConnected();
+        INFO(h.listener.allLogs() << "\nclose: " << h.listener.info.reason);
+        REQUIRE(connected);
+        CHECK(h.listener.allLogs().find("Allowing ssh-rsa (SHA-1) for this session") != std::string::npos);
+        CHECK(server.hasEvent("auth:password:ok"));
+    }
+    SECTION("a host key list of the user's own decides by itself, also with the switch on") {
+        c.ssh.allowSha1Rsa = true;
+        c.ssh.hostKeyAlgorithms = {"ssh-ed25519", "rsa-sha2-512"};
+        h.start(c);
+        REQUIRE(h.listener.waitClosed());
+        CHECK(h.listener.info.reason.find("server host key algo") != std::string::npos);  // not the hint: it is on
+    }
+}
+
+TEST_CASE("ssh: an old server that takes only SHA-1 signatures from an RSA key", "[ssh][sha1rsa]") {
+    RsaUserKey key;
+    TestSshServer server(oldOpenSsh(key, false));
+    Harness h;
+    SessionConfig c = Harness::session(server);
+    c.ssh.auth.privateKeyPath = sys::fromPath(key.path);
+
+    SECTION("the switch off, the host key allowed by hand: the key is refused with the hint, in the terminal too") {
+        c.ssh.hostKeyAlgorithms = {"ssh-rsa"};  // what users did before the switch: the host key alone
+        h.start(c);
+        REQUIRE(h.listener.waitClosed());
+        INFO(h.listener.allLogs());
+        CHECK(h.listener.info.reason == kSha1RsaHint);
+        std::lock_guard lk(h.listener.m);
+        CHECK(h.listener.local.find(kSha1RsaHint) != std::string::npos);
+        CHECK(h.listener.local.find("Server refused our key") == std::string::npos);
+    }
+    SECTION("the switch on: signed in with the RSA key") {
+        c.ssh.allowSha1Rsa = true;
+        h.start(c);
+        const bool connected = h.listener.waitConnected();
+        INFO(h.listener.allLogs() << "\nclose: " << h.listener.info.reason);
+        REQUIRE(connected);
+        CHECK(server.hasEvent("auth:publickey:ok"));
+    }
+}
+
+TEST_CASE("ssh: a current server keeps SHA-2 with the switch on, and RSA keys still work with it off", "[ssh][sha1rsa]") {
+    RsaUserKey key;
+    TestSshServerOptions o;
+    o.hostKeyType = "rsa";  // offers rsa-sha2-512/256 and ssh-rsa, and server-sig-algs with SHA-2
+    o.allowKbdInt = false;
+    o.allowPassword = false;
+    o.authorizedKeys = {key.authorized};
+    TestSshServer server(o);
+    for (const bool allow : {false, true}) {
+        Harness h;
+        SessionConfig c = Harness::session(server);
+        c.ssh.auth.privateKeyPath = sys::fromPath(key.path);
+        c.ssh.allowSha1Rsa = allow;
+        h.start(c);
+        const bool connected = h.listener.waitConnected();
+        INFO("allow " << allow << "\n" << h.listener.allLogs() << "\nclose: " << h.listener.info.reason);
+        REQUIRE(connected);
+    }
+}
+
+TEST_CASE("ssh: the lists for \"Allow old SHA-1 RSA\"", "[ssh][sha1rsa]") {
+    const auto hk = defaultHostKeyAlgorithms();
+    CHECK(std::find(hk.begin(), hk.end(), "ssh-rsa") == hk.end());  // off by default
+    const auto accepted = acceptedKeyTypesWithSha1Rsa();
+    const auto at = [&](const char* n) { return std::find(accepted.begin(), accepted.end(), n) - accepted.begin(); };
+    REQUIRE(at("ssh-rsa") < static_cast<long>(accepted.size()));
+    CHECK(at("rsa-sha2-512") < at("ssh-rsa"));  // SHA-2 first
+    CHECK(at("rsa-sha2-256") < at("ssh-rsa"));
+    CHECK(at("ssh-ed25519") < at("ssh-rsa"));
+
+    CHECK(isSha1RsaOnlyHostKeyError("kex error : no match for method server host key algo: server [ssh-rsa], client [ssh-ed25519]"));
+    CHECK(isSha1RsaOnlyHostKeyError("kex error : no match for method server host key algo: server [ssh-rsa,ssh-dss], client [x]"));
+    CHECK_FALSE(isSha1RsaOnlyHostKeyError("kex error : no match for method server host key algo: server [ssh-dss], client [x]"));
+    CHECK_FALSE(isSha1RsaOnlyHostKeyError("kex error : no match for method server host key algo: server [ssh-rsa,rsa-sha2-256], client [x]"));
+    CHECK_FALSE(isSha1RsaOnlyHostKeyError("kex error : no match for method kex algos: server [ssh-rsa], client [x]"));
+    CHECK(isSha1RsaKeyRefusedError("The key algorithm 'ssh-rsa' is not allowed to be used by PUBLICKEY_ACCEPTED_TYPES configuration option"));
+    CHECK_FALSE(isSha1RsaKeyRefusedError("The key algorithm 'ssh-dss' is not allowed to be used by PUBLICKEY_ACCEPTED_TYPES configuration option"));
 }

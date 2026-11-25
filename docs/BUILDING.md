@@ -60,7 +60,9 @@ vcpkg install --triplet x64-windows-st --overlay-triplets=triplets --x-install-r
 ```
 
 This builds everything from source into `vcpkg_installed\` with the project's own triplet
-(`triplets\x64-windows-st.cmake`: static libraries and static C/C++ runtime, libssh as `ssh.dll`). The first run
+(`triplets\x64-windows-st.cmake`: static libraries and static C/C++ runtime, libssh as `ssh.dll`, and the same exploit
+mitigations as the program, Control Flow Guard and CET compatibility; `scripts\windows\check-mitigations.ps1` checks a
+build for them, and `build.ps1` runs it on what it assembles). The first run
 takes about 7 minutes on a current desktop, 5 of them OpenSSL. Results are cached in `%LOCALAPPDATA%\vcpkg\archives`, so later installs
 (a fresh clone, a deleted `vcpkg_installed\`) restore in seconds. CMake does not run vcpkg itself
 (`VCPKG_MANIFEST_INSTALL` is off): rerun this command whenever `vcpkg.json` or the triplet changes.

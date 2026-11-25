@@ -170,6 +170,8 @@ test.describe('file manager', () => {
     await expect(item(server, `${HOME}/incoming-2026`)).toBeVisible();
 
     await item(server, `${HOME}/incoming-2026`).click({ button: 'right' });
+    await expect(app.getByRole('menuitem', { name: 'Copy path', exact: true })).toBeVisible();
+    await expect(app.getByRole('menuitem', { name: /s3:\/\// })).toHaveCount(0);  // S3 only
     await app.getByRole('menuitem', { name: /^Delete/ }).click();
     const confirm = app.getByRole('dialog', { name: 'Delete "incoming-2026" on the server?' });
     await confirm.getByRole('button', { name: 'Delete' }).click();

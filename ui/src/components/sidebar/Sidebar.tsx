@@ -48,6 +48,7 @@ import {
 } from '@/commands/actions';
 import { runCommand } from '@/commands/commands';
 import { useSessions, useSettings } from '@/store/data';
+import { useOffer } from '@/store/updates';
 import { initVault, useVault } from '@/store/vault';
 import { useUi } from '@/store/ui';
 import { useWorkspace } from '@/store/workspace';
@@ -239,6 +240,7 @@ function useOpenSessionStatus(): Map<string, string> {
 
 export function Sidebar() {
   useEffect(initVault, []);  // the logins for the "Use login" menus
+  const update = useOffer();  // a newer version: a dot on Settings, which then opens at About
   const sessions = useSessions((s) => s.sessions);
   const folders = useSessions((s) => s.folders);
   const loaded = useSessions((s) => s.loaded);
@@ -536,9 +538,14 @@ export function Sidebar() {
           <Download size={15} />
           <span>Import</span>
         </button>
-        <button className="sidebar__footer-btn" onClick={() => runCommand('app.settings')} title="Settings">
+        <button
+          className="sidebar__footer-btn"
+          onClick={() => (update ? useUi.getState().openDialog({ type: 'settings', section: 'about' }) : runCommand('app.settings'))}
+          title={update ? `Settings (SSHTermaq ${update.version} is available)` : 'Settings'}
+        >
           <Settings size={15} />
           <span>Settings</span>
+          {update && <span className="update-dot" aria-label="A new version is available" />}
         </button>
       </div>
 

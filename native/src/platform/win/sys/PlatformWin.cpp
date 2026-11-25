@@ -26,4 +26,16 @@ std::string osVersion() {
            std::to_string(v.dwBuildNumber);
 }
 
+const char* installChannel() {
+    // GetCurrentPackageFullName (Windows 8+) fails with APPMODEL_ERROR_NO_PACKAGE outside an MSIX package. Looked up
+    // at run time, as osVersion() does, so no SDK header for app packages is needed.
+    using Fn = LONG(WINAPI*)(UINT32*, PWSTR);
+    HMODULE kernel = GetModuleHandleW(L"kernel32.dll");
+    auto fn = kernel ? reinterpret_cast<Fn>(reinterpret_cast<void*>(GetProcAddress(kernel, "GetCurrentPackageFullName"))) : nullptr;
+    if (!fn) return "other";
+    UINT32 length = 0;
+    const LONG rc = fn(&length, nullptr);
+    return rc == ERROR_INSUFFICIENT_BUFFER ? "store" : "other";
+}
+
 }  // namespace st::sys

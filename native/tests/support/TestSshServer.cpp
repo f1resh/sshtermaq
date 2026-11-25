@@ -791,6 +791,13 @@ TestSshServer::TestSshServer(TestSshServerOptions opts) : impl_(std::make_unique
     ssh_bind_options_set(s.bind, SSH_BIND_OPTIONS_BINDPORT, &port);
     if (ssh_bind_options_set(s.bind, SSH_BIND_OPTIONS_IMPORT_KEY, s.hostKey) != SSH_OK)
         throw std::runtime_error("TestSshServer: cannot set host key");
+    if (s.opts.onlySha1Rsa) {
+        // The host key types offered, and the signatures accepted for user keys (libssh's server also sends this list
+        // as server-sig-algs).
+        if (ssh_bind_options_set(s.bind, SSH_BIND_OPTIONS_HOSTKEY_ALGORITHMS, "ssh-rsa") != SSH_OK ||
+            ssh_bind_options_set(s.bind, SSH_BIND_OPTIONS_PUBKEY_ACCEPTED_KEY_TYPES, "ssh-rsa") != SSH_OK)
+            throw std::runtime_error(std::string("TestSshServer: cannot limit to ssh-rsa: ") + ssh_get_error(s.bind));
+    }
     if (ssh_bind_listen(s.bind) != SSH_OK)
         throw std::runtime_error(std::string("TestSshServer: listen failed: ") + ssh_get_error(s.bind));
     s.port = net::localPort(static_cast<net::Handle>(ssh_bind_get_fd(s.bind)));

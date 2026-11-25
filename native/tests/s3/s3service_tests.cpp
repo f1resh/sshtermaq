@@ -1,5 +1,6 @@
 // S3 sessions end to end, the way the UI drives them: conn:open with protocol "s3" (S3Transport: sign-in, the secret
-// asked and saved, a wrong secret asked again, an untrusted certificate asked about and remembered, errors), then
+// asked and saved, a wrong secret asked again, an untrusted certificate asked about and remembered, errors, access keys
+// from a login in Credentials), then
 // sftp:open / list / upload / download / presign through SftpService and the transfer engine.
 #include "TestBridge.h"
 #include "TestS3Server.h"
@@ -10,12 +11,16 @@
 #include "session/SessionManager.h"
 #include "sftp/SftpService.h"
 #include "store/Store.h"
+#include "store/Vault.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 using namespace st;
 using namespace st::test;
@@ -55,11 +60,13 @@ struct S3SessionFixture {
         sessions->closeAll();
     }
 
-    std::string open() {
+    /** `password`: the one-time password (`-pw`), '' = none. */
+    std::string open(const std::string& password = "") {
         const std::string connId = "pane#" + std::to_string(++conns);
         ConnOpenRequest req;
         req.connId = connId;
         req.session = cfg;
+        req.password = password;
         h.invoke("conn:open", Json::array({Json(req)}));
         return connId;
     }
@@ -97,6 +104,24 @@ struct S3SessionFixture {
             return true;
         }));
         return status;
+    }
+
+    /** The prompts of `connId` so far, by kind. */
+    std::vector<std::string> promptKinds(const std::string& connId) {
+        std::vector<std::string> out;
+        for (const auto& p : h.eventsOn("prompts:onPrompt"))
+            if (p["args"][0]["connId"] == connId) out.push_back(p["args"][0].value("kind", ""));
+        return out;
+    }
+
+    /** A login in Credentials (user name = access key ID, password = secret); returns its id. */
+    std::string addLogin(const std::string& name, const std::string& keyId, const std::string& mode,
+                         const std::optional<std::string>& secret = std::nullopt) {
+        VaultLogin l;
+        l.name = name;
+        l.username = keyId;
+        l.password = mode;
+        return store->vault().addLogin(l, secret).id;
     }
 
     Json waitDone(const std::string& transferId) {
@@ -233,4 +258,163 @@ TEST_CASE("s3 session: sign-in errors are readable") {
     f.cfg.s3.endpoint = "ftp://nope";
     CHECK(f.waitEnd(f.open(), &message) == "error");
     CHECK(message.find("not an http") != std::string::npos);
+}
+
+// ---- Access keys from a login in Credentials (user name = access key ID, password = secret access key) ----
+
+TEST_CASE("s3 session: a stored login signs in without a prompt, and wins over the session's own key", "[s3][vault]") {
+    S3SessionFixture f;
+    f.cfg.s3.auth.accessKeyId = "AKIDSESSION";  // the login's user name wins
+    f.store->credentials().set(Credentials::passwordKey(f.cfg.id), "the-session-secret");
+    f.cfg.s3.auth.loginId = f.addLogin("minio", " AKIDTEST ", "stored", std::string("test-secret"));
+
+    const std::string conn = f.open();
+    REQUIRE(f.waitEnd(conn) == "connected");
+    CHECK(f.promptKinds(conn).empty());
+    CHECK(f.server->badSignatures() == 0);
+    // The session's own saved secret is left alone, and nothing new is saved for the session.
+    CHECK(f.store->credentials().get(Credentials::passwordKey(f.cfg.id)) == std::string("the-session-secret"));
+
+    // A second session with the same login: no prompt either.
+    f.cfg.id = "another-session";
+    f.cfg.s3.bucket = "bucket";
+    const std::string conn2 = f.open();
+    REQUIRE(f.waitEnd(conn2) == "connected");
+    CHECK(f.promptKinds(conn2).empty());
+
+    // A new secret saved in the login is what the next connection uses.
+    VaultLogin l = *f.store->vault().getLogin(f.cfg.s3.auth.loginId);
+    f.store->vault().updateLogin(l, std::string("an-old-secret"));
+    const std::string conn3 = f.open();
+    const Json p = f.prompt(conn3, "password");
+    CHECK(p.value("message", "").find("not accepted") != std::string::npos);
+    f.answer(p, {{"values", {"test-secret"}}});
+    REQUIRE(f.waitEnd(conn3) == "connected");
+}
+
+TEST_CASE("s3 session: a login that asks every time: the prompt has no \"save\", and nothing is saved", "[s3][vault]") {
+    S3SessionFixture f;
+    f.cfg.s3.auth.accessKeyId = "";
+    const std::string login = GENERATE(std::string("ask"), std::string("none"));
+    f.cfg.s3.auth.loginId = f.addLogin("asking", "AKIDTEST", login);
+
+    const std::string conn = f.open();
+    const Json p = f.prompt(conn, "password");
+    CHECK(p["username"] == "AKIDTEST");  // from the login, not asked
+    CHECK(p["allowSave"] == false);
+    f.answer(p, {{"values", {"test-secret"}}, {"remember", true}});  // even if the page sent "remember"
+    REQUIRE(f.waitEnd(conn) == "connected");
+    CHECK_FALSE(f.store->credentials().get(Credentials::passwordKey(f.cfg.id)).has_value());
+    CHECK_FALSE(f.store->vault().loginPassword(f.cfg.s3.auth.loginId).has_value());
+    CHECK(f.store->vault().getLogin(f.cfg.s3.auth.loginId)->password == login);
+    for (const auto& k : f.promptKinds(conn)) CHECK(k == "password");  // no "Access key ID" question
+}
+
+TEST_CASE("s3 session: a stored login with a wrong secret is asked again, and the login is not changed", "[s3][vault]") {
+    S3SessionFixture f;
+    f.cfg.s3.auth.loginId = f.addLogin("stale", "AKIDTEST", "stored", std::string("an-old-secret"));
+    const std::string conn = f.open();
+    const Json p = f.prompt(conn, "password");
+    CHECK(p.value("message", "").find("secret access key was not accepted") != std::string::npos);
+    CHECK(p["allowSave"] == false);
+    f.answer(p, {{"values", {"test-secret"}}, {"remember", true}});
+    REQUIRE(f.waitEnd(conn) == "connected");
+    CHECK(f.store->vault().loginPassword(f.cfg.s3.auth.loginId) == std::string("an-old-secret"));
+    CHECK_FALSE(f.store->credentials().get(Credentials::passwordKey(f.cfg.id)).has_value());
+}
+
+TEST_CASE("s3 session: a login with a wrong access key ID says so", "[s3][vault]") {
+    S3SessionFixture f;
+    f.cfg.s3.auth.loginId = f.addLogin("typo", "AKIDTYPO", "stored", std::string("test-secret"));
+    const std::string conn = f.open();
+    const Json p = f.prompt(conn, "password");
+    CHECK(p.value("message", "").find("access key ID was not accepted") != std::string::npos);
+    CHECK(p["username"] == "AKIDTYPO");
+    f.h.send("prompts:respond", Json::array({p["id"], Json{{"cancelled", true}}}));
+    CHECK(f.waitEnd(conn) != "connected");
+}
+
+TEST_CASE("s3 session: a deleted login falls back to the session's own access key, as SSH does", "[s3][vault]") {
+    S3SessionFixture f;
+    f.cfg.s3.auth.loginId = f.addLogin("gone", "AKIDOTHER", "stored", std::string("other-secret"));
+    f.store->vault().removeLogin(f.cfg.s3.auth.loginId);
+
+    SECTION("the session's saved secret: no prompt") {
+        f.store->credentials().set(Credentials::passwordKey(f.cfg.id), "test-secret");
+        const std::string conn = f.open();
+        REQUIRE(f.waitEnd(conn) == "connected");
+        CHECK(f.promptKinds(conn).empty());
+        CHECK(f.server->badSignatures() == 0);  // AKIDTEST, the session's own key
+        bool logged = false;
+        for (const auto& e : f.h.eventsOn("conn:onEventLog"))
+            if (e.dump().find("no longer exists; using this session's own access key") != std::string::npos) logged = true;
+        CHECK(logged);
+    }
+    SECTION("nothing saved: the secret is asked, and may be saved for the session") {
+        const std::string conn = f.open();
+        const Json p = f.prompt(conn, "password");
+        CHECK(p["username"] == "AKIDTEST");
+        CHECK(p["allowSave"] == true);
+        f.answer(p, {{"values", {"test-secret"}}, {"remember", true}});
+        REQUIRE(f.waitEnd(conn) == "connected");
+        CHECK(f.store->credentials().get(Credentials::passwordKey(f.cfg.id)) == std::string("test-secret"));
+    }
+}
+
+TEST_CASE("s3 session: the one-time password (-pw) wins over the login's stored secret", "[s3][vault]") {
+    S3SessionFixture f;
+    f.cfg.s3.auth.loginId = f.addLogin("stale", "AKIDTEST", "stored", std::string("an-old-secret"));
+    const std::string conn = f.open("test-secret");
+    REQUIRE(f.waitEnd(conn) == "connected");
+    CHECK(f.promptKinds(conn).empty());
+    CHECK(f.server->badSignatures() == 0);
+}
+
+TEST_CASE("s3 session: locked Credentials ask for the master password first", "[s3][vault][master]") {
+    Vault::setKdfCost(1024, 1);
+    S3SessionFixture f;
+    f.cfg.s3.auth.loginId = f.addLogin("sealed", "AKIDTEST", "stored", std::string("test-secret"));
+    Vault& vault = f.store->vault();
+    vault.setMaster("master password");
+    vault.lock();
+
+    SECTION("a wrong master password asks again; the right one unlocks and signs in") {
+        const std::string conn = f.open();
+        f.answer(f.prompt(conn, "unlock"), {{"values", {"wrong one"}}});
+        const Json again = f.prompt(conn, "unlock", 2);
+        CHECK(again.value("message", "").find("Wrong master password") != std::string::npos);
+        f.answer(again, {{"values", {"master password"}}});
+        REQUIRE(f.waitEnd(conn) == "connected");
+        for (const auto& k : f.promptKinds(conn)) CHECK(k == "unlock");
+        CHECK(vault.status() == "unlocked");
+    }
+
+    SECTION("already unlocked: no prompt") {
+        REQUIRE(vault.unlock("master password"));
+        const std::string conn = f.open();
+        REQUIRE(f.waitEnd(conn) == "connected");
+        CHECK(f.promptKinds(conn).empty());
+    }
+
+    SECTION("cancelled: the connection stops, Credentials stay locked") {
+        const std::string conn = f.open();
+        const Json p = f.prompt(conn, "unlock");
+        f.h.send("prompts:respond", Json::array({p["id"], Json{{"cancelled", true}}}));
+        CHECK(f.waitEnd(conn) != "connected");
+        for (const auto& k : f.promptKinds(conn)) CHECK(k == "unlock");
+        CHECK(vault.status() == "locked");
+        CHECK(f.server->count("ListBuckets") == 0);
+    }
+
+    SECTION("a login that asks every time needs no unlock") {
+        VaultLogin l = *vault.getLogin(f.cfg.s3.auth.loginId);
+        REQUIRE(vault.unlock("master password"));
+        l.password = "ask";
+        vault.updateLogin(l, std::nullopt);
+        vault.lock();
+        const std::string conn = f.open();
+        f.answer(f.prompt(conn, "password"), {{"values", {"test-secret"}}});
+        REQUIRE(f.waitEnd(conn) == "connected");
+        for (const auto& k : f.promptKinds(conn)) CHECK(k == "password");
+    }
 }

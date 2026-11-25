@@ -1,13 +1,17 @@
 /**
- * App information + third-party notices, shared by the About dialog and the Settings › About page.
+ * App information + third-party notices, shared by the About dialog and the Settings › About page; the page also has
+ * the version check (`updates`: src/store/updates.ts).
  */
-import { ExternalLink, FolderOpen } from 'lucide-react';
+import { ExternalLink, FolderOpen, RefreshCw } from 'lucide-react';
 import { api } from '@/bridge/api';
-import { Button } from '@/components/ui';
+import { Button, toast } from '@/components/ui';
+import { useSettings } from '@/store/data';
+import { checkForUpdates, openReleasePage, skipVersion, useUpdates } from '@/store/updates';
+import { isNewer, upgradeCommand } from '@/store/updatesModel';
 import { Logo } from '@/components/welcome/Logo';
 import { APP_NAME } from '@shared/defaults';
 import type { AppInfo } from '@shared/types';
-import { Badge, Spinner } from '../common/controls';
+import { Badge, Spinner, ToggleRow } from '../common/controls';
 import { useAsync } from '../common/hooks';
 import { formatBuildId, formatBuildTime } from './buildInfo';
 
@@ -30,7 +34,82 @@ export const THIRD_PARTY_LICENSES: ThirdPartyLicense[] = [
   { name: 'Lucide', license: 'ISC', url: 'https://lucide.dev/', usage: 'Icons' }
 ];
 
-export function AboutContent({ compact }: { compact?: boolean }) {
+/** Settings › About: "Check for new versions", "Check now", and what the last check found. Not in a Store package. */
+function UpdatesSection() {
+  const u = useUpdates();
+  const on = useSettings((s) => s.settings.behavior.checkForUpdates !== false);
+  if (!u.current || u.channel === 'store') return null;
+  if (!u.available)
+    return (
+      <section className="about__updates" aria-label="Updates">
+        <p className="about__note">Version checks are off for this run (--no-update-check).</p>
+      </section>
+    );
+  const latest = u.state.latest && isNewer(u.state.latest.version, u.current) ? u.state.latest : null;
+  const last = u.state.lastCheck ? new Date(u.state.lastCheck).toLocaleString() : null;
+  const status = u.checking
+    ? 'Checking…'
+    : u.outcome && !u.outcome.ok
+      ? `The check failed: ${u.outcome.error}`
+      : latest
+        ? null
+        : last
+          ? `You have the latest version. Last checked: ${last}.`
+          : 'Not checked yet.';
+  const command = upgradeCommand(u.channel);
+  return (
+    <section className="about__updates" aria-label="Updates">
+      <ToggleRow
+        label="Check for new versions"
+        description="Once a day the app asks GitHub for the project's latest release. Nothing about you or this computer is sent, and nothing is downloaded."
+        checked={on}
+        onChange={(checkForUpdates) => void useSettings.getState().update({ behavior: { checkForUpdates } })}
+      />
+      <div className="about__update-row">
+        <Button size="sm" icon={<RefreshCw size={13} />} disabled={u.checking} onClick={() => void checkForUpdates(true)}>
+          Check now
+        </Button>
+        {status && (
+          <span className="about__update-status" role="status">
+            {status}
+          </span>
+        )}
+      </div>
+      {latest && (
+        <div className="about__update-new" role="status">
+          <span>
+            <b>SSHTermaq {latest.version}</b> is available (you have {u.current}).
+            {u.state.skipped === latest.version && ' You chose to skip this version.'}
+            {last && ` Last checked: ${last}.`}
+          </span>
+          <div className="about__update-actions">
+            <Button size="sm" variant="primary" icon={<ExternalLink size={13} />} onClick={() => openReleasePage(latest)}>
+              Open release page
+            </Button>
+            {command && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  api.app.writeClipboard(command);
+                  toast.info('Copied', `Run ${command} in Terminal.`);
+                }}
+              >
+                Copy “{command}”
+              </Button>
+            )}
+            {u.state.skipped !== latest.version && (
+              <Button size="sm" variant="ghost" onClick={() => skipVersion(latest.version)}>
+                Skip this version
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+export function AboutContent({ compact, updates }: { compact?: boolean; updates?: boolean }) {
   const { data: info, loading } = useAsync<AppInfo>(() => api.app.info(), []);
   const buildId = info && formatBuildId(info);
   const buildTime = formatBuildTime(info?.buildTime);
@@ -55,6 +134,8 @@ export function AboutContent({ compact }: { compact?: boolean }) {
           </div>
         </div>
       </div>
+
+      {updates && <UpdatesSection />}
 
       {info && (
         <dl className="about__facts">

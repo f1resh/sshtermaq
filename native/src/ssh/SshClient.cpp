@@ -127,6 +127,18 @@ bool SshConnector::applyOptions(ssh_session s, sys::SocketHandle sock, int logLe
         for (const auto& d : dropped) log(LogLevel::Warn, "Ignoring unsupported host key algorithm " + d);
         return v;
     }();
+    // "Allow old SHA-1 RSA": ssh-rsa last among the host key types (a list of the user's own decides by itself), and
+    // RSA key sign-in may sign with SHA-1 when the server offers nothing better (libssh picks SHA-2 whenever the
+    // server's server-sig-algs lists it).
+    if (cfg_.ssh.allowSha1Rsa) {
+        log(LogLevel::Info, "Allowing ssh-rsa (SHA-1) for this session");
+        if (cfg_.ssh.hostKeyAlgorithms.empty() && std::find(hk.begin(), hk.end(), "ssh-rsa") == hk.end()) {
+            dropped.clear();
+            if (!filterAlgorithms({"ssh-rsa"}, SSH_HOSTKEYS, dropped).empty()) hk.push_back("ssh-rsa");
+        }
+        const std::string accepted = joinList(acceptedKeyTypesWithSha1Rsa());
+        if (!set(SSH_OPTIONS_PUBLICKEY_ACCEPTED_TYPES, accepted.c_str(), "accepted key types")) return false;
+    }
     if (ctx_.knownHosts) {
         const std::string host = cfg_.connection.logicalHostname.empty() ? cfg_.host : cfg_.connection.logicalHostname;
         std::vector<std::string> known;
@@ -171,6 +183,10 @@ bool SshConnector::establish(ssh_session s, sys::SocketHandle sock, int logLevel
     if (ssh_connect(s) != SSH_OK) {
         r.cancelled = cancel_.load();
         r.error = r.cancelled ? "Cancelled" : sshError(s, "Key exchange failed");
+        if (!r.cancelled && !cfg_.ssh.allowSha1Rsa && isSha1RsaOnlyHostKeyError(r.error)) {
+            log(LogLevel::Error, r.error);
+            r.error = kSha1RsaHint;
+        }
         return false;
     }
     const char* banner = ssh_get_serverbanner(s);
@@ -401,7 +417,7 @@ bool SshConnector::authenticate(ssh_session s, std::string& error, bool& cancell
             return false;
         }
     }
-    error = "No supported authentication methods left to try";
+    error = sha1RsaRefused_ ? std::string(kSha1RsaHint) : "No supported authentication methods left to try";
     local("Server refused our authentication: no supported methods left.\n");
     log(LogLevel::Error, error);
     return false;
@@ -434,6 +450,7 @@ int SshConnector::tryAgent(ssh_session s) {
     const int rc = ssh_userauth_agent(s, nullptr);
     if (rc == SSH_AUTH_SUCCESS) log(LogLevel::Info, "Authenticated using a key from " + name);
     else if (rc == SSH_AUTH_DENIED) log(LogLevel::Info, "Server refused all keys offered by " + name);
+    if (rc == SSH_AUTH_DENIED) noteSha1RsaRefused(s);
     return rc;
 }
 
@@ -535,11 +552,21 @@ int SshConnector::tryKeyFile(ssh_session s, bool& cancelled) {
     KeyPtr owned(key);
     log(LogLevel::Info, "Trying public key authentication with " + what);
     const int rc = ssh_userauth_publickey(s, nullptr, owned.get());
-    if (rc == SSH_AUTH_DENIED) {
+    if (rc == SSH_AUTH_DENIED && !noteSha1RsaRefused(s)) {
         log(LogLevel::Info, "Server refused our key");
         local("Server refused our key\n");
     }
     return rc;
+}
+
+bool SshConnector::noteSha1RsaRefused(ssh_session s) {
+    if (cfg_.ssh.allowSha1Rsa || !isSha1RsaKeyRefusedError(sshError(s, ""))) return false;
+    if (!sha1RsaRefused_) {
+        sha1RsaRefused_ = true;
+        log(LogLevel::Warn, "An RSA key could not be used: the server offers only ssh-rsa (SHA-1) signatures");
+        local(std::string(kSha1RsaHint) + "\n");
+    }
+    return true;
 }
 
 int SshConnector::tryKbdInt(ssh_session s, bool& cancelled) {

@@ -9,9 +9,15 @@ export function sessionsUsingKey(keyId: string, sessions: readonly SessionConfig
   return sessions.filter((s) => s.ssh?.auth?.keyId === keyId).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** The saved sessions that sign in with this login (ssh.auth.loginId), sorted by name. */
+/** The saved sessions that sign in with this login, sorted by name: SSH sessions by ssh.auth.loginId, S3 sessions by
+ *  s3.auth.loginId when they sign in with access keys (a login's user name is the access key ID). */
 export function sessionsUsingLogin(loginId: string, sessions: readonly SessionConfig[]): SessionConfig[] {
-  return sessions.filter((s) => s.ssh?.auth?.loginId === loginId).sort((a, b) => a.name.localeCompare(b.name));
+  return sessions.filter((s) => usesLogin(s, loginId)).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function usesLogin(s: SessionConfig, loginId: string): boolean {
+  if (s.protocol === 's3') return s.s3?.auth?.method === 'keys' && s.s3.auth.loginId === loginId;
+  return s.ssh?.auth?.loginId === loginId;
 }
 
 /** The logins that use this key, sorted by name. */

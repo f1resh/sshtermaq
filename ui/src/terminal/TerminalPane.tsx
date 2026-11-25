@@ -4,16 +4,16 @@
  * overlays: connecting card, disconnected banner, authentication prompts, find bar and the context menu.
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Loader2, Play, Plug, RotateCcw, ScrollText, SquareTerminal, X } from 'lucide-react';
+import { Loader2, Play, Plug, RotateCcw, ScrollText, SlidersHorizontal, SquareTerminal, X } from 'lucide-react';
 import { api } from '@/bridge/api';
 import { runCommand } from '@/commands/commands';
 import { Button, showContextMenu, type MenuItem } from '@/components/ui';
 import { shortcutLabel } from '@/commands/keybindings';
-import { usePrompts } from '@/store/data';
+import { usePrompts, useSessions } from '@/store/data';
 import { useUi } from '@/store/ui';
 import { useWorkspace } from '@/store/workspace';
 import { localProgramName } from '@shared/defaults';
-import type { SpecialCommandDef } from '@shared/types';
+import type { SessionConfig, SpecialCommandDef } from '@shared/types';
 import { lastEventLogOf, PANE_PROMPT_KINDS, watchEventLog } from './connEvents';
 import { FindBar } from './FindBar';
 import { PromptOverlay } from './PromptOverlay';
@@ -250,6 +250,11 @@ export function TerminalPane({ paneId, active, visible }: TerminalPaneProps) {
           <Button size="sm" variant="ghost" icon={<ScrollText size={14} />} onClick={() => runCommand('pane.eventLog', { paneId })}>
             Event log
           </Button>
+          {pane && !local && needsSha1Rsa(pane.statusMessage) && (
+            <Button size="sm" variant="ghost" icon={<SlidersHorizontal size={14} />} onClick={() => openAlgorithms(pane.session)}>
+              Algorithm settings
+            </Button>
+          )}
           <Button size="sm" variant="primary" icon={<RotateCcw size={14} />} onClick={() => session?.restart()} title="Restart (Enter)">
             Restart
           </Button>
@@ -261,5 +266,18 @@ export function TerminalPane({ paneId, active, visible }: TerminalPaneProps) {
 
       {prompt && <PromptOverlay prompt={prompt} host={host} focusSignal={focusSeq} />}
     </div>
+  );
+}
+
+/** The native side says a server only speaks the old SHA-1 RSA (native/src/ssh/SshUtil.h, kSha1RsaHint). */
+function needsSha1Rsa(message: string | undefined): boolean {
+  return !!message && message.includes('Allow old SHA-1 RSA');
+}
+
+/** The session editor on its Algorithms page: the saved session, or (quick connect) a copy to save. */
+function openAlgorithms(session: SessionConfig): void {
+  const saved = useSessions.getState().byId(session.id);
+  useUi.getState().openDialog(
+    saved ? { type: 'sessionEditor', sessionId: session.id, section: 'ssh.algorithms' } : { type: 'sessionEditor', draft: session, section: 'ssh.algorithms' }
   );
 }
